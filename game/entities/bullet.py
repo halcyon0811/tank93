@@ -3,7 +3,7 @@ import math
 from ..settings import *
 
 class Bullet:
-    def __init__(self, x, y, direction, owner, power=1, color=None):
+    def __init__(self, x, y, direction, owner, power=1, color=None, homing=False):
         self.x = x
         self.y = y
         self.dir = direction
@@ -19,20 +19,117 @@ class Bullet:
 
         # trail
         self.trail = []
+        # homing missile support
+        self.homing = homing
+        self.target = None
+        self.vx, self.vy = DIRS.get(direction, (0, -1))
+        # Normalize diagonal
+        if self.vx != 0 and self.vy != 0:
+            norm = math.hypot(self.vx, self.vy)
+            self.vx /= norm
+            self.vy /= norm
+        self.turn_speed = 0.18 if homing else 0
+        if homing:
+            self.speed = BULLET_SPEED * 1.15
+            # make homing more visible
+            if color is None or color == COLOR_WHITE:
+                self.color = (255, 140, 0)  # orange missile
+            self.trail_max = 10
+        else:
+            self.trail_max = 6
+
+    def _find_nearest_target(self, tanks):
+        """Find nearest enemy for homing missile"""
+        if not self.homing:
+            return None
+        candidates = []
+        if self.owner.startswith('player'):
+            # target nearest enemy
+            for t in tanks:
+                if t.alive and not t.is_player:
+                    candidates.append(t)
+        else:
+            # enemy homing (if ever) targets player
+            for t in tanks:
+                if t.alive and t.is_player:
+                    candidates.append(t)
+        if not candidates:
+            return None
+        # find closest by distance
+        nearest = min(candidates, key=lambda tank: math.hypot(tank.x - self.x, tank.y - self.y))
+        return nearest
+
+    def _update_homing(self, tanks):
+        if not self.homing:
+            return
+        # Acquire target if none or dead
+        if self.target is None or not getattr(self.target, 'alive', False):
+            self.target = self._find_nearest_target(tanks)
+        if self.target is None:
+            return
+        # Compute direction to target
+        tx, ty = self.target.x, self.target.y
+        # Add slight prediction? Simple straight
+        dx = tx - self.x
+        dy = ty - self.y
+        dist = math.hypot(dx, dy)
+        if dist < 1:
+            return
+        dx /= dist
+        dy /= dist
+        # Steer towards target (lerp)
+        self.vx = self.vx * (1 - self.turn_speed) + dx * self.turn_speed
+        self.vy = self.vy * (1 - self.turn_speed) + dy * self.turn_speed
+        # Renormalize
+        norm = math.hypot(self.vx, self.vy)
+        if norm > 0:
+            self.vx /= norm
+            self.vy /= norm
+        # Update dir string for brick destruction based on dominant direction
+        # Choose closest 8-dir
+        best = None
+        best_dot = -2
+        for dname, (ddx, ddy) in DIRS.items():
+            # normalize ddx,ddy
+            ndx, ndy = ddx, ddy
+            if ndx != 0 and ndy != 0:
+                nlen = math.hypot(ndx, ndy)
+                ndx /= nlen
+                ndy /= nlen
+            dot = self.vx * ndx + self.vy * ndy
+            if dot > best_dot:
+                best_dot = dot
+                best = dname
+        if best:
+            self.dir = best
 
     def update(self, tilemap, tanks, base):
         if not self.alive:
             return None
 
-        # move
-        dx, dy = DIRS[self.dir]
-        self.x += dx * self.speed
-        self.y += dy * self.speed
+        # homing steering
+        if self.homing:
+            self._update_homing(tanks)
+
+        # move - use vx,vy for homing, else use DIRS[dir]
+        if self.homing:
+            self.x += self.vx * self.speed
+            self.y += self.vy * self.speed
+        else:
+            dx, dy = DIRS.get(self.dir, (0, -1))
+            # Normalize diagonal for consistent speed if not homing
+            if dx != 0 and dy != 0:
+                norm = math.hypot(dx, dy)
+                dx /= norm
+                dy /= norm
+            self.x += dx * self.speed
+            self.y += dy * self.speed
         self.rect.center = (self.x, self.y)
 
-        # trail
+        # trail - longer for homing missile
         self.trail.append((self.x, self.y))
-        if len(self.trail) > 6:
+        max_t = getattr(self, 'trail_max', 6)
+        if len(self.trail) > max_t:
             self.trail.pop(0)
 
         # bounds
@@ -130,17 +227,35 @@ class Bullet:
     def draw(self, screen):
         if not self.alive:
             return
-        # trail
+        # trail - homing has orange flame trail
         for i, (tx, ty) in enumerate(self.trail):
-            alpha = i / len(self.trail)
-            size = int(BULLET_SIZE * alpha)
+            alpha = i / len(self.trail) if self.trail else 0
+            size = int((BULLET_SIZE+2) * alpha)
             if size > 0:
-                pygame.draw.circle(screen, (100, 100, 100), (int(tx), int(ty)), size//2)
+                if self.homing:
+                    # orange flame fading
+                    r = int(255 * alpha + 100 * (1-alpha))
+                    g = int(140 * alpha + 50 * (1-alpha))
+                    b = 0
+                    pygame.draw.circle(screen, (r, g, b), (int(tx), int(ty)), size//2 + 1)
+                else:
+                    pygame.draw.circle(screen, (100, 100, 100), (int(tx), int(ty)), size//2)
         # bullet body
-        pygame.draw.circle(screen, self.color, (int(self.x), int(self.y)), BULLET_SIZE//2 + 2)
-        pygame.draw.circle(screen, COLOR_WHITE, (int(self.x), int(self.y)), BULLET_SIZE//2)
-        if self.power >= 2:
-            pygame.draw.circle(screen, COLOR_YELLOW, (int(self.x), int(self.y)), BULLET_SIZE//2 -1)
+        if self.homing:
+            # missile shape: elongated with direction
+            # draw as small rocket with flame
+            pygame.draw.circle(screen, self.color, (int(self.x), int(self.y)), BULLET_SIZE//2 + 3)
+            pygame.draw.circle(screen, (255, 220, 0), (int(self.x), int(self.y)), BULLET_SIZE//2 + 1)
+            # direction indicator line
+            if hasattr(self, 'vx'):
+                lx = int(self.x - self.vx * 8)
+                ly = int(self.y - self.vy * 8)
+                pygame.draw.line(screen, (255, 80, 0), (int(self.x), int(self.y)), (lx, ly), 2)
+        else:
+            pygame.draw.circle(screen, self.color, (int(self.x), int(self.y)), BULLET_SIZE//2 + 2)
+            pygame.draw.circle(screen, COLOR_WHITE, (int(self.x), int(self.y)), BULLET_SIZE//2)
+            if self.power >= 2:
+                pygame.draw.circle(screen, COLOR_YELLOW, (int(self.x), int(self.y)), BULLET_SIZE//2 -1)
 
 # Base/Eagle class also here for convenience
 class Base:

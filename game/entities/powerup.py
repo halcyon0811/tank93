@@ -21,6 +21,9 @@ class PowerUp:
             'grenade': (255, 60, 60),
             'tank': (80, 255, 80),
             'gun': (255, 80, 200),
+            # new items
+            'homing': (255, 140, 0),   # orange for tracking missile
+            'spread': (160, 80, 255),  # purple for 8-way
         }
 
     def update(self):
@@ -55,6 +58,9 @@ class PowerUp:
             'grenade': 'G',
             'tank': 'T',
             'gun': 'P',
+            # new items
+            'homing': 'M',  # missile
+            'spread': '8',  # 8-way
         }
         txt = font.render(icons.get(self.type, '?'), True, COLOR_BLACK)
         screen.blit(txt, txt.get_rect(center=(self.x, self.y)))

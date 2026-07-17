@@ -91,12 +91,14 @@ PLAYER_SPAWN = [
 ENEMY_SPAWNS = [(0, 0), (12, 0), (24, 0)]
 BASE_POS = (12, 24)  # eagle position (top-left of 2x2)
 
-# Powerups
-POWERUP_TYPES = ['helmet', 'clock', 'shovel', 'star', 'grenade', 'tank', 'gun']
+# Powerups - classic + new items (homing missile, 8-way spread)
+POWERUP_TYPES = ['helmet', 'clock', 'shovel', 'star', 'grenade', 'tank', 'gun', 'homing', 'spread']
 POWERUP_DURATION = {
     'helmet': 10 * FPS,
     'clock': 5 * FPS,
     'shovel': 15 * FPS,
+    'homing': 15 * FPS,   # tracking missile active for 15 sec
+    'spread': 12 * FPS,   # 8-direction firing for 12 sec
 }
 STAR_LEVELS = 4
 
@@ -133,19 +135,29 @@ ENABLE_RUMBLE = False
 JOYCON_L_DPAD_MAP = {0: 'DOWN', 1: 'RIGHT', 2: 'UP', 3: 'LEFT'}
 JOYCON_R_FACE_MAP = {0: 'LEFT', 1: 'UP', 2: 'DOWN', 3: 'RIGHT'}
 
-# Directions
+# Directions - 4 cardinal + 4 diagonal for 8-way firing item
 DIRS = {
     'UP': (0, -1),
     'DOWN': (0, 1),
     'LEFT': (-1, 0),
     'RIGHT': (1, 0),
+    'UP_LEFT': (-1, -1),
+    'UP_RIGHT': (1, -1),
+    'DOWN_LEFT': (-1, 1),
+    'DOWN_RIGHT': (1, 1),
 }
 DIR_ANGLE = {
     'UP': 0,
+    'UP_RIGHT': 45,
     'RIGHT': 90,
+    'DOWN_RIGHT': 135,
     'DOWN': 180,
+    'DOWN_LEFT': 225,
     'LEFT': 270,
+    'UP_LEFT': 315,
 }
+# For 8-direction firing
+EIGHT_DIRS = ['UP', 'UP_RIGHT', 'RIGHT', 'DOWN_RIGHT', 'DOWN', 'DOWN_LEFT', 'LEFT', 'UP_LEFT']
 
 # Tile types (using classic Battle City)
 # 0 empty, 1 brick, 2 steel, 3 water, 4 grass/trees, 5 ice, 6 base border

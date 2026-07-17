@@ -131,11 +131,19 @@ class HUD:
                 statuses.append("SHIELD")
             if p.spawn_protection > 0:
                 statuses.append("SPAWN")
+            if getattr(p, 'homing_timer', 0) > 0:
+                secs = p.homing_timer // FPS
+                statuses.append(f"MISSILE {secs}s")
+            if getattr(p, 'spread_timer', 0) > 0:
+                secs = p.spread_timer // FPS
+                statuses.append(f"8-WAY {secs}s")
             if statuses:
-                stat = self.font_small.render(",".join(statuses), True, (80,200,255))
-                screen.blit(stat, (xpos, ypos))
-                ypos += 16
-            ypos += 18
+                for st in statuses:
+                    col = (255,140,0) if "MISSILE" in st else (160,80,255) if "8-WAY" in st else (80,200,255)
+                    stat = self.font_small.render(st, True, col)
+                    screen.blit(stat, (xpos, ypos))
+                    ypos += 16
+            ypos += 12
 
             pygame.draw.line(screen, (60,60,80), (xpos, ypos), (xpos+HUD_W-24, ypos), 1)
             ypos += 12

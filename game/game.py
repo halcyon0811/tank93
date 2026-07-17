@@ -31,7 +31,16 @@ from .ui.hud import HUD
 
 class Game:
     def __init__(self):
-        pygame.init()
+        # Fix macOS IMK crash "error messaging the mach port for IMKCFRunLoopWakeUpReliable"
+        # and libpng iCCP warning - set env before init
+        import os
+        os.environ.setdefault('SDL_IME_SHOWUI', '0')
+        os.environ.setdefault('PYGAME_HIDE_SUPPORT_PROMPT', '1')
+        try:
+            pygame.init()
+        except Exception as e:
+            print(f"Pygame init failed: {e}")
+            raise
         self.joysticks = []
         self.joystick_enabled = True
         try:
@@ -337,19 +346,44 @@ class Game:
             return
         if len(self.enemies) >= MAX_ENEMIES_ON_FIELD:
             return
-        # find spawn point that is not blocked
+        # find spawn point that is not blocked - improved to prevent enemy stuck bug
+        # Previous logic only checked exact spawn rect overlap, but after first enemy moves slightly (36px),
+        # second could spawn too close and cause stuck when they overlap exactly.
+        # Now we check distance > TANK_SIZE*1.8 to ensure separation and avoid deadlock where
+        # two enemies occupy same spot and block each other's movement forever.
         tries = 0
-        while tries < 10:
+        while tries < 30:
             sx, sy = random.choice(ENEMY_SPAWNS)
-            # check if occupied
+            # check if occupied - more robust
             blocked = False
+            spawn_cx = PLAYFIELD_X + sx * TILE_SIZE + TILE_SIZE//2
+            spawn_cy = PLAYFIELD_Y + sy * TILE_SIZE + TILE_SIZE//2
             test_rect = pygame.Rect(PLAYFIELD_X + sx*TILE_SIZE, PLAYFIELD_Y + sy*TILE_SIZE, TANK_SIZE, TANK_SIZE)
             for e in self.enemies:
-                if e.alive and test_rect.colliderect(e.rect):
+                if not e.alive:
+                    continue
+                # Original rect check
+                if test_rect.colliderect(e.rect):
                     blocked = True
-            for p in self.players:
-                if p.alive and test_rect.colliderect(p.rect):
+                    break
+                # Distance check to avoid close spawns that cause stuck deadlock
+                import math
+                dist = math.hypot(e.x - spawn_cx, e.y - spawn_cy)
+                if dist < TANK_SIZE * 1.8:  # need separation
                     blocked = True
+                    break
+            if not blocked:
+                for p in self.players:
+                    if p.alive:
+                        if test_rect.colliderect(p.rect):
+                            blocked = True
+                            break
+                        # also distance for player
+                        import math
+                        dist_p = math.hypot(p.x - spawn_cx, p.y - spawn_cy)
+                        if dist_p < TANK_SIZE * 2:
+                            blocked = True
+                            break
             if not blocked:
                 # authentic queue if available, else fallback weighted random
                 etype = None
@@ -749,8 +783,11 @@ class Game:
             other_tanks = self.enemies + [op for j, op in enumerate(self.players) if j != i]
             b = p.handle_input(keys, js, self.tilemap, other_tanks, num_players=len(self.players))
             if b:
-                self.bullets.append(b)
-                # add to player's bullets already done
+                if isinstance(b, list):
+                    self.bullets.extend(b)
+                else:
+                    self.bullets.append(b)
+                # add to player's bullets already done in shoot()
             p.update(self.tilemap, other_tanks)
 
         # enemies
@@ -902,6 +939,10 @@ class Game:
         elif pu_type == 'gun':
             player.bullet_power = 2
             player.cooldown = 0
+        elif pu_type == 'homing':
+            player.apply_powerup('homing', self)
+        elif pu_type == 'spread':
+            player.apply_powerup('spread', self)
 
     def draw(self):
         if self.state == 'menu':
@@ -944,22 +985,55 @@ class Game:
         pygame.display.flip()
 
     def run(self):
+        import traceback
+        crash_count = 0
         while True:
-            dt = self.clock.tick(FPS)
-            self.handle_events()
-            if self.state == 'playing':
-                self.update_playing(dt)
-            elif self.state == 'gameover' and not self.gameover_won:
-                # Countdown to menu if no coin inserted
-                if self.continue_timer > 0:
-                    self.continue_timer -= 1
-                    # Also update particles for effect
-                    self.particles.update()
-                else:
-                    # Time out -> go to menu
-                    total = sum(p.score for p in self.players)
-                    self.high_score = max(self.high_score, total)
-                    self.state = 'menu'
-                    self.menu_mode = 'main'
-                    self.menu_selected = 0
-            self.draw()
+            try:
+                dt = self.clock.tick(FPS)
+                self.handle_events()
+                if self.state == 'playing':
+                    try:
+                        self.update_playing(dt)
+                    except Exception as e:
+                        print(f"[CRASH GUARD] update_playing failed: {e}")
+                        traceback.print_exc()
+                        crash_count += 1
+                        if crash_count > 10:
+                            print("Too many crashes, returning to menu")
+                            self.state = 'menu'
+                            self.menu_mode = 'main'
+                            crash_count = 0
+                elif self.state == 'gameover' and not self.gameover_won:
+                    # Countdown to menu if no coin inserted
+                    if self.continue_timer > 0:
+                        self.continue_timer -= 1
+                        # Also update particles for effect
+                        try:
+                            self.particles.update()
+                        except:
+                            pass
+                    else:
+                        # Time out -> go to menu
+                        total = sum(p.score for p in self.players)
+                        self.high_score = max(self.high_score, total)
+                        self.state = 'menu'
+                        self.menu_mode = 'main'
+                        self.menu_selected = 0
+                try:
+                    self.draw()
+                except Exception as e:
+                    print(f"[CRASH GUARD] draw failed: {e}")
+                    traceback.print_exc()
+                    crash_count += 1
+                    if crash_count > 10:
+                        self.state = 'menu'
+                        crash_count = 0
+            except SystemExit:
+                raise
+            except Exception as e:
+                print(f"[CRASH GUARD] main loop failed: {e}")
+                traceback.print_exc()
+                crash_count += 1
+                if crash_count > 20:
+                    print("Too many crashes in main loop, exiting")
+                    break

@@ -1,6 +1,7 @@
 import pygame
 import random
 import pathlib
+import math
 from ..settings import *
 
 # Try to load authentic NES sprite sheet
@@ -51,15 +52,10 @@ class Tank:
     def get_bullet_spawn(self):
         cx, cy = self.rect.center
         offset = TANK_SIZE//2 + 4
-        if self.direction == 'UP':
-            return cx, cy - offset
-        if self.direction == 'DOWN':
-            return cx, cy + offset
-        if self.direction == 'LEFT':
-            return cx - offset, cy
-        if self.direction == 'RIGHT':
-            return cx + offset, cy
-        return cx, cy
+        # 8-direction support
+        dx, dy = DIRS.get(self.direction, (0, -1))
+        # For diagonal, offset both
+        return cx + dx * offset, cy + dy * offset
 
     def can_shoot(self):
         if self.cooldown > 0:
@@ -105,6 +101,11 @@ class Tank:
 
         self.direction = dir_name
         dx, dy = DIRS[dir_name]
+        # Normalize diagonal speed so diagonal not faster than cardinal
+        if dx != 0 and dy != 0:
+            # Diagonal: normalize to 0.707
+            dx *= 0.7071
+            dy *= 0.7071
 
         # Ice effect - authentic: higher speed + slight slide
         speed_mult = 1.35 if self.on_ice else 1.0
@@ -310,25 +311,44 @@ class Tank:
         cx, cy = self.rect.center
         size = TANK_SIZE - 6
 
-        # shadow
-        # pygame.draw.rect(screen, (0,0,0, 100), (cx - size//2 +2, cy - size//2 +4, size, size), border_radius=3)
-
         # Modern simplified fallback that resembles NES yellow/gray etc.
-        # Body color already set via self.color (yellow/green/silver/red)
         body_rect = pygame.Rect(0,0,size-4, size-4)
         body_rect.center = (cx, cy)
         pygame.draw.rect(screen, self.color, body_rect)
         pygame.draw.rect(screen, COLOR_BLACK, body_rect, 2)
-        # turret
+        # turret - now supports 8 directions
+        import math
         cannon_len = 12
         cannon_w = 4
-        if self.direction == 'UP':
-            pygame.draw.rect(screen, (30,30,30), (cx - cannon_w//2, cy - size//2, cannon_w, cannon_len))
-        elif self.direction == 'DOWN':
-            pygame.draw.rect(screen, (30,30,30), (cx - cannon_w//2, cy + size//2 - cannon_len, cannon_w, cannon_len))
-        elif self.direction == 'LEFT':
-            pygame.draw.rect(screen, (30,30,30), (cx - size//2, cy - cannon_w//2, cannon_len, cannon_w))
-        elif self.direction == 'RIGHT':
-            pygame.draw.rect(screen, (30,30,30), (cx + size//2 - cannon_len, cy - cannon_w//2, cannon_len, cannon_w))
-        # eagle turret center
+        # Use DIR_ANGLE for cannon direction
+        angle_map = DIR_ANGLE if 'DIR_ANGLE' in globals() else {}
+        if self.direction in angle_map:
+            ang_deg = angle_map[self.direction]
+            ang_rad = math.radians(ang_deg - 90)  # UP is -90 deg in math coords? Actually 0 deg UP means pointing up (negative Y)
+            # For UP (0 deg), direction vector is (0,-1)
+            # Convert: angle 0 = UP, 90=RIGHT, etc. So vector = (sin(angle), -cos(angle))
+            vx = math.sin(math.radians(ang_deg))
+            vy = -math.cos(math.radians(ang_deg))
+            # draw line for cannon
+            x2 = cx + vx * (size//2 + 2)
+            y2 = cy + vy * (size//2 + 2)
+            pygame.draw.line(screen, (30,30,30), (cx, cy), (x2, y2), cannon_w)
+        else:
+            # fallback cardinal check
+            if self.direction == 'UP':
+                pygame.draw.rect(screen, (30,30,30), (cx - cannon_w//2, cy - size//2, cannon_w, cannon_len))
+            elif self.direction == 'DOWN':
+                pygame.draw.rect(screen, (30,30,30), (cx - cannon_w//2, cy + size//2 - cannon_len, cannon_w, cannon_len))
+            elif self.direction == 'LEFT':
+                pygame.draw.rect(screen, (30,30,30), (cx - size//2, cy - cannon_w//2, cannon_len, cannon_w))
+            elif self.direction == 'RIGHT':
+                pygame.draw.rect(screen, (30,30,30), (cx + size//2 - cannon_len, cy - cannon_w//2, cannon_len, cannon_w))
+            else:
+                # diagonal fallback: draw line using DIRS
+                dx, dy = DIRS.get(self.direction, (0,-1))
+                x2 = cx + dx * (size//2 + 4)
+                y2 = cy + dy * (size//2 + 4)
+                pygame.draw.line(screen, (30,30,30), (cx, cy), (x2, y2), cannon_w)
+
+        # turret center
         pygame.draw.circle(screen, (20,20,20), (cx, cy), 4)

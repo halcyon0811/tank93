@@ -15,6 +15,11 @@ class PlayerTank(Tank):
         self.helmet_timer = 0
         self.spawn_protection = 120  # initial protection
         self.speed = TANK_SPEED['player']
+        # New item system: tracking missile and 8-way firing
+        self.homing_timer = 0    # tracking missile active
+        self.spread_timer = 0    # 8-direction active
+        self.homing_active = False
+        self.spread_active = False
         self.update_bullet_power()
 
     def add_lives(self, n=COIN_LIVES):
@@ -87,34 +92,55 @@ class PlayerTank(Tank):
                     use_keyboard = False
 
         if use_keyboard:
+            # 8-direction support: check vertical and horizontal separately
             if num_players == 1:
-                if keys[pygame.K_w] or keys[pygame.K_UP]:
+                up = keys[pygame.K_w] or keys[pygame.K_UP]
+                down = keys[pygame.K_s] or keys[pygame.K_DOWN]
+                left = keys[pygame.K_a] or keys[pygame.K_LEFT]
+                right = keys[pygame.K_d] or keys[pygame.K_RIGHT]
+                if up and left:
+                    dir_pressed = 'UP_LEFT'
+                elif up and right:
+                    dir_pressed = 'UP_RIGHT'
+                elif down and left:
+                    dir_pressed = 'DOWN_LEFT'
+                elif down and right:
+                    dir_pressed = 'DOWN_RIGHT'
+                elif up:
                     dir_pressed = 'UP'
-                elif keys[pygame.K_s] or keys[pygame.K_DOWN]:
+                elif down:
                     dir_pressed = 'DOWN'
-                elif keys[pygame.K_a] or keys[pygame.K_LEFT]:
+                elif left:
                     dir_pressed = 'LEFT'
-                elif keys[pygame.K_d] or keys[pygame.K_RIGHT]:
+                elif right:
                     dir_pressed = 'RIGHT'
             else:
                 if self.player_id == 1:
-                    if keys[pygame.K_w]:
-                        dir_pressed = 'UP'
-                    elif keys[pygame.K_s]:
-                        dir_pressed = 'DOWN'
-                    elif keys[pygame.K_a]:
-                        dir_pressed = 'LEFT'
-                    elif keys[pygame.K_d]:
-                        dir_pressed = 'RIGHT'
+                    up = keys[pygame.K_w]
+                    down = keys[pygame.K_s]
+                    left = keys[pygame.K_a]
+                    right = keys[pygame.K_d]
                 else:
-                    if keys[pygame.K_UP]:
-                        dir_pressed = 'UP'
-                    elif keys[pygame.K_DOWN]:
-                        dir_pressed = 'DOWN'
-                    elif keys[pygame.K_LEFT]:
-                        dir_pressed = 'LEFT'
-                    elif keys[pygame.K_RIGHT]:
-                        dir_pressed = 'RIGHT'
+                    up = keys[pygame.K_UP]
+                    down = keys[pygame.K_DOWN]
+                    left = keys[pygame.K_LEFT]
+                    right = keys[pygame.K_RIGHT]
+                if up and left:
+                    dir_pressed = 'UP_LEFT'
+                elif up and right:
+                    dir_pressed = 'UP_RIGHT'
+                elif down and left:
+                    dir_pressed = 'DOWN_LEFT'
+                elif down and right:
+                    dir_pressed = 'DOWN_RIGHT'
+                elif up:
+                    dir_pressed = 'UP'
+                elif down:
+                    dir_pressed = 'DOWN'
+                elif left:
+                    dir_pressed = 'LEFT'
+                elif right:
+                    dir_pressed = 'RIGHT'
 
             # shoot from keyboard only if using keyboard
             if self.player_id == 1:
@@ -397,29 +423,77 @@ class PlayerTank(Tank):
             dir_pressed = self.direction
 
         if dir_pressed:
+            # Always face movement/aim direction, even if blocked (fixes bug where moving back still facing forward)
+            self.direction = dir_pressed
             moved = self.try_move(dir_pressed, tilemap, other_tanks)
 
         if shoot:
-            b = self.shoot()
-            if b:
-                return b
+            result = self.shoot()
+            if result:
+                return result
         return None
 
+    def get_bullet_spawn_for(self, dir_name):
+        """Get spawn position for arbitrary direction (for 8-way firing)"""
+        cx, cy = self.rect.center
+        offset = TANK_SIZE//2 + 4
+        dx, dy = DIRS.get(dir_name, (0, -1))
+        # Normalize diagonal
+        if dx != 0 and dy != 0:
+            dx *= 0.7071
+            dy *= 0.7071
+        return cx + dx * offset, cy + dy * offset
+
     def shoot(self):
-        if not self.can_shoot():
-            return None
-        sx, sy = self.get_bullet_spawn()
-        color = COLOR_YELLOW if self.bullet_power >= 2 else self.color
-        bullet = Bullet(sx, sy, self.direction, f"player{self.player_id}", power=self.bullet_power, color=color)
-        self.bullets.append(bullet)
-        self.cooldown = 15 if self.star_level >=1 else 20
-        # Classic Battle City shoot SFX (8-bit pew) + screen shake for power
+        # Check if we can shoot at all (considers max bullets)
+        # For spread, we need to allow up to 8 bullets, so we check more loosely
+        if self.spread_active:
+            # For spread, need at least 1 slot free
+            alive = len([b for b in self.bullets if b.alive])
+            max_b = MAX_BULLETS['player'] if isinstance(MAX_BULLETS['player'], int) else 2
+            # Allow spread even if near limit, but cap total at max*4 to avoid spam
+            if alive >= max_b * 4:
+                return None
+        else:
+            if not self.can_shoot():
+                return None
+
+        bullets_created = []
+
+        # Normal bullet color
+        base_color = COLOR_YELLOW if self.bullet_power >= 2 else self.color
+
+        if self.spread_active:
+            # Fire 8 directions at once
+            for d in EIGHT_DIRS:
+                sx, sy = self.get_bullet_spawn_for(d)
+                # Homing spread: if homing active too, make each homing
+                is_homing = self.homing_active
+                col = (255, 140, 0) if is_homing else base_color
+                bullet = Bullet(sx, sy, d, f"player{self.player_id}", power=self.bullet_power, color=col, homing=is_homing)
+                self.bullets.append(bullet)
+                bullets_created.append(bullet)
+            self.cooldown = 25  # slightly longer for spread
+        else:
+            sx, sy = self.get_bullet_spawn()
+            is_homing = self.homing_active
+            col = (255, 140, 0) if is_homing else base_color
+            bullet = Bullet(sx, sy, self.direction, f"player{self.player_id}", power=self.bullet_power, color=col, homing=is_homing)
+            self.bullets.append(bullet)
+            bullets_created.append(bullet)
+            self.cooldown = 15 if self.star_level >= 1 else 20
+
+        # Classic Battle City shoot SFX
         try:
             from ..sound_manager import sound_manager
             sound_manager.play_shoot()
         except:
             pass
-        return bullet
+
+        # Return single or list for game to handle
+        if len(bullets_created) == 1:
+            return bullets_created[0]
+        return bullets_created
 
     def update(self, tilemap, other_tanks):
         super().update(tilemap, other_tanks)
@@ -427,9 +501,23 @@ class PlayerTank(Tank):
             self.helmet_timer -= 1
             if self.helmet_timer <= 0:
                 self.invulnerable_timer = 0
+
+        # update new item timers
+        if self.homing_timer > 0:
+            self.homing_timer -= 1
+            self.homing_active = True
+            if self.homing_timer <= 0:
+                self.homing_active = False
         else:
-            # if no helmet, invuln only from spawn protection
-            pass
+            self.homing_active = False
+
+        if self.spread_timer > 0:
+            self.spread_timer -= 1
+            self.spread_active = True
+            if self.spread_timer <= 0:
+                self.spread_active = False
+        else:
+            self.spread_active = False
 
         # clean bullets
         self.bullets = [b for b in self.bullets if b.alive]
@@ -446,6 +534,10 @@ class PlayerTank(Tank):
         self.lives -= 1
         # reset star level but keep? Classic loses all power
         self.star_level = 0
+        self.homing_timer = 0
+        self.spread_timer = 0
+        self.homing_active = False
+        self.spread_active = False
         self.update_bullet_power()
 
     def respawn(self, grid_x, grid_y):
@@ -455,11 +547,14 @@ class PlayerTank(Tank):
         self.invulnerable_timer = 0
         self.spawn_protection = 180
         self.helmet_timer = 0
+        # keep items? For balance, reset on respawn (or keep? we reset per classic)
+        # We keep homing/spread if still has timer? For now keep them until timer expires
+        # self.homing_timer and spread remain as is
 
     def apply_powerup(self, type_name, game=None):
         if type_name == 'helmet':
-            self.helmet_timer = POWERUP_DURATION['helmet']
-            self.invulnerable_timer = POWERUP_DURATION['helmet']
+            self.helmet_timer = POWERUP_DURATION.get('helmet', 10 * FPS)
+            self.invulnerable_timer = POWERUP_DURATION.get('helmet', 10 * FPS)
         elif type_name == 'star':
             self.star_level = min(self.star_level + 1, STAR_LEVELS-1)
             self.update_bullet_power()
@@ -468,8 +563,19 @@ class PlayerTank(Tank):
             self.score += 500
         elif type_name == 'gun':
             self.bullet_power = 2
-            # temporary?
+            # temporary? make 2x power for star level
         elif type_name == 'shovel':
             if game:
                 game.tilemap.activate_shovel()
+        elif type_name == 'homing':
+            # Tracking missile item: tank can fire tracking missile to attack nearest enemy
+            # Active for duration
+            self.homing_timer = POWERUP_DURATION.get('homing', 15 * FPS)
+            self.homing_active = True
+            self.score += 200
+        elif type_name == 'spread':
+            # 8-direction firing item
+            self.spread_timer = POWERUP_DURATION.get('spread', 12 * FPS)
+            self.spread_active = True
+            self.score += 200
         # grenade, clock handled by game

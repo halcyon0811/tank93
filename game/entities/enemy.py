@@ -227,6 +227,50 @@ class EnemyTank(Tank):
             self.stuck_timer = 0
         self.last_pos = (self.x, self.y)
 
+        # --- Fix for enemy stuck bug: detect overlapping tanks and force separation ---
+        # When two enemies spawn too close or get stuck overlapping each other (same position),
+        # their normal can_move_dir check will block all directions because they overlap.
+        # This causes them to stay forever in original location. We force separation.
+        overlapping_tanks = []
+        for other in (other_tanks + players):
+            if other is self or not other.alive:
+                continue
+            d = math.hypot(self.x - other.x, self.y - other.y)
+            if d < TANK_SIZE * 0.95:  # overlapping / too close
+                overlapping_tanks.append((other, d))
+
+        if overlapping_tanks:
+            # Find nearest overlapping
+            nearest, _ = min(overlapping_tanks, key=lambda x: x[1])
+            dx = self.x - nearest.x
+            dy = self.y - nearest.y
+            # Choose direction away from nearest
+            if abs(dx) > abs(dy):
+                dir_away = 'RIGHT' if dx > 0 else 'LEFT'
+            else:
+                dir_away = 'DOWN' if dy > 0 else 'UP'
+            self.direction = dir_away
+            self.target_dir_timer = 15
+            # Try to move ignoring other tanks for separation (only tile collision)
+            # We directly call base try_move with empty other list to allow separation
+            moved_sep = super().try_move(dir_away, tilemap, [])
+            if not moved_sep:
+                # If still blocked by tile, try perpendicular away directions
+                perp = {'UP': ['LEFT','RIGHT'], 'DOWN': ['LEFT','RIGHT'], 'LEFT': ['UP','DOWN'], 'RIGHT': ['UP','DOWN']}
+                for pd in perp.get(dir_away, []):
+                    if super().try_move(pd, tilemap, []):
+                        self.direction = pd
+                        moved_sep = True
+                        break
+            # If still overlapping heavily, give a small push to unstick (teleport slightly)
+            if math.hypot(self.x - nearest.x, self.y - nearest.y) < TANK_SIZE * 0.8:
+                # push 2px away
+                push_dx = (dx / (math.hypot(dx, dy) or 1)) * 2.5
+                push_dy = (dy / (math.hypot(dx, dy) or 1)) * 2.5
+                self.x += push_dx
+                self.y += push_dy
+                self.rect.center = (self.x, self.y)
+
         if self.target_dir_timer <= 0 or self.stuck_timer > 25:
             self.choose_new_direction(players, tilemap, base)
             self.target_dir_timer = random.randint(25, 90)

@@ -11,7 +11,10 @@ For tanks: use sprite sheet directly for 100% authentic NES tanks.
 """
 import pygame
 import pathlib
-from PIL import Image
+try:
+    from PIL import Image
+except ImportError:
+    Image = None
 
 ASSET_DIR = pathlib.Path(__file__).parent
 GENERAL_SHEET = ASSET_DIR / "General-Sprites.png"
@@ -25,7 +28,16 @@ def load_sheet_pygame():
     if _sheet_surface is None:
         if not GENERAL_SHEET.exists():
             return None
-        _sheet_surface = pygame.image.load(str(GENERAL_SHEET)).convert_alpha()
+        try:
+            surf = pygame.image.load(str(GENERAL_SHEET))
+            # convert_alpha requires video mode; fallback if not yet set
+            try:
+                _sheet_surface = surf.convert_alpha()
+            except pygame.error:
+                _sheet_surface = surf
+        except Exception as e:
+            print(f"[Sprite] Failed to load sheet: {e}")
+            return None
     return _sheet_surface
 
 # Mapping based on manual inspection of General-Sprites.png 400x256 (16px tiles)
@@ -84,7 +96,24 @@ TANK_BASE = {
 }
 
 # Direction to column offset within 8-frame row (each dir has 2 anim frames)
-DIR_OFFSETS = {'UP':0, 'RIGHT':2, 'DOWN':4, 'LEFT':6}  # start index of pair, verified by your yellow strip
+# Fixed: previous mapping had RIGHT/LEFT swapped causing tank to still face forward when moving back
+# Analysis of General-Sprites.png via darkest edge detection showed:
+# offset 0=UP (top darkest), 2=LEFT (left darkest), 4=DOWN (bottom darkest), 6=RIGHT (right darkest)
+# So correct order is UP=0, LEFT=2, DOWN=4, RIGHT=6 (counter-clockwise)
+DIR_OFFSETS = {'UP':0, 'RIGHT':6, 'DOWN':4, 'LEFT':2}  # fixed: RIGHT/LEFT were swapped
+
+# 8-direction angles from UP clockwise (degrees)
+DIR_ANGLE_8 = {
+    'UP': 0,
+    'UP_RIGHT': 45,
+    'RIGHT': 90,
+    'DOWN_RIGHT': 135,
+    'DOWN': 180,
+    'DOWN_LEFT': 225,
+    'LEFT': 270,
+    'UP_LEFT': 315,
+}
+EIGHT_DIRS_LOCAL = ['UP', 'UP_RIGHT', 'RIGHT', 'DOWN_RIGHT', 'DOWN', 'DOWN_LEFT', 'LEFT', 'UP_LEFT']
 
 def get_tank_frame(color, direction, anim_frame=0, level=0):
     """
@@ -96,9 +125,11 @@ def get_tank_frame(color, direction, anim_frame=0, level=0):
     base = TANK_BASE.get(color, (0,0))
     base_x, base_y = base
 
-    # Dir offset
+    # Dir offset - handle diagonal by mapping to UP for base frame, rotation handled later in scaled function
     d = direction.upper() if isinstance(direction, str) else 'UP'
-    col_offset = DIR_OFFSETS.get(d, 0) + (anim_frame % 2)
+    # If diagonal, use UP as base for rotation to keep authentic then rotate
+    base_dir_for_raw = d if d in DIR_OFFSETS else 'UP'
+    col_offset = DIR_OFFSETS.get(base_dir_for_raw, 0) + (anim_frame % 2)
 
     fx = base_x + col_offset
     fy = base_y + level  # level = row offset
@@ -118,20 +149,55 @@ def get_tank_frame(color, direction, anim_frame=0, level=0):
     return sub
 
 def get_tank_sprite_scaled(color, direction, anim_frame=0, level=0, size=32):
-    small = get_tank_frame(color, direction, anim_frame, level)
+    d = direction.upper() if isinstance(direction, str) else 'UP'
+    small = get_tank_frame(color, d, anim_frame, level)
     if small is None:
         return None
     # Scale with nearest for crisp NES pixels
     # If size is multiple of 16, use scale for perfect pixels
     scaled = pygame.transform.scale(small, (size, size))
+
+    # If diagonal, rotate the scaled UP or base sprite to correct angle
+    if d not in DIR_OFFSETS and d in DIR_ANGLE_8:
+        angle = DIR_ANGLE_8[d]
+        # We have UP base scaled, need to rotate to target angle
+        # Pygame rotates counter-clockwise, so rotate by -angle
+        # For diagonals we rotated from UP, so -angle
+        rotated = pygame.transform.rotate(scaled, -angle)
+        return rotated
+    # Also handle diagonal that has base_dir fallback but we still want rotation from true UP?
+    # For cardinal directions that are not diagonal, get_tank_frame already returns correctly oriented sprite
+    # No extra rotation needed
     return scaled
 
-# Also cache for performance
+# Also cache for performance - now supports 8 dirs with rotation
 _sprite_cache = {}
 def get_cached_tank(color, direction, anim, level, size):
-    key = (color, direction, anim, level, size)
+    key = (color, direction.upper() if isinstance(direction, str) else 'UP', anim, level, size)
     if key in _sprite_cache:
         return _sprite_cache[key]
+    # For diagonal, we need to ensure base frame is UP rotated
+    d = key[1]
+    if d not in DIR_OFFSETS and d in DIR_ANGLE_8:
+        # Get UP scaled then rotate
+        base_key = (color, 'UP', anim, level, size)
+        if base_key in _sprite_cache:
+            base_scaled = _sprite_cache[base_key]
+        else:
+            base_small = get_tank_frame(color, 'UP', anim, level)
+            if base_small is None:
+                _sprite_cache[key] = None
+                return None
+            base_scaled = pygame.transform.scale(base_small, (size, size))
+            _sprite_cache[base_key] = base_scaled
+        angle = DIR_ANGLE_8[d]
+        rotated = pygame.transform.rotate(base_scaled, -angle)
+        _sprite_cache[key] = rotated
+        return rotated
     s = get_tank_sprite_scaled(color, direction, anim, level, size)
     _sprite_cache[key] = s
     return s
+
+def get_tank_sprite_rotated(color, direction, anim_frame=0, level=0, size=32):
+    """Helper to get 8-dir rotated sprite, always works"""
+    return get_cached_tank(color, direction, anim_frame, level, size)
