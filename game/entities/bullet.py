@@ -41,18 +41,18 @@ class Bullet:
             self.alive = False
             return 'out'
 
-        # tile collision
+        # tile collision - authentic: check brick destruction based on direction
         gx = int((self.x - PLAYFIELD_X) // TILE_SIZE)
         gy = int((self.y - PLAYFIELD_Y) // TILE_SIZE)
         if 0 <= gx < GRID_W and 0 <= gy < GRID_H:
             tt = tilemap.tiles[gy][gx]
             if tt == TILE_BRICK:
-                tilemap.destroy_tile(gx, gy, self.power)
+                tilemap.destroy_tile(gx, gy, self.power, self.dir)
                 self.alive = False
                 return 'hit_brick'
             elif tt == TILE_STEEL:
                 if self.power >= 2:
-                    tilemap.destroy_tile(gx, gy, self.power)
+                    tilemap.destroy_tile(gx, gy, self.power, self.dir)
                 self.alive = False
                 return 'hit_steel'
             # water, grass, ice pass through

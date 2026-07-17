@@ -2,6 +2,7 @@ import pygame
 from .tank import Tank
 from .bullet import Bullet
 from ..settings import *
+import game.settings as settings_module  # for live calibration toggles
 
 class PlayerTank(Tank):
     def __init__(self, player_id, grid_x, grid_y, lives=None):
@@ -45,82 +46,224 @@ class PlayerTank(Tank):
             self.bullet_power = 2  # can break steel
             self.speed = TANK_SPEED['player'] * 1.3
 
-    def handle_input(self, keys, joystick=None, tilemap=None, other_tanks=None):
+    def handle_input(self, keys, joystick=None, tilemap=None, other_tanks=None, num_players=1):
         if not self.alive:
             return None
         moved = False
         dir_pressed = None
-        # Both players can use WASD or arrows (more forgiving) - classic + modern
-        if keys[pygame.K_w] or keys[pygame.K_UP]:
-            dir_pressed = 'UP'
-        elif keys[pygame.K_s] or keys[pygame.K_DOWN]:
-            dir_pressed = 'DOWN'
-        elif keys[pygame.K_a] or keys[pygame.K_LEFT]:
-            dir_pressed = 'LEFT'
-        elif keys[pygame.K_d] or keys[pygame.K_RIGHT]:
-            dir_pressed = 'RIGHT'
-        # shoot: allow multiple keys
-        if self.player_id == 1:
-            shoot = keys[pygame.K_SPACE] or keys[pygame.K_LCTRL] or keys[pygame.K_LSHIFT] or keys[pygame.K_z]
+        # Fix synced movement bug: P1 and P2 must have separate keys in 2P mode
+        # In 1P mode, allow both WASD and arrows for convenience
+        if num_players == 1:
+            # Single player can use either WASD or arrows
+            if keys[pygame.K_w] or keys[pygame.K_UP]:
+                dir_pressed = 'UP'
+            elif keys[pygame.K_s] or keys[pygame.K_DOWN]:
+                dir_pressed = 'DOWN'
+            elif keys[pygame.K_a] or keys[pygame.K_LEFT]:
+                dir_pressed = 'LEFT'
+            elif keys[pygame.K_d] or keys[pygame.K_RIGHT]:
+                dir_pressed = 'RIGHT'
         else:
-            shoot = keys[pygame.K_RETURN] or keys[pygame.K_RCTRL] or keys[pygame.K_RSHIFT] or keys[pygame.K_m] or keys[pygame.K_SPACE]
+            # 2P mode: separate controls - P1 WASD, P2 Arrows (no cross)
+            if self.player_id == 1:
+                if keys[pygame.K_w]:
+                    dir_pressed = 'UP'
+                elif keys[pygame.K_s]:
+                    dir_pressed = 'DOWN'
+                elif keys[pygame.K_a]:
+                    dir_pressed = 'LEFT'
+                elif keys[pygame.K_d]:
+                    dir_pressed = 'RIGHT'
+            else:  # P2
+                if keys[pygame.K_UP]:
+                    dir_pressed = 'UP'
+                elif keys[pygame.K_DOWN]:
+                    dir_pressed = 'DOWN'
+                elif keys[pygame.K_LEFT]:
+                    dir_pressed = 'LEFT'
+                elif keys[pygame.K_RIGHT]:
+                    dir_pressed = 'RIGHT'
 
-        # joystick handling - supports Joy-Con, Pro Controller, Xbox, PS
+        # shoot: separate for P1/P2 to avoid sync
+        if self.player_id == 1:
+            shoot = keys[pygame.K_SPACE] or keys[pygame.K_LCTRL] or keys[pygame.K_f]
+        else:
+            shoot = keys[pygame.K_RETURN] or keys[pygame.K_RCTRL] or keys[pygame.K_m]
+
+        # joystick handling - supports Joy-Con, Pro Controller, Xbox, PS - FIXED for 2P sync and cross-rumble
+        joy_btn_dir_idx = None
+        joy_btn_dir = None
         if joystick:
             try:
                 name = joystick.get_name().lower()
                 is_joycon = 'joy-con' in name or 'joycon' in name
+                is_joycon_l = 'joy-con (l)' in name and 'l/r' not in name
+                is_joycon_r = 'joy-con (r)' in name and 'l/r' not in name
+                is_combined = 'l/r' in name  # Nintendo Switch Joy-Con (L/R) combined as Pro controller with 6 axes
+                num_axes = joystick.get_numaxes()
                 ax = ay = 0
-                if joystick.get_numaxes() >= 2:
-                    ax = joystick.get_axis(0)
-                    ay = joystick.get_axis(1)
-                    # right stick fallback
-                    if abs(ax) < 0.3 and abs(ay) < 0.3 and joystick.get_numaxes() >= 4:
-                        ax = joystick.get_axis(2)
-                        ay = joystick.get_axis(3)
-                    # Joy-Con horizontal mode compensation (sideways = 90deg rotate)
-                    # If Joy-Con held sideways, swap axes: up becomes left etc.
-                    # Detect if stick is sideways by checking name? For now keep normal vertical.
+
+                # === Combined Joy-Con (L/R) split for 2P: left stick for P1, right stick for P2 ===
+                if is_combined and num_players == 2:
+                    if self.player_id == 1:
+                        # P1 uses left stick axes 0,1
+                        if num_axes >= 2:
+                            ax = joystick.get_axis(0)
+                            ay = joystick.get_axis(1)
+                    else:
+                        # P2 uses right stick axes 2,3
+                        if num_axes >= 4:
+                            ax = joystick.get_axis(2)
+                            ay = joystick.get_axis(3)
+                        else:
+                            ax = joystick.get_axis(0)
+                            ay = joystick.get_axis(1)
+                else:
+                    # Normal single joystick per player
+                    if num_axes >= 2:
+                        ax = joystick.get_axis(0)
+                        ay = joystick.get_axis(1)
+                        # Right stick fallback if left idle and not combined mode
+                        if not is_combined and abs(ax) < 0.3 and abs(ay) < 0.3 and num_axes >= 4:
+                            ax2 = joystick.get_axis(2)
+                            ay2 = joystick.get_axis(3)
+                            if abs(ax2) > 0.3 or abs(ay2) > 0.3:
+                                ax, ay = ax2, ay2
+
                 # D-pad hat (Pro Controller, Xbox)
                 if joystick.get_numhats() > 0:
-                    hx, hy = joystick.get_hat(0)
-                    if hx != 0 or hy != 0:
-                        ax = hx
-                        ay = -hy
-
-                # Joy-Con specific: D-pad is buttons, not hat on macOS pygame
-                # Common Mac mapping: Joy-Con L has 16-20 buttons, D-pad as buttons 0,1,2,3 or 10-13
-                # We try to detect D-pad via buttons if no axis movement
-                joy_btn_dir = None
-                if is_joycon and abs(ax) < 0.4 and abs(ay) < 0.4:
                     try:
-                        # Try typical Joy-Con button mapping on macOS
-                        # Left Joy-Con vertical: up/down/left/right often buttons 0-3
-                        # Right Joy-Con: similar
-                        # We'll check multiple possible indices
-                        nb = joystick.get_numbuttons()
-                        # Map attempt: buttons 0=up,1=down,2=left,3=right or similar
-                        # Also check high indices for D-pad
-                        checks = [
-                            (0, 'UP'), (1, 'DOWN'), (2, 'LEFT'), (3, 'RIGHT'),
-                            (10, 'UP'), (11, 'DOWN'), (12, 'LEFT'), (13, 'RIGHT'),
-                            (14, 'UP'), (15, 'DOWN'), (16, 'LEFT'), (17, 'RIGHT'),
-                        ]
-                        for b_idx, d in checks:
-                            if b_idx < nb and joystick.get_button(b_idx):
-                                # Need to distinguish shoot vs move: if multiple buttons, prioritize direction
-                                # If button is held and it's likely D-pad, set direction
-                                # But also keep shoot ability
-                                if dir_pressed is None: # only set if not already set by stick
-                                    joy_btn_dir = d
-                                    break
+                        hx, hy = joystick.get_hat(0)
+                        if hx != 0 or hy != 0:
+                            ax = hx
+                            ay = -hy
                     except:
                         pass
 
-                # deadzone
-                if abs(ax) < 0.35:
+                # Apply calibration per Joy-Con side - FIXED for both left and right
+                try:
+                    if is_combined and num_players == 2:
+                        # Combined Joy-Con (L/R) as Pro controller with 6 axes: split for 2P
+                        if self.player_id == 1:
+                            # P1 left side: same as left Joy-Con fix (SWAP+INV_Y)
+                            if getattr(settings_module, 'JOYCON_L_SWAP', settings_module.JOYCON_SWAP_AXES):
+                                ax, ay = ay, ax
+                            if getattr(settings_module, 'JOYCON_L_INVERT_X', settings_module.JOYCON_INVERT_X):
+                                ax = -ax
+                            if getattr(settings_module, 'JOYCON_L_INVERT_Y', settings_module.JOYCON_INVERT_Y):
+                                ay = -ay
+                        else:
+                            # P2 right side: both axes inverted (LEFT->RIGHT, UP->DOWN as user reported)
+                            if getattr(settings_module, 'JOYCON_R_SWAP', False):
+                                ax, ay = ay, ax
+                            if getattr(settings_module, 'JOYCON_R_INVERT_X', True):
+                                ax = -ax
+                            if getattr(settings_module, 'JOYCON_R_INVERT_Y', True):
+                                ay = -ay
+                    elif is_joycon_l:
+                        if getattr(settings_module, 'JOYCON_L_SWAP', settings_module.JOYCON_SWAP_AXES):
+                            ax, ay = ay, ax
+                        if getattr(settings_module, 'JOYCON_L_INVERT_X', settings_module.JOYCON_INVERT_X):
+                            ax = -ax
+                        if getattr(settings_module, 'JOYCON_L_INVERT_Y', settings_module.JOYCON_INVERT_Y):
+                            ay = -ay
+                    elif is_joycon_r:
+                        if getattr(settings_module, 'JOYCON_R_SWAP', False):
+                            ax, ay = ay, ax
+                        if getattr(settings_module, 'JOYCON_R_INVERT_X', True):
+                            ax = -ax
+                        if getattr(settings_module, 'JOYCON_R_INVERT_Y', True):
+                            ay = -ay
+                    else:
+                        if settings_module.JOYCON_SWAP_AXES:
+                            ax, ay = ay, ax
+                        if settings_module.JOYCON_INVERT_X:
+                            ax = -ax
+                        if settings_module.JOYCON_INVERT_Y:
+                            ay = -ay
+                except:
+                    pass
+
+                # Joy-Con specific: D-pad / face buttons as direction when stick idle
+                # macOS SDL mapping for Joy-Con (L): btn 0=Down,1=Right,2=Up,3=Left (D-pad)
+                # Joy-Con (R) has no D-pad, but we can still use face buttons as dirs for testing
+                if abs(ax) < 0.4 and abs(ay) < 0.4:
+                    try:
+                        nb = joystick.get_numbuttons()
+                        # Accurate mapping for Joy-Con L on macOS pygame/SDL
+                        # Based on SDL gamecontrollerdb: Joy-Con L: dpup=2, dpdown=0, dpleft=3, dpright=1
+                        # Joy-Con R: uses stick, but also allow Y(0)/X(1)/B(2)/A(3) as directions for debugging
+                        jc_checks = []
+                        # Use calibrated maps - FIXED for attack: Right Joy-Con face buttons should be SHOOT, not movement
+                        l_map = settings_module.JOYCON_L_DPAD_MAP
+                        # === Combined Joy-Con (L/R) split mapping - FIXED ===
+                        if is_combined and num_players == 2:
+                            if self.player_id == 1:
+                                # P1 left side: D-pad only for movement (not face buttons which are shoot)
+                                jc_checks = [
+                                    (12, 'UP'), (13, 'DOWN'), (14, 'LEFT'), (15, 'RIGHT'),
+                                ]
+                                for btn, dir in l_map.items():
+                                    jc_checks.append((btn, dir))
+                            else:
+                                # P2 right side: NO D-pad/face as movement, stick only (fixes attack)
+                                jc_checks = []
+                        elif is_joycon_l:
+                            # Left: D-pad only movement
+                            jc_checks = []
+                            for btn, dir in l_map.items():
+                                jc_checks.append((btn, dir))
+                            jc_checks.extend([(12, 'UP'), (13, 'DOWN'), (14, 'LEFT'), (15, 'RIGHT')])
+                        elif is_joycon_r:
+                            # Right: stick only movement, face buttons are SHOOT (fixes attack not working)
+                            jc_checks = []
+                        elif is_joycon:
+                            jc_checks = []
+                            for btn, dir in l_map.items():
+                                jc_checks.append((btn, dir))
+                            jc_checks.extend([(12, 'UP'), (13, 'DOWN'), (14, 'LEFT'), (15, 'RIGHT')])
+                        else:
+                            jc_checks = [
+                                (11, 'UP'), (12, 'DOWN'), (13, 'LEFT'), (14, 'RIGHT'),
+                            ]
+
+                        for b_idx, d in jc_checks:
+                            if b_idx < nb and joystick.get_button(b_idx):
+                                if dir_pressed is None:
+                                    joy_btn_dir = d
+                                    joy_btn_dir_idx = b_idx
+                                    break
+                        # Also if not Joy-Con, check generic D-pad buttons high indices
+                        if joy_btn_dir is None and not is_joycon:
+                            for b_idx in range(min(nb, 20)):
+                                # skip action buttons 0-3 for generic to avoid conflict
+                                if b_idx in (0,1,2,3):
+                                    continue
+                                if joystick.get_button(b_idx):
+                                    # Heuristic: if button 11-14 are D-pad
+                                    if b_idx == 11:
+                                        joy_btn_dir = 'UP'
+                                        joy_btn_dir_idx = b_idx
+                                        break
+                                    elif b_idx == 12:
+                                        joy_btn_dir = 'DOWN'
+                                        joy_btn_dir_idx = b_idx
+                                        break
+                                    elif b_idx == 13:
+                                        joy_btn_dir = 'LEFT'
+                                        joy_btn_dir_idx = b_idx
+                                        break
+                                    elif b_idx == 14:
+                                        joy_btn_dir = 'RIGHT'
+                                        joy_btn_dir_idx = b_idx
+                                        break
+                    except Exception:
+                        pass
+
+                # deadzone and direction from axes
+                if abs(ax) < 0.32:
                     ax = 0
-                if abs(ay) < 0.35:
+                if abs(ay) < 0.32:
                     ay = 0
                 if ay < -0.5:
                     dir_pressed = 'UP'
@@ -134,33 +277,68 @@ class PlayerTank(Tank):
                     dir_pressed = joy_btn_dir
 
             except Exception as e:
+                # Don't crash, just ignore joystick error for this frame
+                # print(f"Joystick handling error: {e}")
                 pass
 
-            # buttons: any button shoots
+            # Shooting: fixed for 2P sync and cross-rumble bugs
             try:
-                for btn_idx in range(min(joystick.get_numbuttons(), 20)):
-                    if joystick.get_button(btn_idx):
-                        # For Joy-Con, if we used that button for movement, don't also shoot unless it's action button
-                        # But for simplicity, allow any to shoot - you can move and shoot at same time with different buttons
-                        # Check if this button was already used as D-pad direction to avoid double
-                        is_dir_btn = False
-                        if 'joy_btn_dir' in locals() and joy_btn_dir and btn_idx < 4:
-                            # maybe it's D-pad, skip shoot for that exact button to avoid shoot while moving only
-                            is_dir_btn = False # allow anyway, more fun
-                        if not is_dir_btn:
-                            shoot = True
-                            # Rumble on shoot for Joy-Con (HD Rumble)
-                            try:
-                                if joystick.get_name().lower().count('joy-con') and hasattr(joystick, 'rumble'):
-                                    joystick.rumble(0.3, 0.7, 100)
-                            except:
+                nb = joystick.get_numbuttons()
+                shoot_buttons = set()
+                # For attack fix: make shooting very permissive for Joy-Con
+                # P1 left side: allow ANY button except D-pad movement to shoot, to ensure attack works
+                # P2 right side: same
+                # For combined, allow any button for both players (but still split rumble)
+                for b_idx in range(min(nb, 30)):
+                    try:
+                        if joystick.get_button(b_idx):
+                            # Skip only the exact D-pad button used for movement if it's the only button (to avoid move=shoot)
+                            # But if another button also pressed, allow shoot
+                            if b_idx == joy_btn_dir_idx:
+                                # If this is the movement button and it's the ONLY button pressed, don't shoot (movement only)
+                                # We will handle this by checking len of all pressed buttons later
+                                # For now, add it but mark as movement
                                 pass
-                            break
-                # Triggers as axes (Xbox) also shoot
+                            # For all Joy-Con, any button press counts as potential shoot (fix attack not working)
+                            shoot_buttons.add(b_idx)
+                    except:
+                        continue
+
+                # Remove the movement button from shoot set if it's the ONLY button (so moving alone doesn't shoot)
+                # If there are other buttons pressed along with movement, keep them for shooting
+                if joy_btn_dir_idx is not None and joy_btn_dir_idx in shoot_buttons and len(shoot_buttons) == 1:
+                    # Only movement button pressed, no shoot
+                    shoot_buttons.clear()
+
+                if shoot_buttons:
+                    shoot = True
+                    # Rumble disabled per user request - check ENABLE_RUMBLE
+                    try:
+                        if getattr(settings_module, 'ENABLE_RUMBLE', False):
+                            if is_combined and num_players == 2:
+                                if self.player_id == 1:
+                                    joystick.rumble(0.8, 0.0, 80)
+                                else:
+                                    joystick.rumble(0.0, 0.8, 80)
+                            elif 'joy-con' in joystick.get_name().lower() and hasattr(joystick, 'rumble'):
+                                joystick.rumble(0.3, 0.7, 80)
+                    except:
+                        pass
+
+                # Triggers as axes (Xbox, PS) also shoot - but split for 2P combined
                 try:
-                    if joystick.get_numaxes() >= 5:
-                        # triggers often axis 4,5 >0.5
-                        if joystick.get_axis(4) > 0.5 or joystick.get_axis(5) > 0.5:
+                    if joystick.get_numaxes() >= 6:
+                        # Combined: axis 4 = left trigger, 5 = right trigger
+                        if is_combined and num_players == 2:
+                            if self.player_id == 1 and joystick.get_axis(4) > 0.5:
+                                shoot = True
+                            elif self.player_id == 2 and joystick.get_axis(5) > 0.5:
+                                shoot = True
+                        else:
+                            if joystick.get_axis(4) > 0.5 or joystick.get_axis(5) > 0.5:
+                                shoot = True
+                    elif joystick.get_numaxes() >= 5:
+                        if joystick.get_axis(4) > 0.5:
                             shoot = True
                 except:
                     pass
@@ -169,6 +347,11 @@ class PlayerTank(Tank):
         else:
             if 'shoot' not in locals():
                 shoot = False
+
+        # Authentic ice sliding: if on ice and no input, keep sliding in current direction
+        if not dir_pressed and self.on_ice:
+            # Continue sliding with same direction, but allow easier turning (original ice has inertia)
+            dir_pressed = self.direction
 
         if dir_pressed:
             moved = self.try_move(dir_pressed, tilemap, other_tanks)
