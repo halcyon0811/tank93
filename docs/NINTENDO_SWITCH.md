@@ -1,4 +1,4 @@
-# Nintendo Switch Publishing Guide for Tank 90
+# Nintendo Switch Publishing Guide for Tank 93
 
 This document explains how to take this Pygame prototype and publish it to Nintendo eShop.
 
@@ -28,7 +28,7 @@ This document explains how to take this Pygame prototype and publish it to Ninte
 
 ### Option A: Godot 4 (Recommended - Free, suits this game)
 
-Why Godot fits Tank 90:
+Why Godot fits Tank 93:
 - Original Battle City was 2D tile-based, Godot TileMap is perfect
 - Our 13x13 int tilemap can be imported 1:1
 - Godot's GDScript is similar to Python -> easy port
@@ -74,7 +74,7 @@ Performance for Switch in Unity:
 
 ## 4. Technical Requirements for eShop (Lot Check)
 
-Nintendo has ~100 page guidelines, but critical for Tank 90:
+Nintendo has ~100 page guidelines, but critical for Tank 93:
 
 **Must Have:**
 - [ ] 60fps stable (no drops below 55)
@@ -87,7 +87,7 @@ Nintendo has ~100 page guidelines, but critical for Tank 90:
 - [ ] Age rating: ESRB E, PEGI 3 (no violence issue since tanks cartoon)
 - [ ] Handles both docked and handheld, single Joy-Con + Pro Controller
 
-**Input for Tank 90 specifically:**
+**Input for Tank 93 specifically:**
 - Support: Single Joy-Con horizontal (1P), Dual Joy-Con (2P), Pro Controller
 - Use Nintendo's "Appliance" input library to detect Joy-Con style
 - Vibration: add HD Rumble when shooting/exploding (simple for lot check love)
@@ -100,7 +100,7 @@ Nintendo has ~100 page guidelines, but critical for Tank 90:
 ## 5. Store Assets & Submission
 
 You need (prepare now):
-- Game title: Can't be "Tank 1990" trademarked. Use "Tank 90: Steel Defense" or similar
+- Game title: Can't be "Tank 1990" trademarked. Use "Tank 93: Steel Defense" or similar
 - Icon 512x512 original art (our modernized pixel is safe)
 - Screenshots: 1920x1080 docked, 1280x720 handheld - 6 minimum
 - Trailer: 30-60 sec, no copyrighted music

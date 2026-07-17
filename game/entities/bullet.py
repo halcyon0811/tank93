@@ -41,22 +41,26 @@ class Bullet:
             self.alive = False
             return 'out'
 
-        # tile collision - authentic NES sounds: brick break crack, steel clang, forest cut (no sound), etc.
+        # tile collision - authentic NES sounds + direction-aware brick destruction (35 maps)
+        # Remote had direction-aware: destroy_tile(gx, gy, power, dir) -> our tilemap supports both signatures
         gx = int((self.x - PLAYFIELD_X) // TILE_SIZE)
         gy = int((self.y - PLAYFIELD_Y) // TILE_SIZE)
         if 0 <= gx < GRID_W and 0 <= gy < GRID_H:
             tt = tilemap.tiles[gy][gx]
             if tt == TILE_BRICK:
-                destroyed = tilemap.destroy_tile(gx, gy, self.power)
+                # Try direction-aware first (origin), fallback to old signature
+                destroyed = False
+                try:
+                    destroyed = tilemap.destroy_tile(gx, gy, self.power, self.dir)
+                except TypeError:
+                    destroyed = tilemap.destroy_tile(gx, gy, self.power)
                 self.alive = False
-                # SFX: brick break vs hit
                 try:
                     from ..sound_manager import sound_manager
                     if destroyed:
                         sound_manager.play_brick_break()
                     else:
                         sound_manager.play_hit_brick()
-                    # Update tile type score: Battle City brick break count kept? Our maps count bricks across 35 stages
                     sound_manager.brick_break_count += 1
                 except:
                     pass
@@ -64,7 +68,10 @@ class Bullet:
             elif tt == TILE_STEEL:
                 destroyed = False
                 if self.power >= 2:
-                    destroyed = tilemap.destroy_tile(gx, gy, self.power)
+                    try:
+                        destroyed = tilemap.destroy_tile(gx, gy, self.power, self.dir)
+                    except TypeError:
+                        destroyed = tilemap.destroy_tile(gx, gy, self.power)
                 self.alive = False
                 try:
                     from ..sound_manager import sound_manager
@@ -74,15 +81,21 @@ class Bullet:
                 except:
                     pass
                 return 'hit_steel'
+            # water, grass, ice pass through
 
         # base collision
         if base and base.alive:
             if base.rect.collidepoint(self.x, self.y):
                 base.take_damage()
                 self.alive = False
+                try:
+                    from ..sound_manager import sound_manager
+                    sound_manager.play_explosion(big=True)
+                except:
+                    pass
                 return 'hit_base'
 
-        # tank collision + explosion SFX (authentic NES)
+        # tank collision + explosion SFX (authentic NES - 35 maps same SFX across all stages)
         for tank in tanks:
             if not tank.alive or tank.invulnerable_timer > 0:
                 continue
@@ -96,19 +109,16 @@ class Bullet:
 
             if tank.rect.collidepoint(self.x, self.y):
                 if not tank.take_damage(self.power):
-                    # blocked by armor/helmet - play hit sound
                     self.alive = False
                     try:
                         from ..sound_manager import sound_manager
-                        sound_manager.play_hit_brick()  # blocked = same as hit
+                        sound_manager.play_hit_brick()
                     except:
                         pass
                     return 'blocked'
                 self.alive = False
-                # Play explosion for tank hit
                 try:
                     from ..sound_manager import sound_manager
-                    # If armor tank that flashes (original had 4 hits), play hit not full explosion? But tank will be dead only when health 0, particle handles
                     if not tank.alive:
                         sound_manager.play_explosion(big=(getattr(tank, 'enemy_type','')=='armor'))
                 except:
@@ -154,29 +164,21 @@ class Base:
 
     def draw(self, screen):
         if self.alive:
-            # modernized eagle/base
-            # main body
             pygame.draw.rect(screen, (230, 230, 230), self.rect)
             pygame.draw.rect(screen, (180, 180, 180), self.rect, 3)
-            # eagle emblem simplified
             cx = self.rect.centerx
             cy = self.rect.centery
-            # wings
             pygame.draw.polygon(screen, (50, 50, 50), [
                 (cx-12, cy-4), (cx-4, cy-8), (cx-2, cy), (cx-8, cy+6)
             ])
             pygame.draw.polygon(screen, (50, 50, 50), [
                 (cx+12, cy-4), (cx+4, cy-8), (cx+2, cy), (cx+8, cy+6)
             ])
-            # head
             pygame.draw.circle(screen, (255, 220, 0), (cx, cy-2), 6)
             pygame.draw.circle(screen, COLOR_BLACK, (cx+2, cy-4), 2)
-            # flag colors
             pygame.draw.rect(screen, (200, 50, 50), (cx-10, cy+8, 20, 4))
         else:
-            # destroyed - burning
             pygame.draw.rect(screen, (60, 20, 20), self.rect)
-            # flicker flame
             t = pygame.time.get_ticks()
             flame_h = 10 + (t % 500) // 100 * 2
             pygame.draw.polygon(screen, (255, 100, 0), [

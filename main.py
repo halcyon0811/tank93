@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Tank 90 Enhanced - Main Entry
+Tank 93 Enhanced - Main Entry
 Pygame prototype for PC, structured for Nintendo Switch port via Godot/Unity.
 
 Controls:

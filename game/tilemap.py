@@ -136,17 +136,41 @@ class TileMap:
                 return True
         return False
 
-    def destroy_tile(self, gx, gy, bullet_power=1):
+    def destroy_tile(self, gx, gy, bullet_power=1, bullet_dir=None):
+        """Authentic Battle City brick destruction: destroys 2 small tiles per hit (half brick)"""
         if not (0 <= gx < GRID_W and 0 <= gy < GRID_H):
             return False
-        t = self.tiles[gy][gx]
-        if t == TILE_BRICK:
-            self.tiles[gy][gx] = TILE_EMPTY
-            return True
-        if t == TILE_STEEL and bullet_power >= 2:
-            self.tiles[gy][gx] = TILE_EMPTY
-            return True
-        return False
+        # Determine which tiles to destroy based on direction - original destroys 2 tiles side by side
+        tiles_to_destroy = [(gx, gy)]
+        if bullet_dir in ('UP', 'DOWN'):
+            # Vertical bullet - destroys 2 horizontal small bricks in same big tile row
+            # Find big tile
+            bx = gx // 2
+            by = gy // 2
+            # Same row within big tile, other column
+            # Determine row offset inside big tile (0 or 1)
+            row_in_big = gy % 2
+            # Destroy both columns in that row
+            tiles_to_destroy = [(bx*2, by*2 + row_in_big), (bx*2 + 1, by*2 + row_in_big)]
+        elif bullet_dir in ('LEFT', 'RIGHT'):
+            # Horizontal bullet - destroys 2 vertical bricks in same big tile column
+            bx = gx // 2
+            by = gy // 2
+            col_in_big = gx % 2
+            tiles_to_destroy = [(bx*2 + col_in_big, by*2), (bx*2 + col_in_big, by*2 + 1)]
+
+        destroyed = False
+        for tx, ty in tiles_to_destroy:
+            if not (0 <= tx < GRID_W and 0 <= ty < GRID_H):
+                continue
+            t = self.tiles[ty][tx]
+            if t == TILE_BRICK:
+                self.tiles[ty][tx] = TILE_EMPTY
+                destroyed = True
+            elif t == TILE_STEEL and bullet_power >= 2:
+                self.tiles[ty][tx] = TILE_EMPTY
+                destroyed = True
+        return destroyed
 
     def update(self, dt):
         if self.shovel_timer > 0:

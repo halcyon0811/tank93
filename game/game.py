@@ -36,24 +36,36 @@ class Game:
         self.joystick_enabled = True
         try:
             pygame.joystick.init()
+            temp = []
             for i in range(pygame.joystick.get_count()):
                 try:
                     js = pygame.joystick.Joystick(i)
                     js.init()
-                    self.joysticks.append(js)
+                    temp.append(js)
                 except Exception:
                     continue
+            # Sort L/R for consistent 2P assignment fix
+            def sort_key(js):
+                try:
+                    n = js.get_name().lower()
+                except:
+                    n = ""
+                if 'joy-con (l)' in n:
+                    return (0, n)
+                if 'joy-con (r)' in n:
+                    return (1, n)
+                if 'l/r' in n:
+                    return (2, n)
+                if 'joy-con' in n:
+                    return (3, n)
+                return (4, n)
+            temp.sort(key=sort_key)
+            self.joysticks = temp
         except Exception as e:
             print(f"Joystick init failed, running without joystick: {e}")
             self.joystick_enabled = False
             self.joysticks = []
-            try:
-                pygame.joystick.quit()
-            except:
-                pass
 
-        # Keep joystick device events unblocked so Joy-Con can be detected even if no joystick at start
-        # (JOYDEVICEADDED/REMOVED must stay unblocked)
         try:
             pygame.event.set_allowed(pygame.JOYDEVICEADDED)
             pygame.event.set_allowed(pygame.JOYDEVICEREMOVED)
@@ -61,7 +73,7 @@ class Game:
             pass
 
         self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-        pygame.display.set_caption("Tank 90 Enhanced - Battle City Tribute")
+        pygame.display.set_caption("Tank 93 Enhanced - Battle City Tribute")
         self.clock = pygame.time.Clock()
         self.hud = HUD()
 
@@ -256,11 +268,21 @@ class Game:
                         self.tilemap.build_base_walls(TILE_BRICK)
                 self.state = 'playing'
                 self.continue_timer = 0
-                # Rumble joy-cons
-                for js in self.joysticks:
+                # Rumble disabled per user request
+                if ENABLE_RUMBLE:
                     try:
-                        if hasattr(js, 'rumble'):
-                            js.rumble(0.5, 0.9, 300)
+                        target_js = None
+                        if target and hasattr(self, 'joysticks'):
+                            idx = target.player_id - 1
+                            if 0 <= idx < len(self.joysticks):
+                                target_js = self.joysticks[idx]
+                            if target_js and 'l/r' in target_js.get_name().lower():
+                                if target.player_id == 1:
+                                    target_js.rumble(0.8, 0.0, 300)
+                                else:
+                                    target_js.rumble(0.0, 0.8, 300)
+                            elif target_js and hasattr(target_js, 'rumble'):
+                                target_js.rumble(0.5, 0.9, 300)
                     except:
                         pass
             return True
@@ -361,21 +383,44 @@ class Game:
             tries+=1
 
     def rescan_joysticks(self):
-        """Rescan for Joy-Cons, call when user presses J or connects controller"""
+        """Rescan for Joy-Cons, call when user presses J or connects controller
+           Fixed for 2P sync bug: sort so Joy-Con (L) = P1, (R) = P2 consistently"""
         try:
             pygame.joystick.init()
-            self.joysticks = []
+            found = []
             for i in range(pygame.joystick.get_count()):
                 try:
                     js = pygame.joystick.Joystick(i)
                     js.init()
-                    self.joysticks.append(js)
-                    print(f"Found joystick {i}: {js.get_name()} axes={js.get_numaxes()} btns={js.get_numbuttons()} hats={js.get_numhats()}")
+                    found.append(js)
                 except Exception as e:
                     print(f"Joystick {i} init failed: {e}")
                     continue
+            # Sort for consistent P1/P2 assignment: L before R, then others
+            # This fixes synced movement where P1/P2 got swapped randomly
+            def sort_key(js):
+                try:
+                    name = js.get_name().lower()
+                except:
+                    name = ""
+                # L should come first for P1
+                if 'joy-con (l)' in name:
+                    return (0, name)
+                if 'joy-con (r)' in name:
+                    return (1, name)
+                if 'l/r' in name:
+                    return (2, name)  # combined last, will be split
+                if 'joy-con' in name:
+                    return (3, name)
+                return (4, name)
+            found.sort(key=sort_key)
+            self.joysticks = found
+            for i, js in enumerate(self.joysticks):
+                try:
+                    print(f"Found joystick {i}: {js.get_name()} axes={js.get_numaxes()} btns={js.get_numbuttons()} hats={js.get_numhats()} -> P{i+1}")
+                except:
+                    pass
             self.joystick_enabled = len(self.joysticks) > 0
-            # Ensure device events are allowed
             try:
                 pygame.event.set_allowed(pygame.JOYDEVICEADDED)
                 pygame.event.set_allowed(pygame.JOYDEVICEREMOVED)
@@ -501,6 +546,34 @@ class Game:
                     if event.key == pygame.K_5:
                         print(f"Coin inserted! Total: {self.coins+1} (+{COIN_LIVES} lives)")
                     self.insert_coin()
+                if event.key == pygame.K_j:
+                    print("Rescanning joysticks (J pressed)...")
+                    self.rescan_joysticks()
+                if event.key == pygame.K_i:
+                    import game.settings as settings_module
+                    # Only toggle RIGHT for now since LEFT is correct per user
+                    settings_module.JOYCON_R_INVERT_Y = not getattr(settings_module, 'JOYCON_R_INVERT_Y', True)
+                    print(f"RIGHT Joy-Con Invert Y toggled: R {settings_module.JOYCON_R_INVERT_Y} (UP/DOWN) - LEFT stays correct")
+                if event.key == pygame.K_u:
+                    import game.settings as settings_module
+                    settings_module.JOYCON_R_INVERT_X = not getattr(settings_module, 'JOYCON_R_INVERT_X', True)
+                    print(f"RIGHT Joy-Con Invert X toggled: R {settings_module.JOYCON_R_INVERT_X} (LEFT/RIGHT)")
+                if event.key == pygame.K_o:
+                    import game.settings as settings_module
+                    settings_module.JOYCON_R_SWAP = not getattr(settings_module, 'JOYCON_R_SWAP', True)
+                    print(f"RIGHT Joy-Con Swap toggled: R {settings_module.JOYCON_R_SWAP} (UP/DOWN <-> LEFT/RIGHT)")
+                if event.key == pygame.K_k:
+                    # Cycle D-pad mapping for Joy-Con L if directions wrong
+                    import game.settings as settings_module
+                    # Rotate mapping 90 degrees: UP->RIGHT->DOWN->LEFT->UP
+                    old_map = settings_module.JOYCON_L_DPAD_MAP.copy()
+                    # Simple rotation: each dir moves to next
+                    rotation = {'UP':'RIGHT','RIGHT':'DOWN','DOWN':'LEFT','LEFT':'UP'}
+                    new_map = {}
+                    for btn, dir in old_map.items():
+                        new_map[btn] = rotation.get(dir, dir)
+                    settings_module.JOYCON_L_DPAD_MAP = new_map
+                    print(f"Joy-Con L D-pad map rotated: {new_map} - test UP/DOWN/LEFT/RIGHT again")
                 if event.key == pygame.K_1:
                     # P1 start/join
                     if self.state in ('gameover', 'stage_clear') and not self.gameover_won:
@@ -649,13 +722,32 @@ class Game:
 
         # players
         all_tanks_for_collision = self.enemies.copy()
+        # Smart Joy-Con handling for 2P: if we have 1 combined Joy-Con (L/R) with 6 axes, split it
+        # P1 uses left stick (axes 0,1) and left buttons, P2 uses right stick (axes 2,3) and right buttons
+        combined_joycon = None
+        if len(self.joysticks) == 1:
+            try:
+                name = self.joysticks[0].get_name().lower()
+                if 'l/r' in name or ('joy-con' in name and self.joysticks[0].get_numaxes() >= 4):
+                    combined_joycon = self.joysticks[0]
+            except:
+                pass
+
         for i, p in enumerate(self.players):
             if not p.alive:
                 continue
-            # get joystick for this player
-            js = self.joysticks[i] if i < len(self.joysticks) else None
+            # get joystick for this player - with combined Joy-Con split support
+            js = None
+            if combined_joycon and len(self.players) == 2:
+                # Both players share the combined Joy-Con, but we pass same object and let player.py handle left/right split
+                # We pass a tuple indicating player side for split logic
+                js = combined_joycon
+                # For split, we will have special handling inside player.py via player_id
+            else:
+                js = self.joysticks[i] if i < len(self.joysticks) else None
+
             other_tanks = self.enemies + [op for j, op in enumerate(self.players) if j != i]
-            b = p.handle_input(keys, js, self.tilemap, other_tanks)
+            b = p.handle_input(keys, js, self.tilemap, other_tanks, num_players=len(self.players))
             if b:
                 self.bullets.append(b)
                 # add to player's bullets already done
@@ -669,7 +761,7 @@ class Game:
                 e.invulnerable_timer = max(e.invulnerable_timer, 1)
                 e.cooldown = max(e.cooldown, 1)
                 continue
-            e.update_ai(self.tilemap, players_list, self.enemies, self.bullets)
+            e.update_ai(self.tilemap, players_list, self.enemies, self.bullets, self.base)
 
         # bullets update
         for b in self.bullets[:]:

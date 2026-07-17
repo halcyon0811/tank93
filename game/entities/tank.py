@@ -72,39 +72,92 @@ class Tank:
     def try_move(self, dir_name, tilemap, other_tanks):
         if not self.alive:
             return False
+
+        # Authentic turning: try to snap to grid when turning (original NES 8-pixel alignment)
+        # Store previous direction to detect turn
+        prev_dir = self.direction
+        is_turn = prev_dir != dir_name and prev_dir is not None
+
+        # Determine snap attempt for turning
+        snap_x = self.x
+        snap_y = self.y
+        if is_turn:
+            # When turning from vertical to horizontal, snap Y to nearest half-tile
+            # When turning from horizontal to vertical, snap X
+            # Half-tile = TILE_SIZE//2 = 12 px, center offset = TILE_SIZE//2
+            # Formula: nearest = PLAYFIELD + round((pos - PLAYFIELD - TILE_SIZE//2)/ (TILE_SIZE//2)) * (TILE_SIZE//2) + TILE_SIZE//2
+            half = TILE_SIZE // 2
+            if prev_dir in ('UP','DOWN') and dir_name in ('LEFT','RIGHT'):
+                # Snap Y
+                rel_y = self.y - PLAYFIELD_Y - TILE_SIZE//2
+                # nearest half-tile
+                snapped_rel = round(rel_y / half) * half
+                snap_y = PLAYFIELD_Y + snapped_rel + TILE_SIZE//2
+                # Only snap if close enough (within 8 px) to avoid jumping
+                if abs(snap_y - self.y) > 8:
+                    snap_y = self.y  # too far, don't snap
+            elif prev_dir in ('LEFT','RIGHT') and dir_name in ('UP','DOWN'):
+                rel_x = self.x - PLAYFIELD_X - TILE_SIZE//2
+                snapped_rel = round(rel_x / half) * half
+                snap_x = PLAYFIELD_X + snapped_rel + TILE_SIZE//2
+                if abs(snap_x - self.x) > 8:
+                    snap_x = self.x
+
         self.direction = dir_name
         dx, dy = DIRS[dir_name]
-        new_x = self.x + dx * self.speed
-        new_y = self.y + dy * self.speed
 
-        # check ice effect - slippery?
-        if self.on_ice:
-            new_x = self.x + dx * self.speed * 1.3
-            new_y = self.y + dy * self.speed * 1.3
+        # Ice effect - authentic: higher speed + slight slide
+        speed_mult = 1.35 if self.on_ice else 1.0
+        new_x = snap_x + dx * self.speed * speed_mult
+        new_y = snap_y + dy * self.speed * speed_mult
 
         new_rect = self.rect.copy()
         new_rect.center = (new_x, new_y)
 
-        # bounds
-        if new_rect.left < PLAYFIELD_X or new_rect.right > PLAYFIELD_X + PLAYFIELD_W:
+        # bounds - authentic: tanks cannot go outside playfield, allow 4px tolerance for smooth edge movement
+        # Original NES allows tank to go slightly outside when spawning
+        if new_rect.left < PLAYFIELD_X - 6 or new_rect.right > PLAYFIELD_X + PLAYFIELD_W + 6:
             return False
-        if new_rect.top < PLAYFIELD_Y or new_rect.bottom > PLAYFIELD_Y + PLAYFIELD_H:
+        if new_rect.top < PLAYFIELD_Y - 6 or new_rect.bottom > PLAYFIELD_Y + PLAYFIELD_H + 6:
             return False
 
-        # tile collision
-        tiles = tilemap.get_tiles_in_rect(new_rect)
+        # tile collision - authentic checks 2 front corners with small tolerance (2px) like original
+        # Shrink new_rect slightly for more forgiving collision (original allows 2px overlap)
+        check_rect = new_rect.inflate(-4, -4)
+        tiles = tilemap.get_tiles_in_rect(check_rect)
         for ttype, gx, gy, trect in tiles:
-            if new_rect.colliderect(trect):
-                return False
+            if check_rect.colliderect(trect):
+                # Try to nudge slightly if turning and close to wall
+                if is_turn and (abs(snap_x - self.x) > 0.1 or abs(snap_y - self.y) > 0.1):
+                    new_rect2 = self.rect.copy()
+                    new_rect2.center = (self.x + dx * self.speed * speed_mult, self.y + dy * self.speed * speed_mult)
+                    check_rect2 = new_rect2.inflate(-4, -4)
+                    blocked2 = False
+                    tiles2 = tilemap.get_tiles_in_rect(check_rect2)
+                    for _, _, _, tr2 in tiles2:
+                        if check_rect2.colliderect(tr2):
+                            blocked2 = True
+                            break
+                    if not blocked2:
+                        snap_x, snap_y = self.x, self.y
+                        new_x = self.x + dx * self.speed * speed_mult
+                        new_y = self.y + dy * self.speed * speed_mult
+                        new_rect = new_rect2
+                        check_rect = check_rect2
+                    else:
+                        return False
+                else:
+                    return False
 
-        # tank-tank collision
+        # tank-tank collision - authentic: tanks block each other, no overlap
         for other in other_tanks:
             if other is self or not other.alive:
                 continue
-            if new_rect.colliderect(other.rect):
-                # small push?
+            # Slight shrink for more forgiving feel (original has 2px gap)
+            if new_rect.colliderect(other.rect.inflate(-2, -2)):
                 return False
 
+        # Move successful - apply snap if any
         self.x = new_x
         self.y = new_y
         self.rect.center = (self.x, self.y)

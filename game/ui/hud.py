@@ -20,9 +20,55 @@ class HUD:
         xpos = HUD_X + 12
 
         # Title
-        title = self.font_big.render("TANK 90", True, COLOR_YELLOW)
+        title = self.font_big.render("TANK 93", True, COLOR_YELLOW)
         screen.blit(title, (xpos, ypos))
-        ypos += 30
+        ypos += 26
+
+        # Joystick status (so user knows Joy-Con connected)
+        joy_count = len(game.joysticks) if hasattr(game, 'joysticks') else 0
+        if joy_count > 0:
+            joy_names = []
+            for js in game.joysticks:
+                try:
+                    n = js.get_name()
+                    if 'joy-con' in n.lower():
+                        # shorten
+                        if '(l)' in n.lower():
+                            joy_names.append("JC(L)")
+                        elif '(r)' in n.lower():
+                            joy_names.append("JC(R)")
+                        else:
+                            joy_names.append("JC")
+                    elif 'pro' in n.lower():
+                        joy_names.append("Pro")
+                    else:
+                        joy_names.append(n[:8])
+                except:
+                    joy_names.append("?")
+            joy_txt = self.font_small.render(f"Joy: {joy_count} {','.join(joy_names)}", True, (100,255,100))
+        else:
+            joy_txt = self.font_small.render("Joy: 0 (Press J to rescan)", True, (200,100,100))
+        screen.blit(joy_txt, (xpos, ypos))
+        ypos += 14
+        # Calibration status for Joy-Con fix - per side
+        try:
+            import game.settings as settings_mod
+            cal_lines = []
+            # Show per-side for debugging right issue
+            l_swap = getattr(settings_mod, 'JOYCON_L_SWAP', False)
+            l_invx = getattr(settings_mod, 'JOYCON_L_INVERT_X', False)
+            l_invy = getattr(settings_mod, 'JOYCON_L_INVERT_Y', False)
+            r_swap = getattr(settings_mod, 'JOYCON_R_SWAP', False)
+            r_invx = getattr(settings_mod, 'JOYCON_R_INVERT_X', False)
+            r_invy = getattr(settings_mod, 'JOYCON_R_INVERT_Y', False)
+            cal_lines.append(f"L:{'S' if l_swap else ''}{'X' if l_invx else ''}{'Y' if l_invy else '' or 'OK'}")
+            cal_lines.append(f"R:{'S' if r_swap else ''}{'X' if r_invx else ''}{'Y' if r_invy else '' or 'OK'}")
+            cal_txt = self.font_small.render("Cal " + " ".join(cal_lines) + " I:InvY U:InvX O:Swap", True, (255,200,100))
+            screen.blit(cal_txt, (xpos, ypos))
+            ypos += 14
+        except:
+            pass
+        ypos += 4
 
         # Level
         lvl_txt = self.font_mid.render(f"STAGE {game.current_level+1}", True, COLOR_WHITE)
@@ -116,10 +162,11 @@ class HUD:
         hints = [
             "P1: WASD+SPACE",
             "P2: ARROWS+ENTER",
-            "C/5: Insert Coin",
-            "1/2: Join (+10 Lives)",
+            "C/5: Coin 1/2: Join",
             "P: Pause ESC: Menu",
             "Joy: -:Coin +=Start",
+            "J:Rescan I:InvY U:InvX",
+            "O:Swap K:RotDpad",
         ]
         for h in hints:
             txt = self.font_small.render(h, True, (140,140,160))
@@ -167,7 +214,7 @@ class HUD:
         screen.fill(COLOR_BG)
         # title
         big_font = pygame.font.Font(None, 72)
-        title = big_font.render("TANK 90", True, COLOR_YELLOW)
+        title = big_font.render("TANK 93", True, COLOR_YELLOW)
         screen.blit(title, title.get_rect(center=(SCREEN_WIDTH//2, 160)))
         # subtitle
         small = pygame.font.Font(None, 28)
@@ -331,7 +378,7 @@ class HUD:
             overlay.fill((0,0,0,200))
             screen.blit(overlay, (0,100))
             lines = [
-                "HOW TO PLAY - TANK 90",
+                "HOW TO PLAY - TANK 93",
                 "",
                 "Goal: Protect your base (Eagle) and destroy all enemy tanks.",
                 "Movement: P1 WASD / P2 Arrows / Gamepad Stick / Joy-Con",

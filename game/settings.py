@@ -1,5 +1,5 @@
 """
-Tank 90 Enhanced - Settings
+Tank 93 Enhanced - Settings
 Designed for PC prototype with Switch portability in mind.
 """
 import pygame
@@ -113,6 +113,25 @@ CONTINUE_TIME = 15 * FPS  # 15 sec to continue
 COIN_KEYS = [pygame.K_c, pygame.K_5]  # MAME style: 5=coin, C=coin
 P1_START_KEYS = [pygame.K_1]
 P2_START_KEYS = [pygame.K_2]
+
+# Joy-Con Calibration - Both sides have 90° rotation bug per latest user report:
+# Right: Up->Right, Down->Left, Right->Down = 90° rotation = SWAP+INV_Y fix
+# Left: previously fixed with same SWAP+INV_Y
+JOYCON_INVERT_X = False
+JOYCON_INVERT_Y = True
+JOYCON_SWAP_AXES = True
+# Per Joy-Con - both use SWAP+INV_Y for 90° rotation
+JOYCON_L_INVERT_X = False
+JOYCON_L_INVERT_Y = True
+JOYCON_L_SWAP = True
+JOYCON_R_INVERT_X = False
+JOYCON_R_INVERT_Y = True
+JOYCON_R_SWAP = True
+# Rumble disabled per user request
+ENABLE_RUMBLE = False
+# D-pad mapping
+JOYCON_L_DPAD_MAP = {0: 'DOWN', 1: 'RIGHT', 2: 'UP', 3: 'LEFT'}
+JOYCON_R_FACE_MAP = {0: 'LEFT', 1: 'UP', 2: 'DOWN', 3: 'RIGHT'}
 
 # Directions
 DIRS = {
