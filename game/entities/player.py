@@ -51,44 +51,76 @@ class PlayerTank(Tank):
             return None
         moved = False
         dir_pressed = None
-        # Fix synced movement bug: P1 and P2 must have separate keys in 2P mode
-        # In 1P mode, allow both WASD and arrows for convenience
-        if num_players == 1:
-            # Single player can use either WASD or arrows
-            if keys[pygame.K_w] or keys[pygame.K_UP]:
-                dir_pressed = 'UP'
-            elif keys[pygame.K_s] or keys[pygame.K_DOWN]:
-                dir_pressed = 'DOWN'
-            elif keys[pygame.K_a] or keys[pygame.K_LEFT]:
-                dir_pressed = 'LEFT'
-            elif keys[pygame.K_d] or keys[pygame.K_RIGHT]:
-                dir_pressed = 'RIGHT'
-        else:
-            # 2P mode: separate controls - P1 WASD, P2 Arrows (no cross)
-            if self.player_id == 1:
-                if keys[pygame.K_w]:
-                    dir_pressed = 'UP'
-                elif keys[pygame.K_s]:
-                    dir_pressed = 'DOWN'
-                elif keys[pygame.K_a]:
-                    dir_pressed = 'LEFT'
-                elif keys[pygame.K_d]:
-                    dir_pressed = 'RIGHT'
-            else:  # P2
-                if keys[pygame.K_UP]:
-                    dir_pressed = 'UP'
-                elif keys[pygame.K_DOWN]:
-                    dir_pressed = 'DOWN'
-                elif keys[pygame.K_LEFT]:
-                    dir_pressed = 'LEFT'
-                elif keys[pygame.K_RIGHT]:
-                    dir_pressed = 'RIGHT'
+        shoot = False
 
-        # shoot: separate for P1/P2 to avoid sync
-        if self.player_id == 1:
-            shoot = keys[pygame.K_SPACE] or keys[pygame.K_LCTRL] or keys[pygame.K_f]
-        else:
-            shoot = keys[pygame.K_RETURN] or keys[pygame.K_RCTRL] or keys[pygame.K_m]
+        # FIX for cross-control: left controller affects right via OS keyboard mapping
+        # If joystick present for this player in 2P mode, ignore keyboard to prevent cross via arrow/WASD emulation
+        # In 1P mode, allow both for convenience
+        use_keyboard = True
+        if num_players == 2 and joystick is not None:
+            # In 2P with joystick, ignore keyboard to prevent left Joy-Con generating arrow keys affecting P2 etc
+            # Only use keyboard if joystick is idle and no buttons pressed (to allow fallback)
+            # Check if joystick has any significant input
+            has_joy_input = False
+            try:
+                if joystick.get_numaxes() >= 2:
+                    if abs(joystick.get_axis(0)) > 0.25 or abs(joystick.get_axis(1)) > 0.25:
+                        has_joy_input = True
+                if joystick.get_numbuttons() > 0:
+                    for b in range(min(joystick.get_numbuttons(), 12)):
+                        if joystick.get_button(b):
+                            has_joy_input = True
+                            break
+            except:
+                pass
+            # If joystick has input, ignore keyboard for this player to prevent cross
+            if has_joy_input:
+                use_keyboard = False
+            else:
+                # Even if idle, in 2P mode with 2 joysticks, ignore keyboard to prevent cross via OS mapping
+                # Only allow keyboard if player has NO joystick
+                # Actually, if we have 2 joysticks (L and R), both players have joystick, so both should ignore keyboard
+                # This prevents left Joy-Con generating arrow keys that would move P2
+                if len([j for j in [joystick] if j is not None]) > 0:
+                    # Player has joystick assigned, ignore keyboard for movement to avoid cross
+                    # Keep shoot from keyboard as backup? No, also ignore shoot keyboard to avoid cross
+                    use_keyboard = False
+
+        if use_keyboard:
+            if num_players == 1:
+                if keys[pygame.K_w] or keys[pygame.K_UP]:
+                    dir_pressed = 'UP'
+                elif keys[pygame.K_s] or keys[pygame.K_DOWN]:
+                    dir_pressed = 'DOWN'
+                elif keys[pygame.K_a] or keys[pygame.K_LEFT]:
+                    dir_pressed = 'LEFT'
+                elif keys[pygame.K_d] or keys[pygame.K_RIGHT]:
+                    dir_pressed = 'RIGHT'
+            else:
+                if self.player_id == 1:
+                    if keys[pygame.K_w]:
+                        dir_pressed = 'UP'
+                    elif keys[pygame.K_s]:
+                        dir_pressed = 'DOWN'
+                    elif keys[pygame.K_a]:
+                        dir_pressed = 'LEFT'
+                    elif keys[pygame.K_d]:
+                        dir_pressed = 'RIGHT'
+                else:
+                    if keys[pygame.K_UP]:
+                        dir_pressed = 'UP'
+                    elif keys[pygame.K_DOWN]:
+                        dir_pressed = 'DOWN'
+                    elif keys[pygame.K_LEFT]:
+                        dir_pressed = 'LEFT'
+                    elif keys[pygame.K_RIGHT]:
+                        dir_pressed = 'RIGHT'
+
+            # shoot from keyboard only if using keyboard
+            if self.player_id == 1:
+                shoot = keys[pygame.K_SPACE] or keys[pygame.K_LCTRL] or keys[pygame.K_f]
+            else:
+                shoot = keys[pygame.K_RETURN] or keys[pygame.K_RCTRL] or keys[pygame.K_m]
 
         # joystick handling - supports Joy-Con, Pro Controller, Xbox, PS - FIXED for 2P sync and cross-rumble
         joy_btn_dir_idx = None
@@ -103,18 +135,29 @@ class PlayerTank(Tank):
                 num_axes = joystick.get_numaxes()
                 ax = ay = 0
 
-                # === Combined Joy-Con (L/R) split for 2P: left stick for P1, right stick for P2 ===
+                # === Combined Joy-Con (L/R) split for 2P: TRY SWAPPED to fix left affects right ===
+                # User reports left controller affects right, suggests left stick might be axes 2,3 not 0,1
                 if is_combined and num_players == 2:
                     if self.player_id == 1:
-                        # P1 uses left stick axes 0,1
-                        if num_axes >= 2:
-                            ax = joystick.get_axis(0)
-                            ay = joystick.get_axis(1)
-                    else:
-                        # P2 uses right stick axes 2,3
+                        # P1 uses right stick axes 2,3 (try swapped) - if left affects right, left is actually 2,3
                         if num_axes >= 4:
                             ax = joystick.get_axis(2)
                             ay = joystick.get_axis(3)
+                            # Fallback to 0,1 if no movement
+                            if abs(ax) < 0.3 and abs(ay) < 0.3:
+                                ax = joystick.get_axis(0)
+                                ay = joystick.get_axis(1)
+                        else:
+                            ax = joystick.get_axis(0)
+                            ay = joystick.get_axis(1)
+                    else:
+                        # P2 uses left stick axes 0,1
+                        if num_axes >= 2:
+                            ax = joystick.get_axis(0)
+                            ay = joystick.get_axis(1)
+                            if abs(ax) < 0.3 and abs(ay) < 0.3 and num_axes >= 4:
+                                ax = joystick.get_axis(2)
+                                ay = joystick.get_axis(3)
                         else:
                             ax = joystick.get_axis(0)
                             ay = joystick.get_axis(1)

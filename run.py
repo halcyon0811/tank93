@@ -8,7 +8,7 @@ except ImportError:
     sys.exit(1)
 
 from game.game import Game
-print("Starting Tank 90 Enhanced...")
+print("Starting Tank 93 Enhanced...")
 print("P1: WASD+SPACE, P2: ARROWS+ENTER, P=Pause, ESC=Menu")
 game = Game()
 game.run()

@@ -20,7 +20,7 @@ class HUD:
         xpos = HUD_X + 12
 
         # Title
-        title = self.font_big.render("TANK 90", True, COLOR_YELLOW)
+        title = self.font_big.render("TANK 93", True, COLOR_YELLOW)
         screen.blit(title, (xpos, ypos))
         ypos += 26
 
@@ -214,7 +214,7 @@ class HUD:
         screen.fill(COLOR_BG)
         # title
         big_font = pygame.font.Font(None, 72)
-        title = big_font.render("TANK 90", True, COLOR_YELLOW)
+        title = big_font.render("TANK 93", True, COLOR_YELLOW)
         screen.blit(title, title.get_rect(center=(SCREEN_WIDTH//2, 160)))
         # subtitle
         small = pygame.font.Font(None, 28)
@@ -264,7 +264,7 @@ class HUD:
             overlay.fill((0,0,0,200))
             screen.blit(overlay, (0,100))
             lines = [
-                "HOW TO PLAY - TANK 90",
+                "HOW TO PLAY - TANK 93",
                 "",
                 "Goal: Protect your base (Eagle) and destroy all enemy tanks.",
                 "Movement: P1 WASD / P2 Arrows / Gamepad Stick / Joy-Con",

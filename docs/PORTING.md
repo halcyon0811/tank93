@@ -47,7 +47,7 @@ Will need save high score. Use:
 
 ## Performance Tips for Switch (Tegra X1)
 
-- Tank 90 is cheap: < 100 draw calls even unoptimized -> fine for Switch
+- Tank 93 is cheap: < 100 draw calls even unoptimized -> fine for Switch
 - Keep 60fps: limit particles to 100, use object pool
 - Use sprite atlas not individual draws (our Pygame draws rects - faster on Switch with atlas)
 

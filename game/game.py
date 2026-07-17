@@ -56,7 +56,7 @@ class Game:
             pass
 
         self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-        pygame.display.set_caption("Tank 90 Enhanced - Battle City Tribute")
+        pygame.display.set_caption("Tank 93 Enhanced - Battle City Tribute")
         self.clock = pygame.time.Clock()
         self.hud = HUD()
 
@@ -463,22 +463,17 @@ class Game:
                     self.rescan_joysticks()
                 if event.key == pygame.K_i:
                     import game.settings as settings_module
-                    settings_module.JOYCON_INVERT_Y = not settings_module.JOYCON_INVERT_Y
-                    settings_module.JOYCON_L_INVERT_Y = not getattr(settings_module, 'JOYCON_L_INVERT_Y', True)
+                    # Only toggle RIGHT for now since LEFT is correct per user
                     settings_module.JOYCON_R_INVERT_Y = not getattr(settings_module, 'JOYCON_R_INVERT_Y', True)
-                    print(f"Joy-Con Invert Y toggled: Global {settings_module.JOYCON_INVERT_Y}, L {settings_module.JOYCON_L_INVERT_Y}, R {settings_module.JOYCON_R_INVERT_Y} (UP/DOWN swap)")
+                    print(f"RIGHT Joy-Con Invert Y toggled: R {settings_module.JOYCON_R_INVERT_Y} (UP/DOWN) - LEFT stays correct")
                 if event.key == pygame.K_u:
                     import game.settings as settings_module
-                    settings_module.JOYCON_INVERT_X = not settings_module.JOYCON_INVERT_X
-                    settings_module.JOYCON_L_INVERT_X = not getattr(settings_module, 'JOYCON_L_INVERT_X', False)
                     settings_module.JOYCON_R_INVERT_X = not getattr(settings_module, 'JOYCON_R_INVERT_X', True)
-                    print(f"Joy-Con Invert X toggled: Global {settings_module.JOYCON_INVERT_X}, L {settings_module.JOYCON_L_INVERT_X}, R {settings_module.JOYCON_R_INVERT_X} (LEFT/RIGHT swap)")
+                    print(f"RIGHT Joy-Con Invert X toggled: R {settings_module.JOYCON_R_INVERT_X} (LEFT/RIGHT)")
                 if event.key == pygame.K_o:
                     import game.settings as settings_module
-                    settings_module.JOYCON_SWAP_AXES = not settings_module.JOYCON_SWAP_AXES
-                    settings_module.JOYCON_L_SWAP = not getattr(settings_module, 'JOYCON_L_SWAP', True)
-                    settings_module.JOYCON_R_SWAP = not getattr(settings_module, 'JOYCON_R_SWAP', False)
-                    print(f"Joy-Con Swap Axes toggled: Global {settings_module.JOYCON_SWAP_AXES}, L {settings_module.JOYCON_L_SWAP}, R {settings_module.JOYCON_R_SWAP} (LEFT/RIGHT <-> UP/DOWN)")
+                    settings_module.JOYCON_R_SWAP = not getattr(settings_module, 'JOYCON_R_SWAP', True)
+                    print(f"RIGHT Joy-Con Swap toggled: R {settings_module.JOYCON_R_SWAP} (UP/DOWN <-> LEFT/RIGHT)")
                 if event.key == pygame.K_k:
                     # Cycle D-pad mapping for Joy-Con L if directions wrong
                     import game.settings as settings_module

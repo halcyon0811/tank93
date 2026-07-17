@@ -1,5 +1,5 @@
 """
-Tank 90 Enhanced - Settings
+Tank 93 Enhanced - Settings
 Designed for PC prototype with Switch portability in mind.
 """
 import pygame

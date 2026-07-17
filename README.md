@@ -1,4 +1,4 @@
-# Tank 90 Enhanced - Battle City Tribute
+# Tank 93 Enhanced - Battle City Tribute
 
 A modernized Tank 1990 / Battle City clone built with Pygame. Designed as a **PC prototype** structured for easy porting to **Nintendo Switch** (via Godot/Unity + Nintendo SDK).
 
@@ -48,7 +48,7 @@ Nintendo Switch mapping (when ported):
 ## Project Structure (Switch-Port Ready)
 
 ```
-tank90/
+tank93/
 ├── main.py              # Entry point
 ├── game/
 │   ├── settings.py      # All constants - single source of truth for porting
@@ -117,7 +117,7 @@ tank90/
 
 This is a tribute/fan project inspired by Battle City (Namco 1985). Original sprites/game design belong to respective owners. For eShop publishing, you must:
 - Use original art/music (not ripped from Battle City)
-- Rename (e.g., "Tank 90: Steel Defense")
+- Rename (e.g., "Tank 93: Steel Defense")
 - Our assets here are original geometric shapes - safe for commercial use
 
 Enjoy! 
