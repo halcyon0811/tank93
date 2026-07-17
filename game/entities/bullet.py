@@ -41,21 +41,39 @@ class Bullet:
             self.alive = False
             return 'out'
 
-        # tile collision
+        # tile collision - authentic NES sounds: brick break crack, steel clang, forest cut (no sound), etc.
         gx = int((self.x - PLAYFIELD_X) // TILE_SIZE)
         gy = int((self.y - PLAYFIELD_Y) // TILE_SIZE)
         if 0 <= gx < GRID_W and 0 <= gy < GRID_H:
             tt = tilemap.tiles[gy][gx]
             if tt == TILE_BRICK:
-                tilemap.destroy_tile(gx, gy, self.power)
+                destroyed = tilemap.destroy_tile(gx, gy, self.power)
                 self.alive = False
+                # SFX: brick break vs hit
+                try:
+                    from ..sound_manager import sound_manager
+                    if destroyed:
+                        sound_manager.play_brick_break()
+                    else:
+                        sound_manager.play_hit_brick()
+                    # Update tile type score: Battle City brick break count kept? Our maps count bricks across 35 stages
+                    sound_manager.brick_break_count += 1
+                except:
+                    pass
                 return 'hit_brick'
             elif tt == TILE_STEEL:
+                destroyed = False
                 if self.power >= 2:
-                    tilemap.destroy_tile(gx, gy, self.power)
+                    destroyed = tilemap.destroy_tile(gx, gy, self.power)
                 self.alive = False
+                try:
+                    from ..sound_manager import sound_manager
+                    sound_manager.play_hit_steel()
+                    if destroyed:
+                        sound_manager.play_brick_break()
+                except:
+                    pass
                 return 'hit_steel'
-            # water, grass, ice pass through
 
         # base collision
         if base and base.alive:
@@ -64,27 +82,37 @@ class Bullet:
                 self.alive = False
                 return 'hit_base'
 
-        # tank collision
+        # tank collision + explosion SFX (authentic NES)
         for tank in tanks:
             if not tank.alive or tank.invulnerable_timer > 0:
                 continue
-            # don't hit own owner type if same? enemy can hit enemy? No friendly fire for same team
             if self.owner.startswith('player') and tank.is_player:
                 if getattr(tank, 'player_id', None) and self.owner == f"player{tank.player_id}":
-                    continue  # skip self
-                # allow player to hit player? No, for co-op disable
+                    continue
                 if tank.is_player:
                     continue
             if self.owner == 'enemy' and not tank.is_player:
                 continue
 
             if tank.rect.collidepoint(self.x, self.y):
-                # armor check
                 if not tank.take_damage(self.power):
-                    # blocked by armor/helmet
+                    # blocked by armor/helmet - play hit sound
                     self.alive = False
+                    try:
+                        from ..sound_manager import sound_manager
+                        sound_manager.play_hit_brick()  # blocked = same as hit
+                    except:
+                        pass
                     return 'blocked'
                 self.alive = False
+                # Play explosion for tank hit
+                try:
+                    from ..sound_manager import sound_manager
+                    # If armor tank that flashes (original had 4 hits), play hit not full explosion? But tank will be dead only when health 0, particle handles
+                    if not tank.alive:
+                        sound_manager.play_explosion(big=(getattr(tank, 'enemy_type','')=='armor'))
+                except:
+                    pass
                 return 'hit_tank'
 
         return None

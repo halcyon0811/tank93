@@ -145,6 +145,12 @@ class EnemyTank(Tank):
         b = Bullet(sx, sy, self.direction, 'enemy', power=self.bullet_power, color=(255, 100, 100))
         self.bullets.append(b)
         self.cooldown = random.randint(40, 90)
+        try:
+            from ..sound_manager import sound_manager
+            # Enemy shoot slightly quieter
+            sound_manager.play_shoot()
+        except:
+            pass
         return b
 
     def take_damage(self, power=1):

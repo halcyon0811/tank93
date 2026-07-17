@@ -12,8 +12,12 @@ Classic Battle City + modern twists:
 
 - **1-2P Local Co-op** (Joy-Con ready): WASD + Arrows + Gamepad support
 - **4 Enemy Types**: Basic (gray), Fast (blue), Power (red), Armor (4HP)
-- **5 Handcrafted Stages** with increasing difficulty
-- **Tile Types**: Brick (breakable), Steel (needs power gun), Water (blocked), Forest (hide), Ice (slippery)
+- **35 Original NES Battle City Maps** integrated (13x13 tokens -> 26x26 precise with half-brick support)
+  - Brick `Bf/B3/Bc/B5/Ba` (full/top/bottom/left/right half), Steel `Tf/T3/Tc/T5/Ta` (bitmask 1=TL 2=TR 4=BL 8=BR), Water `R`, Forest `F`, Ice `S`, Eagle `E`
+  - Authentic enemy queues per stage: Stage1 18*basic 2*fast … Stage35 4*power 6*fast 10*armor (700 enemies total)
+  - Source: `feichao93/battle-city` 1.9k⭐, parser from `StageConfig.ts`
+  - Plus 5 fallback handcrafted stages if module missing
+- **Tile Types**: Brick (breakable, quarter/half/full), Steel (needs power gun, half support), Water (blocked tank, bullet passes), Forest (overlay hides), Ice (slippery 1.3x)
 - **7 Power-ups**: 
   - ⭐ Star = upgrade (speed + steel-breaking gun)
   - Helmet = 10s shield
@@ -24,7 +28,8 @@ Classic Battle City + modern twists:
   - Gun = power bullets
 - **Modernized Pixel Art**: HD rendering while keeping retro feel
 - **Juicy Effects**: Explosions, spawn effects, tracers, screen shake ready
-- **Data-driven Levels**: 13x13 big-tile system like original NES
+- **Data-driven Levels**: 26x26 precise (13x13 big-tile + half-brick `B3/Bc` + steel `T3/Tc` support like original NES RAM 0x005C: 0x0-0x4 brick, 0x5-0x9 steel, 0xA water, 0xB forest, 0xC ice)
+- **Full 35 Stage Campaign**: 700 enemies with authentic difficulty curve (see `docs/CLASSIC_MAPS_RESEARCH.md`)
 
 ## Quick Start
 

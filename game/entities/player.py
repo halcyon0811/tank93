@@ -187,6 +187,12 @@ class PlayerTank(Tank):
         bullet = Bullet(sx, sy, self.direction, f"player{self.player_id}", power=self.bullet_power, color=color)
         self.bullets.append(bullet)
         self.cooldown = 15 if self.star_level >=1 else 20
+        # Classic Battle City shoot SFX (8-bit pew) + screen shake for power
+        try:
+            from ..sound_manager import sound_manager
+            sound_manager.play_shoot()
+        except:
+            pass
         return bullet
 
     def update(self, tilemap, other_tanks):

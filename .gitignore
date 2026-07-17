@@ -5,6 +5,7 @@ __pycache__/
 .Python
 env/
 venv/
+.venv/
 .env
 .DS_Store
 build/
@@ -12,3 +13,10 @@ dist/
 *.nsp
 *.nro
 switch/
+# Large temp wav duplicates - keep only final
+game/assets/music/intro.wav
+game/assets/music/intro_pcm.wav
+game/assets/sounds/intro.wav
+game/assets/sounds/battle_city_intro.wav
+game/assets/sounds/battle_city_intro.ogg
+game/assets/sounds/battle_city_intro_classic.wav

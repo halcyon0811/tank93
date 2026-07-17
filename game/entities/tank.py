@@ -1,6 +1,16 @@
 import pygame
 import random
+import pathlib
 from ..settings import *
+
+# Try to load authentic NES sprite sheet
+try:
+    from ..assets.sprites import get_tank_sprite_scaled
+    HAS_AUTHENTIC_SPRITES = True
+except Exception:
+    HAS_AUTHENTIC_SPRITES = False
+    def get_tank_sprite_scaled(*a, **k):
+        return None
 
 class Tank:
     def __init__(self, grid_x, grid_y, color, is_player=False):
@@ -130,58 +140,142 @@ class Tank:
     def draw(self, screen):
         if not self.alive:
             return
-        # flicker if invulnerable
-        if self.invulnerable_timer > 0 and (self.invulnerable_timer // 4) % 2 == 0:
-            # draw shield circle instead of flicker hide
-            pygame.draw.circle(screen, (80, 180, 255), self.rect.center, TANK_SIZE//2+6, 2)
 
+        # If authentic NES sprites available, use them for true retro look matching downloaded_maps
+        # This matches General-Sprites.png ripped from NES ROM (yellow player, green P2, silver enemy, red power)
+        shield_flicker = self.invulnerable_timer > 0 and (self.invulnerable_timer // 4) % 2 == 0
+        if shield_flicker:
+            # draw shield (NES had blinking shield)
+            pygame.draw.circle(screen, (200,200,200), self.rect.center, TANK_SIZE//2+6, 2)
+
+        # Determine which sprite color to use based on downloaded_maps + original NES sheet
+        # P1 = yellow, P2 = green, Enemy basic = silver (gray), fast = gray but faster, power = red, armor = red/purple (we use red)
+        # Star levels: for player, increasing power shows bigger gun – we will map level to sprite row
+        sprite_color = None
+        sprite_level = 0
+
+        # Check for powerup carrier flashing (original NES flashes red/silver) – we already flash red in subclass but here handle base
+        is_powerup_flash = getattr(self, 'powerup_carrier', False) and getattr(self, 'flash_timer', 0) % 16 < 8 and hasattr(self, 'flash_timer') and ((self.flash_timer // 8) % 2 == 0) if hasattr(self, 'flash_timer') else False
+
+        if self.is_player:
+            # P1 yellow, P2 green
+            pid = getattr(self, 'player_id', 1)
+            if pid == 1:
+                sprite_color = 'yellow'
+            else:
+                sprite_color = 'green'
+            # star level mapping: 0 basic (small gun), 1 fast? Actually armor level shows bigger? Use star_level as level index
+            sprite_level = getattr(self, 'star_level', 0)  # 0-3
+        else:
+            # enemy
+            etype = getattr(self, 'enemy_type', 'basic')
+            if etype == 'basic':
+                sprite_color = 'silver'
+                sprite_level = 0
+            elif etype == 'fast':
+                sprite_color = 'silver'  # same but faster – in NES fast is same gray but we could offset?
+                sprite_level = 1
+            elif etype == 'power':
+                sprite_color = 'red'
+                sprite_level = 0
+            elif etype == 'armor':
+                sprite_color = 'red'
+                # armor health 4 -> 1 etc. map to row for visual damage? Use health-1 inverse? Let's use 4-health as level for armor stages
+                hp = getattr(self, 'health', 1)
+                sprite_level = max(0, 4 - hp)  # 0 = full, 3 = damaged but in NES armor uses same sprite with flashing colors
+            else:
+                sprite_color = 'silver'
+
+            # flashing red for powerup carrier (like original)
+            if getattr(self, 'powerup_carrier', False):
+                # original flashes red/silver every 8 frames
+                if (getattr(self, 'flash_timer', 0) // 8) % 2 == 0:
+                    sprite_color = 'red'
+
+        # Try authentic sprite - now with verified DIR_OFFSETS UP,RIGHT,DOWN,LEFT *2 frames
+        if HAS_AUTHENTIC_SPRITES and sprite_color:
+            try:
+                # Anim frame based on movement (tread animation) - NES toggles every ~8 frames
+                anim = 0
+                if hasattr(self, 'move_timer') and self.move_timer:
+                    # use move_timer // 6 for faster tread like NES (2 frames)
+                    anim = (self.move_timer // 6) % 2
+
+                # For authentic retro tanks we also want to mirror powerup flashing like original (red/silver flashing)
+                # Already handled color flashing above
+
+                # Get sprite scaled to TANK_SIZE (32 -> 16*2) using cached version for perf
+                from ..assets.sprites import get_cached_tank
+                spr = get_cached_tank(sprite_color, self.direction, anim, sprite_level, TANK_SIZE)
+                if spr is None:
+                    # fallback to non-cached
+                    from ..assets.sprites import get_tank_sprite_scaled as _g
+                    spr = _g(sprite_color, self.direction, anim_frame=anim, level=sprite_level, size=TANK_SIZE)
+                if spr is not None:
+                    # flicker when invulnerable (original NES tanks blink when spawn protection)
+                    if shield_flicker and self.invulnerable_timer % 8 < 4:
+                        # skip draw for blink effect - draw only shield already
+                        pass
+                    else:
+                        # Center blit
+                        rect = spr.get_rect(center=self.rect.center)
+                        screen.blit(spr, rect)
+
+                        # player indicator small
+                        if self.is_player:
+                            pid = getattr(self, 'player_id', 1)
+                            # small P1/P2 label above like NES?
+                            # In original NES, no label, but we keep for co-op clarity small
+                            font = pygame.font.Font(None, 14)
+                            txt = font.render(f"P{pid}", True, COLOR_WHITE if pid==1 else (100,255,100))
+                            # background black
+                            txt_bg = pygame.Surface((txt.get_width()+4, txt.get_height()+2))
+                            txt_bg.fill((0,0,0))
+                            screen.blit(txt_bg, (self.rect.centerx - txt.get_width()//2 -2, self.rect.top - 14))
+                            screen.blit(txt, (self.rect.centerx - txt.get_width()//2, self.rect.top - 14))
+
+                        # armor health bar for armor tanks (keep for gameplay clarity)
+                        if getattr(self, 'enemy_type', '') == 'armor' and getattr(self, 'health',1) > 1 and not self.is_player:
+                            bar_w = 20
+                            bar_h = 4
+                            cx = self.rect.centerx
+                            cy = self.rect.bottom + 2
+                            pygame.draw.rect(screen, (0,0,0), (cx-bar_w//2-1, cy-1, bar_w+2, bar_h+2))
+                            pygame.draw.rect(screen, (60,60,60), (cx-bar_w//2, cy, bar_w, bar_h))
+                            # green to red based on health
+                            frac = self.health / 4.0
+                            col = (int(255*(1-frac)), int(255*frac), 0)
+                            pygame.draw.rect(screen, col, (cx-bar_w//2, cy, int(bar_w*frac), bar_h))
+
+                    return  # authentic sprite drawn, skip fallback
+            except Exception as e:
+                # fallback to procedural if sprite fails
+                # print(f"Sprite draw error {e}")
+                pass
+
+        # ---- Fallback procedural retro (if sheet missing) ----
         cx, cy = self.rect.center
         size = TANK_SIZE - 6
 
         # shadow
-        pygame.draw.rect(screen, (0,0,0, 100), (cx - size//2 +2, cy - size//2 +4, size, size), border_radius=3)
+        # pygame.draw.rect(screen, (0,0,0, 100), (cx - size//2 +2, cy - size//2 +4, size, size), border_radius=3)
 
-        # tracks
-        track_color = (40,40,40)
-        pygame.draw.rect(screen, track_color, (cx - size//2 -2, cy - size//2, 6, size), border_radius=2)
-        pygame.draw.rect(screen, track_color, (cx + size//2 -4, cy - size//2, 6, size), border_radius=2)
-        # track animation dots
-        if self.move_timer % 4 == 0:
-            pygame.draw.rect(screen, (80,80,80), (cx - size//2, cy - size//2 + int(self.track_offset) % size, 2, 4))
-            pygame.draw.rect(screen, (80,80,80), (cx + size//2 -2, cy - size//2 + (int(self.track_offset)+4) % size, 2, 4))
-
-        # body
-        body_rect = pygame.Rect(0,0,size-8, size-6)
+        # Modern simplified fallback that resembles NES yellow/gray etc.
+        # Body color already set via self.color (yellow/green/silver/red)
+        body_rect = pygame.Rect(0,0,size-4, size-4)
         body_rect.center = (cx, cy)
-        pygame.draw.rect(screen, self.color, body_rect, border_radius=4)
-        pygame.draw.rect(screen, (0,0,0), body_rect, 2, border_radius=4)
-        # highlight
-        pygame.draw.rect(screen, (255,255,255, 120), (body_rect.x+2, body_rect.y+2, body_rect.w-4, 4), border_radius=2)
-
-        # turret/cannon
-        cannon_len = 14
-        cannon_w = 5
+        pygame.draw.rect(screen, self.color, body_rect)
+        pygame.draw.rect(screen, COLOR_BLACK, body_rect, 2)
+        # turret
+        cannon_len = 12
+        cannon_w = 4
         if self.direction == 'UP':
-            pygame.draw.rect(screen, (30,30,30), (cx - cannon_w//2, cy - size//2 -2, cannon_w, cannon_len))
-            pygame.draw.circle(screen, (20,20,20), (cx, cy), 6)
+            pygame.draw.rect(screen, (30,30,30), (cx - cannon_w//2, cy - size//2, cannon_w, cannon_len))
         elif self.direction == 'DOWN':
-            pygame.draw.rect(screen, (30,30,30), (cx - cannon_w//2, cy + size//2 - cannon_len +2, cannon_w, cannon_len))
-            pygame.draw.circle(screen, (20,20,20), (cx, cy), 6)
+            pygame.draw.rect(screen, (30,30,30), (cx - cannon_w//2, cy + size//2 - cannon_len, cannon_w, cannon_len))
         elif self.direction == 'LEFT':
-            pygame.draw.rect(screen, (30,30,30), (cx - size//2 -2, cy - cannon_w//2, cannon_len, cannon_w))
-            pygame.draw.circle(screen, (20,20,20), (cx, cy), 6)
+            pygame.draw.rect(screen, (30,30,30), (cx - size//2, cy - cannon_w//2, cannon_len, cannon_w))
         elif self.direction == 'RIGHT':
-            pygame.draw.rect(screen, (30,30,30), (cx + size//2 - cannon_len +2, cy - cannon_w//2, cannon_len, cannon_w))
-            pygame.draw.circle(screen, (20,20,20), (cx, cy), 6)
-
-        # player indicator
-        if self.is_player:
-            pid = getattr(self, 'player_id', 1)
-            # small crown
-            font = pygame.font.Font(None, 16)
-            txt = font.render(f"P{pid}", True, COLOR_WHITE)
-            screen.blit(txt, (cx-6, cy - size//2 -14))
-
-        # flash for high power gun
-        if self.bullet_power >= 2:
-            pygame.draw.circle(screen, COLOR_YELLOW, (cx, cy), 3)
+            pygame.draw.rect(screen, (30,30,30), (cx + size//2 - cannon_len, cy - cannon_w//2, cannon_len, cannon_w))
+        # eagle turret center
+        pygame.draw.circle(screen, (20,20,20), (cx, cy), 4)

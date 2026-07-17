@@ -187,29 +187,143 @@ class HUD:
         pygame.draw.rect(screen, (30,30,30), (SCREEN_WIDTH//2 + 38, 240, 4, 20))
 
         options_main = [
-            "1 PLAYER",
-            "2 PLAYERS CO-OP",
-            "LEVEL SELECT",
+            "1 PLAYER (35 STAGES)",
+            "2 PLAYERS CO-OP (35 STAGES)",
+            "LEVEL SELECT - 35 ORIGINAL NES MAPS",
             "HOW TO PLAY",
             "QUIT",
         ]
-        options_level = [f"STAGE {i+1}" for i in range(5)] + ["BACK"]
-        options = options_level if mode == 'level' else options_main
 
-        for i, opt in enumerate(options):
-            color = COLOR_YELLOW if i == selected else (200,200,200)
-            font = pygame.font.Font(None, 38) if i == selected else pygame.font.Font(None, 32)
-            txt = font.render(opt, True, color)
-            y = 340 + i*44
-            # selector arrow
-            if i == selected:
-                arrow = pygame.font.Font(None, 32).render(">", True, COLOR_YELLOW)
-                screen.blit(arrow, (SCREEN_WIDTH//2 - 130, y))
-            screen.blit(txt, txt.get_rect(center=(SCREEN_WIDTH//2, y)))
+        # Try to get total stage count from battle_city module (35)
+        try:
+            from ..levels.battle_city import STAGE_COUNT as TOTAL_STAGES, BOTS_RAW as BOTS_RAW_ALL, LEVELS_13 as LVLS_13_PREVIEW
+        except ImportError:
+            try:
+                from ..tilemap import ORIGINAL_STAGE_COUNT as TOTAL_STAGES
+                from ..tilemap import BOTS_RAW_ORIGINAL as BOTS_RAW_ALL, LEVELS_13_ORIGINAL as LVLS_13_PREVIEW
+            except ImportError:
+                TOTAL_STAGES = 5
+                BOTS_RAW_ALL = []
+                LVLS_13_PREVIEW = []
 
-        # footer for publishing info
-        footer = pygame.font.Font(None, 20).render("Prototype for PC - Nintendo Switch port requires Unity/Godot + Nintendo SDK", True, (100,100,120))
+        if mode == 'main':
+            options = options_main
+            for i, opt in enumerate(options):
+                color = COLOR_YELLOW if i == selected else (200,200,200)
+                font = pygame.font.Font(None, 38) if i == selected else pygame.font.Font(None, 32)
+                txt = font.render(opt, True, color)
+                y = 340 + i*44
+                if i == selected:
+                    arrow = pygame.font.Font(None, 32).render(">", True, COLOR_YELLOW)
+                    screen.blit(arrow, (SCREEN_WIDTH//2 - 160, y))
+                screen.blit(txt, txt.get_rect(center=(SCREEN_WIDTH//2, y)))
+        elif mode == 'level':
+            # Header
+            header_font = pygame.font.Font(None, 30)
+            header = header_font.render(f"SELECT STAGE - {TOTAL_STAGES} ORIGINAL NES MAPS (Arrows:Move L/R:+5 PgUp/Dn:+10)", True, COLOR_WHITE)
+            screen.blit(header, header.get_rect(center=(SCREEN_WIDTH//2, 315)))
+
+            # Grid layout 7 cols x 5 rows for 35 stages
+            cols = 7
+            cell_w, cell_h = 104, 38
+            gap_x, gap_y = 10, 8
+            grid_w = cols*cell_w + (cols-1)*gap_x
+            start_x = SCREEN_WIDTH//2 - grid_w//2
+            start_y = 340
+
+            # draw stage cells 0..TOTAL_STAGES-1
+            for idx in range(TOTAL_STAGES):
+                c = idx % cols
+                r = idx // cols
+                x = start_x + c*(cell_w+gap_x)
+                y = start_y + r*(cell_h+gap_y)
+                is_sel = (selected == idx)
+                # box
+                bg_col = (60,60,90) if not is_sel else COLOR_YELLOW
+                border_col = COLOR_WHITE if not is_sel else COLOR_BLACK
+                pygame.draw.rect(screen, bg_col, (x, y, cell_w, cell_h), border_radius=6)
+                pygame.draw.rect(screen, border_col, (x, y, cell_w, cell_h), 2, border_radius=6)
+                # text
+                txt_color = COLOR_BLACK if is_sel else COLOR_WHITE
+                f = pygame.font.Font(None, 26) if is_sel else pygame.font.Font(None, 22)
+                label = f"STAGE {idx+1}"
+                txt_surf = f.render(label, True, txt_color)
+                screen.blit(txt_surf, txt_surf.get_rect(center=(x+cell_w//2, y+cell_h//2 - 6)))
+                # small difficulty hint: count armor
+                if BOTS_RAW_ALL and idx < len(BOTS_RAW_ALL):
+                    # parse armor count
+                    raw = BOTS_RAW_ALL[idx]
+                    # e.g. ['18*basic','2*fast'] -> compact
+                    tiny = self.font_small.render(" ".join(raw), True, (200,200,100) if not is_sel else (40,40,20))
+                    # truncate to fit
+                    # Scale down font to 14 for fit
+                    # We'll just show first 12 chars
+                    screen.blit(tiny, (x+6, y+cell_h-14))
+
+            # BACK button below grid
+            back_idx = TOTAL_STAGES
+            is_back_sel = (selected == back_idx)
+            back_y = start_y + 5*(cell_h+gap_y) + 12
+            back_x = SCREEN_WIDTH//2 - cell_w//2
+            pygame.draw.rect(screen, (90,40,40) if not is_back_sel else COLOR_YELLOW, (back_x, back_y, cell_w, cell_h), border_radius=6)
+            pygame.draw.rect(screen, (200,100,100) if not is_back_sel else COLOR_BLACK, (back_x, back_y, cell_w, cell_h), 2, border_radius=6)
+            back_col = COLOR_WHITE if not is_back_sel else COLOR_BLACK
+            back_txt = pygame.font.Font(None, 24).render("BACK", True, back_col)
+            screen.blit(back_txt, back_txt.get_rect(center=(back_x+cell_w//2, back_y+cell_h//2)))
+            if is_back_sel:
+                arrow = pygame.font.Font(None, 28).render(">", True, COLOR_YELLOW)
+                screen.blit(arrow, (back_x-20, back_y+8))
+
+            # Preview panel for selected stage (if not BACK)
+            if selected < TOTAL_STAGES and LVLS_13_PREVIEW and selected < len(LVLS_13_PREVIEW):
+                # mini map preview top-right
+                preview = LVLS_13_PREVIEW[selected]
+                # 13x13 map, tile size 10 px -> 130px
+                p_tile = 10
+                p_w = 13 * p_tile
+                p_h = 13 * p_tile
+                p_x = SCREEN_WIDTH - p_w - 30
+                p_y = start_y
+                # bg
+                pygame.draw.rect(screen, (10,10,10), (p_x-4, p_y-4, p_w+8, p_h+8))
+                pygame.draw.rect(screen, (100,100,120), (p_x-4, p_y-4, p_w+8, p_h+8), 2)
+                for ry in range(13):
+                    for rx in range(13):
+                        t = preview[ry][rx]
+                        tx = p_x + rx * p_tile
+                        ty = p_y + ry * p_tile
+                        if t == 0:
+                            continue
+                        elif t == 1:
+                            pygame.draw.rect(screen, COLOR_BRICK, (tx, ty, p_tile, p_tile))
+                        elif t == 2:
+                            pygame.draw.rect(screen, COLOR_STEEL, (tx, ty, p_tile, p_tile))
+                        elif t == 3:
+                            pygame.draw.rect(screen, COLOR_WATER, (tx, ty, p_tile, p_tile))
+                        elif t == 4:
+                            pygame.draw.rect(screen, COLOR_GRASS, (tx, ty, p_tile, p_tile))
+                        elif t == 5:
+                            pygame.draw.rect(screen, COLOR_ICE, (tx, ty, p_tile, p_tile))
+                # bots info below preview
+                if BOTS_RAW_ALL and selected < len(BOTS_RAW_ALL):
+                    bot_text = "Enemies: " + " ".join(BOTS_RAW_ALL[selected])
+                    bt = self.font_small.render(bot_text, True, (200,200,200))
+                    screen.blit(bt, (p_x - 20, p_y + p_h + 8))
+                    # tile legend
+                    legend = self.font_small.render("B=Brick S=Steel ~=Water F=Forest I=Ice", True, (160,160,160))
+                    screen.blit(legend, (p_x - 20, p_y + p_h + 26))
+
+                # selected big highlight label
+                sel_label = pygame.font.Font(None, 26).render(f"> SELECTED: STAGE {selected+1} <", True, COLOR_YELLOW)
+                screen.blit(sel_label, sel_label.get_rect(center=(SCREEN_WIDTH//2, back_y + 40)))
+
+        # footer for publishing info + sound label
+        footer = pygame.font.Font(None, 18).render("35 Original NES Maps + Authentic NES SFX (feichao93 pack) - Bricks/Water/Forest/Steel/Ice + Tank Move Engine + Explosions + Powerups", True, (100,100,120))
         screen.blit(footer, footer.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT-30)))
+
+        # Second footer with all 35 maps copyright + original
+        footer2 = pygame.font.Font(None, 16).render("Stage 1: 18*basic 2*fast ... Stage 35: 4*power 6*fast 10*armor (700 enemies total) - Authentic Battle City 1985", True, (80,80,100))
+        screen.blit(footer2, footer2.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT-14)))
 
         if mode == 'howto':
             # overlay howto

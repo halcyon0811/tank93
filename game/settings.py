@@ -22,24 +22,47 @@ PLAYFIELD_Y = 48
 HUD_X = PLAYFIELD_X + PLAYFIELD_W + 20
 HUD_W = SCREEN_WIDTH - HUD_X - 20
 
-# Colors - modernized palette
+# Colors - authentic NES Battle City palette matched from downloaded_maps (retro screenshots)
+# Your downloaded_maps show: red-orange bricks, white/light-gray steel with rivets,
+# bright blue water with white sparkles, mottled green forest, diagonal-hatched light gray ice
+# Keeping classic NES look: black playfield background
+
 COLOR_BG = (18, 18, 24)
 COLOR_PLAYFIELD_BG = (0, 0, 0)
-COLOR_BRICK = (168, 80, 32)
-COLOR_BRICK_DARK = (120, 56, 24)
-COLOR_BRICK_LIGHT = (200, 112, 48)
-COLOR_STEEL = (160, 160, 170)
-COLOR_STEEL_DARK = (110, 110, 120)
-COLOR_STEEL_LIGHT = (200, 200, 210)
-COLOR_WATER = (32, 99, 199)
-COLOR_WATER_DARK = (16, 60, 150)
-COLOR_GRASS = (34, 139, 34)
-COLOR_GRASS_DARK = (20, 100, 20)
-COLOR_ICE = (173, 216, 230)
+
+# --- Retro NES tile colors sampled from Battle City screenshots ---
+# Brick: bright red-orange 0xE0 0x38 0x18 approx, mortar dark brown
+COLOR_BRICK = (210, 56, 24)          # main red brick - from screenshots #D23818
+COLOR_BRICK_DARK = (140, 30, 10)      # mortar dark
+COLOR_BRICK_LIGHT = (240, 120, 70)    # highlight / top edge
+COLOR_BRICK_MORTAR = (180, 180, 180)  # light gray mortar line (NES style thin)
+
+COLOR_STEEL = (210, 210, 210)         # white/light gray steel
+COLOR_STEEL_DARK = (130, 130, 130)    # shadow
+COLOR_STEEL_LIGHT = (255, 255, 255)   # highlight / inner white square
+COLOR_STEEL_RIVET = (160, 160, 160)
+
+COLOR_WATER = (28,  90, 240)          # bright NES blue #1C5AF0
+COLOR_WATER_DARK = (12, 60, 180)
+COLOR_WATER_SPARKLE = (200, 220, 255) # white dots
+
+COLOR_GRASS = (60, 160,  20)          # base green
+COLOR_GRASS_DARK = (20, 100, 10)      # dark dapple
+COLOR_GRASS_LIGHT = (140, 230, 80)    # light speckles
+COLOR_GRASS_MID = (90, 190, 30)
+
+COLOR_ICE = (190, 190, 190)           # light gray ice
+COLOR_ICE_DARK = (130, 130, 135)
+COLOR_ICE_STRIPE = (220, 220, 220)    # diagonal hatching light
+COLOR_ICE_SHADOW = (100, 100, 105)
+
 COLOR_WHITE = (255, 255, 255)
 COLOR_BLACK = (0, 0, 0)
 COLOR_YELLOW = (255, 224, 64)
 COLOR_RED = (235, 50, 50)
+
+# Retro brick pattern as used in NES: 2 rows of bricks per 16px tile, offset
+# We'll draw exact pattern in tilemap.py draw_brick retro
 
 # Player colors
 PLAYER_COLORS = [

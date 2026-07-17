@@ -1,0 +1,419 @@
+{
+  "source": "Battle City NES 1985 - 35 stages + Construction level (36th) from Namco",
+  "tiles": {
+    "0": "Empty (black)",
+    "1": "Brick (red/orange) breakable - 4 micro tiles per block",
+    "2": "Steel (white/gray) indestructible except power gun",
+    "3": "Water (blue animated waves)",
+    "4": "Forest (green mottled, hides tank)",
+    "5": "Ice (gray slippery)"
+  },
+  "stages": [
+    {
+      "stage": 1,
+      "bots": [
+        "18*basic",
+        "2*fast"
+      ],
+      "map_13_size": "13x13 big tiles",
+      "original_nes_file": "app/stages/stage-1.json",
+      "colors": "Brick orange, steel white, water blue sparkle, forest green, ice gray, base eagle"
+    },
+    {
+      "stage": 2,
+      "bots": [
+        "2*armor",
+        "4*fast",
+        "14*basic"
+      ],
+      "map_13_size": "13x13 big tiles",
+      "original_nes_file": "app/stages/stage-2.json",
+      "colors": "Brick orange, steel white, water blue sparkle, forest green, ice gray, base eagle"
+    },
+    {
+      "stage": 3,
+      "bots": [
+        "14*basic",
+        "4*fast",
+        "2*armor"
+      ],
+      "map_13_size": "13x13 big tiles",
+      "original_nes_file": "app/stages/stage-3.json",
+      "colors": "Brick orange, steel white, water blue sparkle, forest green, ice gray, base eagle"
+    },
+    {
+      "stage": 4,
+      "bots": [
+        "10*power",
+        "5*fast",
+        "2*basic",
+        "3*armor"
+      ],
+      "map_13_size": "13x13 big tiles",
+      "original_nes_file": "app/stages/stage-4.json",
+      "colors": "Brick orange, steel white, water blue sparkle, forest green, ice gray, base eagle"
+    },
+    {
+      "stage": 5,
+      "bots": [
+        "5*power",
+        "2*armor",
+        "8*basic",
+        "5*fast"
+      ],
+      "map_13_size": "13x13 big tiles",
+      "original_nes_file": "app/stages/stage-5.json",
+      "colors": "Brick orange, steel white, water blue sparkle, forest green, ice gray, base eagle"
+    },
+    {
+      "stage": 6,
+      "bots": [
+        "7*power",
+        "2*fast",
+        "9*basic",
+        "2*armor"
+      ],
+      "map_13_size": "13x13 big tiles",
+      "original_nes_file": "app/stages/stage-6.json",
+      "colors": "Brick orange, steel white, water blue sparkle, forest green, ice gray, base eagle"
+    },
+    {
+      "stage": 7,
+      "bots": [
+        "3*basic",
+        "4*fast",
+        "6*power",
+        "7*basic"
+      ],
+      "map_13_size": "13x13 big tiles",
+      "original_nes_file": "app/stages/stage-7.json",
+      "colors": "Brick orange, steel white, water blue sparkle, forest green, ice gray, base eagle"
+    },
+    {
+      "stage": 8,
+      "bots": [
+        "7*power",
+        "2*armor",
+        "4*fast",
+        "7*basic"
+      ],
+      "map_13_size": "13x13 big tiles",
+      "original_nes_file": "app/stages/stage-8.json",
+      "colors": "Brick orange, steel white, water blue sparkle, forest green, ice gray, base eagle"
+    },
+    {
+      "stage": 9,
+      "bots": [
+        "6*fast",
+        "4*fast",
+        "7*power",
+        "3*armor"
+      ],
+      "map_13_size": "13x13 big tiles",
+      "original_nes_file": "app/stages/stage-9.json",
+      "colors": "Brick orange, steel white, water blue sparkle, forest green, ice gray, base eagle"
+    },
+    {
+      "stage": 10,
+      "bots": [
+        "12*basic",
+        "2*fast",
+        "4*power",
+        "2*armor"
+      ],
+      "map_13_size": "13x13 big tiles",
+      "original_nes_file": "app/stages/stage-10.json",
+      "colors": "Brick orange, steel white, water blue sparkle, forest green, ice gray, base eagle"
+    },
+    {
+      "stage": 11,
+      "bots": [
+        "5*fast",
+        "6*armor",
+        "4*power",
+        "5*fast"
+      ],
+      "map_13_size": "13x13 big tiles",
+      "original_nes_file": "app/stages/stage-11.json",
+      "colors": "Brick orange, steel white, water blue sparkle, forest green, ice gray, base eagle"
+    },
+    {
+      "stage": 12,
+      "bots": [
+        "8*power",
+        "6*fast",
+        "6*armor"
+      ],
+      "map_13_size": "13x13 big tiles",
+      "original_nes_file": "app/stages/stage-12.json",
+      "colors": "Brick orange, steel white, water blue sparkle, forest green, ice gray, base eagle"
+    },
+    {
+      "stage": 13,
+      "bots": [
+        "8*power",
+        "8*fast",
+        "4*armor"
+      ],
+      "map_13_size": "13x13 big tiles",
+      "original_nes_file": "app/stages/stage-13.json",
+      "colors": "Brick orange, steel white, water blue sparkle, forest green, ice gray, base eagle"
+    },
+    {
+      "stage": 14,
+      "bots": [
+        "10*power",
+        "4*fast",
+        "6*armor"
+      ],
+      "map_13_size": "13x13 big tiles",
+      "original_nes_file": "app/stages/stage-14.json",
+      "colors": "Brick orange, steel white, water blue sparkle, forest green, ice gray, base eagle"
+    },
+    {
+      "stage": 15,
+      "bots": [
+        "2*basic",
+        "10*fast",
+        "8*armor"
+      ],
+      "map_13_size": "13x13 big tiles",
+      "original_nes_file": "app/stages/stage-15.json",
+      "colors": "Brick orange, steel white, water blue sparkle, forest green, ice gray, base eagle"
+    },
+    {
+      "stage": 16,
+      "bots": [
+        "16*basic",
+        "2*fast",
+        "2*armor"
+      ],
+      "map_13_size": "13x13 big tiles",
+      "original_nes_file": "app/stages/stage-16.json",
+      "colors": "Brick orange, steel white, water blue sparkle, forest green, ice gray, base eagle"
+    },
+    {
+      "stage": 17,
+      "bots": [
+        "2*armor",
+        "2*fast",
+        "8*armor",
+        "8*basic"
+      ],
+      "map_13_size": "13x13 big tiles",
+      "original_nes_file": "app/stages/stage-17.json",
+      "colors": "Brick orange, steel white, water blue sparkle, forest green, ice gray, base eagle"
+    },
+    {
+      "stage": 18,
+      "bots": [
+        "4*armor",
+        "2*basic",
+        "6*power",
+        "8*fast"
+      ],
+      "map_13_size": "13x13 big tiles",
+      "original_nes_file": "app/stages/stage-18.json",
+      "colors": "Brick orange, steel white, water blue sparkle, forest green, ice gray, base eagle"
+    },
+    {
+      "stage": 19,
+      "bots": [
+        "4*fast",
+        "8*armor",
+        "4*basic",
+        "4*power"
+      ],
+      "map_13_size": "13x13 big tiles",
+      "original_nes_file": "app/stages/stage-19.json",
+      "colors": "Brick orange, steel white, water blue sparkle, forest green, ice gray, base eagle"
+    },
+    {
+      "stage": 20,
+      "bots": [
+        "8*fast",
+        "2*basic",
+        "2*power",
+        "8*armor"
+      ],
+      "map_13_size": "13x13 big tiles",
+      "original_nes_file": "app/stages/stage-20.json",
+      "colors": "Brick orange, steel white, water blue sparkle, forest green, ice gray, base eagle"
+    },
+    {
+      "stage": 21,
+      "bots": [
+        "8*power",
+        "2*fast",
+        "6*basic",
+        "4*armor"
+      ],
+      "map_13_size": "13x13 big tiles",
+      "original_nes_file": "app/stages/stage-21.json",
+      "colors": "Brick orange, steel white, water blue sparkle, forest green, ice gray, base eagle"
+    },
+    {
+      "stage": 22,
+      "bots": [
+        "8*fast",
+        "6*basic",
+        "2*power",
+        "4*armor"
+      ],
+      "map_13_size": "13x13 big tiles",
+      "original_nes_file": "app/stages/stage-22.json",
+      "colors": "Brick orange, steel white, water blue sparkle, forest green, ice gray, base eagle"
+    },
+    {
+      "stage": 23,
+      "bots": [
+        "6*armor",
+        "4*power",
+        "10*fast"
+      ],
+      "map_13_size": "13x13 big tiles",
+      "original_nes_file": "app/stages/stage-23.json",
+      "colors": "Brick orange, steel white, water blue sparkle, forest green, ice gray, base eagle"
+    },
+    {
+      "stage": 24,
+      "bots": [
+        "4*power",
+        "2*armor",
+        "4*fast",
+        "10*basic"
+      ],
+      "map_13_size": "13x13 big tiles",
+      "original_nes_file": "app/stages/stage-24.json",
+      "colors": "Brick orange, steel white, water blue sparkle, forest green, ice gray, base eagle"
+    },
+    {
+      "stage": 25,
+      "bots": [
+        "2*power",
+        "8*fast",
+        "10*armor"
+      ],
+      "map_13_size": "13x13 big tiles",
+      "original_nes_file": "app/stages/stage-25.json",
+      "colors": "Brick orange, steel white, water blue sparkle, forest green, ice gray, base eagle"
+    },
+    {
+      "stage": 26,
+      "bots": [
+        "6*fast",
+        "6*armor",
+        "4*basic",
+        "4*power"
+      ],
+      "map_13_size": "13x13 big tiles",
+      "original_nes_file": "app/stages/stage-26.json",
+      "colors": "Brick orange, steel white, water blue sparkle, forest green, ice gray, base eagle"
+    },
+    {
+      "stage": 27,
+      "bots": [
+        "2*power",
+        "8*armor",
+        "8*fast",
+        "2*basic"
+      ],
+      "map_13_size": "13x13 big tiles",
+      "original_nes_file": "app/stages/stage-27.json",
+      "colors": "Brick orange, steel white, water blue sparkle, forest green, ice gray, base eagle"
+    },
+    {
+      "stage": 28,
+      "bots": [
+        "2*fast",
+        "1*armor",
+        "15*basic",
+        "2*power"
+      ],
+      "map_13_size": "13x13 big tiles",
+      "original_nes_file": "app/stages/stage-28.json",
+      "colors": "Brick orange, steel white, water blue sparkle, forest green, ice gray, base eagle"
+    },
+    {
+      "stage": 29,
+      "bots": [
+        "10*power",
+        "4*fast",
+        "6*armor"
+      ],
+      "map_13_size": "13x13 big tiles",
+      "original_nes_file": "app/stages/stage-29.json",
+      "colors": "Brick orange, steel white, water blue sparkle, forest green, ice gray, base eagle"
+    },
+    {
+      "stage": 30,
+      "bots": [
+        "4*basic",
+        "8*fast",
+        "4*power",
+        "4*armor"
+      ],
+      "map_13_size": "13x13 big tiles",
+      "original_nes_file": "app/stages/stage-30.json",
+      "colors": "Brick orange, steel white, water blue sparkle, forest green, ice gray, base eagle"
+    },
+    {
+      "stage": 31,
+      "bots": [
+        "3*power",
+        "8*fast",
+        "6*armor",
+        "3*power"
+      ],
+      "map_13_size": "13x13 big tiles",
+      "original_nes_file": "app/stages/stage-31.json",
+      "colors": "Brick orange, steel white, water blue sparkle, forest green, ice gray, base eagle"
+    },
+    {
+      "stage": 32,
+      "bots": [
+        "8*armor",
+        "6*basic",
+        "2*power",
+        "4*fast"
+      ],
+      "map_13_size": "13x13 big tiles",
+      "original_nes_file": "app/stages/stage-32.json",
+      "colors": "Brick orange, steel white, water blue sparkle, forest green, ice gray, base eagle"
+    },
+    {
+      "stage": 33,
+      "bots": [
+        "4*fast",
+        "8*armor",
+        "4*power",
+        "4*fast"
+      ],
+      "map_13_size": "13x13 big tiles",
+      "original_nes_file": "app/stages/stage-33.json",
+      "colors": "Brick orange, steel white, water blue sparkle, forest green, ice gray, base eagle"
+    },
+    {
+      "stage": 34,
+      "bots": [
+        "4*power",
+        "10*fast",
+        "6*armor"
+      ],
+      "map_13_size": "13x13 big tiles",
+      "original_nes_file": "app/stages/stage-34.json",
+      "colors": "Brick orange, steel white, water blue sparkle, forest green, ice gray, base eagle"
+    },
+    {
+      "stage": 35,
+      "bots": [
+        "4*power",
+        "6*fast",
+        "10*armor"
+      ],
+      "map_13_size": "13x13 big tiles",
+      "original_nes_file": "app/stages/stage-35.json",
+      "colors": "Brick orange, steel white, water blue sparkle, forest green, ice gray, base eagle"
+    }
+  ]
+}
