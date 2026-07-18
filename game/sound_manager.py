@@ -156,21 +156,42 @@ class SoundManager:
 
             # === NEW: Better shooting sounds - punchy, modern, satisfying ===
             # Generate multiple shooting variants and replace the default 'shoot' with better one
-            print("[Sound] Generating better shooting sounds (punchy, modern, etc.)...")
+            print("[Sound] Generating better shooting sounds (punchy, modern, realistic tank)...")
+
+            # First, keep authentic as backup
+            if 'shoot' in self.sounds:
+                self.sounds['shoot_authentic_nes'] = self.sounds['shoot']
+
+            # Punchy retro - improved over authentic
             better_shoot = self.generate_punchy_shoot(f0=1200, f1=180, duration=0.18, volume=0.85, punch_freq=90, punch_vol=0.9)
             if better_shoot:
-                # Keep authentic as fallback as shoot_authentic
-                if 'shoot' in self.sounds:
-                    self.sounds['shoot_authentic'] = self.sounds['shoot']
-                self.sounds['shoot'] = better_shoot
                 self.sounds['shoot_punchy'] = better_shoot
+                # Use punchy as intermediate
+                self.sounds['shoot'] = better_shoot
                 print("[Sound] -> Upgraded 'shoot' to punchy version (1200->180Hz sweep + 90Hz punch)")
 
-            # Power shoot (for power level 2, can break steel)
+            # REALISTIC TANK CANNON - close to real life, deep boom + crack + reverb
+            # This is what user asked for: "close real life tank shooting sound"
+            real_cannon = self.generate_real_tank_cannon(volume=0.92)
+            if real_cannon:
+                self.sounds['shoot_real'] = real_cannon
+                self.sounds['shoot_realistic'] = real_cannon
+                self.sounds['shoot_tank_real'] = real_cannon
+                # Make realistic the DEFAULT for shooting (most satisfying, close to real tank)
+                self.sounds['shoot'] = real_cannon
+                print("[Sound] -> Upgraded 'shoot' to REALISTIC TANK CANNON (40-55Hz boom + 120Hz body + blast)")
+
+            # Power shoot (for power level 2, can break steel) - even more beefy real
             power_shoot = self.generate_punchy_shoot(f0=900, f1=120, duration=0.22, volume=0.95, punch_freq=70, punch_vol=1.0, add_second_layer=True)
+            real_power = self.generate_real_tank_cannon(volume=1.0)
             if power_shoot:
                 self.sounds['shoot_power'] = power_shoot
                 self.sounds['shoot_strong'] = power_shoot
+            if real_power:
+                self.sounds['shoot_power_real'] = real_power
+                # Use real power as power shoot
+                self.sounds['shoot_power'] = real_power
+                self.sounds['shoot_strong'] = real_power
 
             # Rapid fire - very short, snappy
             rapid_shoot = self.generate_punchy_shoot(f0=1500, f1=500, duration=0.08, volume=0.65, punch_freq=120, punch_vol=0.6, short=True)
@@ -196,6 +217,26 @@ class SoundManager:
             if plasma:
                 self.sounds['shoot_plasma'] = plasma
                 self.sounds['shoot_laser'] = plasma
+
+            # === REALISTIC BRICK AND STEEL HITS ===
+            print("[Sound] Generating realistic brick/steel hit sounds (close to real tank vs brick)...")
+            real_brick = self.generate_real_brick_hit(volume=0.85)
+            if real_brick:
+                if 'hit_brick' in self.sounds:
+                    self.sounds['hit_brick_authentic'] = self.sounds['hit_brick']
+                self.sounds['hit_brick'] = real_brick
+                self.sounds['hit_brick_real'] = real_brick
+                self.sounds['brick_real'] = real_brick
+                print("[Sound] -> Upgraded 'hit_brick' to realistic concrete crack + debris")
+
+            real_steel = self.generate_real_steel_hit(volume=0.9)
+            if real_steel:
+                if 'hit_steel' in self.sounds:
+                    self.sounds['hit_steel_authentic'] = self.sounds['hit_steel']
+                self.sounds['hit_steel'] = real_steel
+                self.sounds['hit_steel_real'] = real_steel
+                self.sounds['steel_real'] = real_steel
+                print("[Sound] -> Upgraded 'hit_steel' to realistic clang + ricochet whine")
 
         except Exception as e:
             print(f"[Sound] Retro generation failed: {e}")
@@ -498,6 +539,230 @@ class SoundManager:
             return pygame.sndarray.make_sound(stereo)
         except Exception as e:
             print(f"[Sound] Plasma shoot gen failed: {e}")
+            return None
+
+    def generate_real_tank_cannon(self, volume=0.9):
+        """
+        Generate realistic tank cannon fire - close to real life
+        Layers:
+        - Sub-bass 35-50Hz boom with long decay (0.6s) - chest thump
+        - Low-mid 120Hz body
+        - Mid punch 250Hz square
+        - High crack 3000Hz transient 0-30ms
+        - Blast white noise low-passed 0-150ms
+        - Reverb echo at 120ms
+        """
+        try:
+            import numpy as np
+            sr = 44100  # higher quality for realism
+            duration = 0.75
+            N = int(sr * duration)
+            t = np.linspace(0, duration, N, False)
+
+            wave = np.zeros(N)
+
+            # 1. Sub-bass boom 40Hz - long, powerful, chest feel
+            # Use sine with exponential decay, slight pitch drop 50->35Hz
+            f_sub_start, f_sub_end = 55, 32
+            freq_sub = f_sub_start * np.power(f_sub_end / f_sub_start, t / duration)
+            phase_sub = np.cumsum(2 * np.pi * freq_sub / sr)
+            sub = np.sin(phase_sub) * np.exp(-5 * t) * 1.2
+            wave += sub * 0.9
+
+            # 2. Low-mid body 120Hz
+            f_body = 120
+            body = np.sin(2 * np.pi * f_body * t) * np.exp(-7 * t) * 0.7
+            wave += body * 0.6
+
+            # 3. Mid punch 250Hz square with distortion
+            f_mid_start, f_mid_end = 300, 120
+            freq_mid = f_mid_start * np.power(f_mid_end / f_mid_start, t / duration)
+            phase_mid = np.cumsum(2 * np.pi * freq_mid / sr)
+            mid = np.sign(np.sin(phase_mid)) * np.exp(-12 * t)
+            # Add slight distortion (clip)
+            mid = np.clip(mid * 1.5, -1, 1) * 0.5
+            wave += mid
+
+            # 4. Blast - white noise low-passed 0-0.15s, high energy
+            blast_dur = int(0.15 * sr)
+            if blast_dur < N:
+                noise = np.random.uniform(-1, 1, blast_dur)
+                # Simple low-pass via moving average (box filter)
+                window = 20
+                if len(noise) > window:
+                    # Moving average to low-pass at ~1000Hz
+                    kernel = np.ones(window) / window
+                    noise = np.convolve(noise, kernel, mode='same')
+                blast_env = np.exp(-25 * np.linspace(0, 0.15, blast_dur))  # fast decay
+                blast = noise * blast_env * 1.1
+                wave[:blast_dur] += blast * 0.8
+
+            # 5. High crack - 3000Hz transient 0-0.03s for initial snap
+            crack_dur = int(0.03 * sr)
+            if crack_dur < N:
+                crack_t = np.linspace(0, 0.03, crack_dur, False)
+                crack = np.sin(2 * np.pi * 3000 * crack_t) * np.exp(-150 * crack_t) * 0.5
+                # Add second harmonic for brightness
+                crack += np.sin(2 * np.pi * 6000 * crack_t) * np.exp(-150 * crack_t) * 0.25
+                wave[:crack_dur] += crack
+
+            # 6. Shell ejection clink - small metallic tick at 0.1s
+            clink_time = int(0.12 * sr)
+            clink_dur = int(0.02 * sr)
+            if clink_time + clink_dur < N:
+                clink_t = np.linspace(0, 0.02, clink_dur, False)
+                clink = np.sin(2 * np.pi * 2500 * clink_t) * np.exp(-80 * clink_t) * 0.15
+                # Add with slight randomness
+                wave[clink_time:clink_time+clink_dur] += clink
+
+            # 7. Reverb - delayed quiet copy at 120ms with echo
+            delay = int(0.12 * sr)
+            if delay + N//3 < N:
+                reverb = np.zeros(N)
+                # Quiet copy of wave with low-pass and delay
+                reverb[delay:] = wave[:N-delay] * 0.25 * np.exp(-2 * t[:N-delay])
+                wave += reverb * 0.6
+
+            # 8. Ground reflection - very low frequency rumble at 60ms
+            ground_delay = int(0.06 * sr)
+            if ground_delay < N:
+                ground = np.sin(2 * np.pi * 60 * t) * np.exp(-4 * (t-0.06)) * 0.3
+                ground[:ground_delay] = 0
+                wave += ground * 0.4
+
+            # Normalize with headroom for punch
+            max_val = np.max(np.abs(wave))
+            if max_val > 0:
+                wave = wave / max_val * 0.92
+
+            # Slight distortion for realism (soft clipping)
+            wave = np.tanh(wave * 1.2) * 0.9
+
+            audio = (wave * 32767 * volume).astype(np.int16)
+            stereo = np.column_stack([audio, audio])
+            return pygame.sndarray.make_sound(stereo)
+        except ImportError:
+            return None
+        except Exception as e:
+            print(f"[Sound] Real tank cannon gen failed: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+
+    def generate_real_brick_hit(self, volume=0.8):
+        """
+        Realistic brick/concrete hit - when tank shell hits brick wall
+        Layers:
+        - Sharp impact click 0-5ms
+        - Crack 800-2000Hz bandpass noise 0-0.25s
+        - Debris crumbling random pops 0.1-0.5s
+        """
+        try:
+            import numpy as np
+            sr = 44100
+            duration = 0.45
+            N = int(sr * duration)
+            t = np.linspace(0, duration, N, False)
+            wave = np.zeros(N)
+
+            # 1. Sharp impact click - high freq transient
+            click_dur = int(0.005 * sr)
+            if click_dur < N:
+                # High freq sine burst
+                click_t = np.linspace(0, 0.005, click_dur, False)
+                click = np.sin(2 * np.pi * 3500 * click_t) * np.exp(-500 * click_t) * 0.8
+                wave[:click_dur] += click
+
+            # 2. Main crack - bandpass noise around 1000Hz
+            crack_dur = int(0.25 * sr)
+            if crack_dur < N:
+                # White noise
+                noise = np.random.uniform(-1, 1, crack_dur)
+                # Simple bandpass via two moving averages (very rough)
+                # Low-pass at 2000Hz: window ~ sr/2000 = 22
+                # High-pass at 500Hz: subtract low-pass at 500Hz (window ~88)
+                # For simplicity, just filter via sine modulation
+                # Create crack with decaying noise
+                crack_env = np.exp(-12 * np.linspace(0, 0.25, crack_dur))
+                # Modulate noise with 1000Hz sine for bandpass feel
+                crack = noise * crack_env * (0.5 + 0.5 * np.sin(2 * np.pi * 1000 * np.linspace(0, 0.25, crack_dur)))
+                wave[:crack_dur] += crack * 0.7
+
+            # 3. Debris - random small pops/cracks in tail
+            num_pops = 8
+            for _ in range(num_pops):
+                pop_time = np.random.uniform(0.05, 0.4)
+                pop_idx = int(pop_time * sr)
+                pop_dur = int(np.random.uniform(0.01, 0.03) * sr)
+                if pop_idx + pop_dur < N:
+                    pop_freq = np.random.uniform(600, 1800)
+                    pop_t = np.linspace(0, pop_dur/sr, pop_dur, False)
+                    pop = np.sin(2 * np.pi * pop_freq * pop_t) * np.exp(-30 * pop_t) * np.random.uniform(0.15, 0.35)
+                    wave[pop_idx:pop_idx+pop_dur] += pop
+
+            # 4. Low rumble for heavy brick
+            rumble = np.sin(2 * np.pi * 90 * t) * np.exp(-8 * t) * 0.3
+            wave += rumble * 0.4
+
+            # Normalize
+            max_val = np.max(np.abs(wave))
+            if max_val > 0:
+                wave = wave / max_val * 0.85
+
+            audio = (wave * 32767 * volume).astype(np.int16)
+            stereo = np.column_stack([audio, audio])
+            return pygame.sndarray.make_sound(stereo)
+        except Exception as e:
+            print(f"[Sound] Real brick hit gen failed: {e}")
+            return None
+
+    def generate_real_steel_hit(self, volume=0.85):
+        """
+        Realistic steel armor hit - ricochet, clang
+        """
+        try:
+            import numpy as np
+            sr = 44100
+            duration = 0.6
+            N = int(sr * duration)
+            t = np.linspace(0, duration, N, False)
+            wave = np.zeros(N)
+
+            # 1. Very sharp initial impact - high freq
+            click_dur = int(0.003 * sr)
+            if click_dur < N:
+                click = np.random.uniform(-1, 1, click_dur) * np.exp(-200 * np.linspace(0, 0.003, click_dur)) * 0.9
+                wave[:click_dur] += click
+
+            # 2. Main steel clang - 800Hz + 1600Hz + 2400Hz harmonics, long decay with beating
+            # Steel has long metallic ring
+            for i, (freq, amp, decay) in enumerate([(800, 0.8, 3), (1600, 0.5, 2.5), (2400, 0.3, 3.5), (3200, 0.2, 4)]):
+                clang = np.sin(2 * np.pi * freq * t + i*0.5) * np.exp(-decay * t) * amp
+                # Add slight frequency modulation for realistic beating
+                clang *= (1 + 0.1 * np.sin(2 * np.pi * 15 * t))
+                wave += clang
+
+            # 3. Ricochet whine - rising pitch 1000->3000Hz whine after impact
+            whine_dur = int(0.25 * sr)
+            whine_start = int(0.05 * sr)
+            if whine_start + whine_dur < N:
+                whine_t = np.linspace(0, 0.25, whine_dur, False)
+                f0, f1 = 800, 2500
+                freq = f0 * np.power(f1/f0, whine_t/0.25)
+                phase = np.cumsum(2 * np.pi * freq / sr)
+                whine = np.sin(phase) * np.exp(-6 * whine_t) * 0.35
+                wave[whine_start:whine_start+whine_dur] += whine
+
+            # Normalize
+            max_val = np.max(np.abs(wave))
+            if max_val > 0:
+                wave = wave / max_val * 0.9
+
+            audio = (wave * 32767 * volume).astype(np.int16)
+            stereo = np.column_stack([audio, audio])
+            return pygame.sndarray.make_sound(stereo)
+        except Exception as e:
+            print(f"[Sound] Real steel hit gen failed: {e}")
             return None
 
     # ---- Playback ----
