@@ -189,9 +189,9 @@ SHRINK_SCALE = 0.5
 SHRINK_SPEED_MULT = 2.0
 GIANT_SCALE = 2.0
 GIANT_DURATION = 15 * FPS
-MONSTER_SPEED_MULT = 1.5  # relative to player speed
-VENOM_DISSOLVE_TIME = 10 * FPS
-VENOM_SPEED = BULLET_SPEED * 0.7
+MONSTER_SPEED_MULT = 1.0  # slowed to normal enemy speed per user request (was 1.5x player)
+VENOM_DISSOLVE_TIME = 18 * FPS  # slowed down venom: was 10s, now 18s for more time to counter (user request)
+VENOM_SPEED = BULLET_SPEED * 0.45  # slowed down venom: was 0.7x bullet speed, now 0.45x (slower)
 BULLET_COUNTER_ENABLED = True
 
 # Enemy count per level

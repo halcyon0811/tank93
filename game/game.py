@@ -1300,7 +1300,9 @@ class Game:
                 self.enemies.remove(e)
                 self.enemies_killed += 1
 
-        # handle dead players respawn or game over
+        # handle dead players respawn or game over - fixed bug where boss camping spawn blocked respawn
+        # Previously: only respawned if can_spawn True, so if boss near spawn, player stayed dead and couldn't move
+        # Now: always respawn, clear area, and give extra protection if blocked - fixes "cannot move after killed by boss"
         all_dead = True
         spawns = MEGA_PLAYER_SPAWN if self.is_mega else PLAYER_SPAWN
         ts = MEGA_TILE_SIZE if self.is_mega else TILE_SIZE
@@ -1309,16 +1311,35 @@ class Game:
                 all_dead = False
             else:
                 if p.lives >= 0:
-                    if p.lives >= 0:
-                        gx, gy = spawns[p.player_id-1]
-                        can_spawn = True
-                        test_rect = pygame.Rect(PLAYFIELD_X+gx*ts, PLAYFIELD_Y+gy*ts, TANK_SIZE, TANK_SIZE)
-                        for en in self.enemies:
-                            if en.alive and test_rect.colliderect(en.rect):
-                                can_spawn = False
-                        if can_spawn:
-                            p.respawn(gx, gy)
-                            all_dead = False
+                    gx, gy = spawns[p.player_id-1]
+                    # Always clear area around spawn to prevent boss camping
+                    try:
+                        self.tilemap.clear_area(gx-1, gy-1, 4, 4)
+                    except:
+                        pass
+                    # Check if still blocked (for extra protection)
+                    can_spawn = True
+                    test_rect = pygame.Rect(PLAYFIELD_X+gx*ts, PLAYFIELD_Y+gy*ts, TANK_SIZE, TANK_SIZE)
+                    for en in self.enemies:
+                        if en.alive and test_rect.colliderect(en.rect):
+                            can_spawn = False
+                            # Push blocking enemy slightly away to unblock
+                            try:
+                                # Push enemy away from spawn point
+                                dx = en.x - (PLAYFIELD_X+gx*ts+ts*2)
+                                dy = en.y - (PLAYFIELD_Y+gy*ts+ts*2)
+                                dist = max(1, (dx*dx+dy*dy)**0.5)
+                                en.x += dx/dist * 8
+                                en.y += dy/dist * 8
+                                en.rect.center = (en.x, en.y)
+                            except:
+                                pass
+                    p.respawn(gx, gy)
+                    if not can_spawn:
+                        # Extra protection if spawned in previously blocked area (e.g., boss near spawn)
+                        p.spawn_protection = 300
+                        p.invulnerable_timer = 180
+                    all_dead = False
 
         # base/monster hit? New logic: monster base hit releases boss instead of immediate game over
         if not self.base.alive:

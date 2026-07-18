@@ -124,14 +124,15 @@ class EnemyTank(Tank):
             self.shoot_chance = 0.020
         elif enemy_type in ('boss', 'monster_boss', 'monster'):
             # Monster boss - slowed to normal enemy speed per user request (was 1.5x player = 3.3, now 1.2 same as basic)
-            self.speed = TANK_SPEED['enemy']  # same as normal enemy (1.2) - slowed down
+            # Further slowed shooting and venom per user request "slow down the venom and shooting speed of boss"
+            self.speed = TANK_SPEED['enemy']  # same as normal enemy (1.8 currently, 1.2 originally) - slowed down
             self.health = 18  # tougher boss still
             self.bullet_power = 2
             self.score_value = 3500
-            self.shoot_chance = 0.12  # shoots more, mix of normal + venom
+            self.shoot_chance = 0.045  # slowed: was 0.12, now 0.045 similar to power enemy (user requested slower)
             self.is_boss = True
             self.venom_cooldown = 0
-            self.venom_shoot_chance = 0.06
+            self.venom_shoot_chance = 0.025  # slowed venom: was 0.06, now 0.025
             # Make boss bigger
             self.rect = pygame.Rect(0,0, int((TANK_SIZE-4)*1.8), int((TANK_SIZE-4)*1.8))
             self.rect.center = (self.x, self.y)
@@ -592,14 +593,14 @@ class EnemyTank(Tank):
                     b.speed *= 1.2
                 self.bullets.append(b)
                 bullets.append(b)
-            # Cooldown for spread - longer, but rapid reduces
+            # Cooldown for spread - longer, but rapid reduces - slowed for boss
             base_cd = 40
             if getattr(self, 'rapid_active', False):
                 base_cd = max(10, base_cd // 2)
             if self.enemy_type == 'fast':
                 self.cooldown = random.randint(30, 60)
             elif getattr(self, 'is_boss', False):
-                self.cooldown = random.randint(35, 70)
+                self.cooldown = random.randint(65, 110)  # slowed: was 35-70, now 65-110
             else:
                 self.cooldown = random.randint(base_cd, base_cd+30)
             try:
@@ -611,13 +612,13 @@ class EnemyTank(Tank):
 
         sx, sy = self.get_bullet_spawn()
         if venom or (getattr(self, 'is_boss', False) and random.random() < 0.45):
-            # venom shot from boss
+            # venom shot from boss - slowed down per user request
             b = Bullet(sx, sy, self.direction, 'enemy', power=1, venom=True)
             b.owner = 'boss'
             self.bullets.append(b)
             if getattr(self, 'is_boss', False):
-                self.cooldown = random.randint(35, 80)
-                self.venom_cooldown = 25
+                self.cooldown = random.randint(70, 130)  # slowed: was 35-80, now 70-130
+                self.venom_cooldown = 60  # slowed: was 25, now 60
             try:
                 from ..sound_manager import sound_manager
                 sound_manager.play_shoot()
@@ -633,12 +634,13 @@ class EnemyTank(Tank):
         self.bullets.append(b)
 
         # Cooldown handling - rapid reduces cooldown for 3x attack feel
+        # Slowed down boss per user request
         if getattr(self, 'rapid_active', False):
-            # Rapid: much faster shooting
+            # Rapid: faster shooting, but boss slower than before
             if self.enemy_type == 'fast':
                 self.cooldown = random.randint(12, 28)
             elif getattr(self, 'is_boss', False):
-                self.cooldown = random.randint(15, 35)
+                self.cooldown = random.randint(30, 60)  # slowed: was 15-35, now 30-60
             else:
                 self.cooldown = random.randint(15, 40)
         else:
@@ -647,7 +649,7 @@ class EnemyTank(Tank):
             elif self.enemy_type == 'power':
                 self.cooldown = random.randint(25, 60)
             elif getattr(self, 'is_boss', False):
-                self.cooldown = random.randint(30, 60)
+                self.cooldown = random.randint(65, 115)  # slowed: was 30-60, now 65-115
             else:
                 self.cooldown = random.randint(40, 95)
 

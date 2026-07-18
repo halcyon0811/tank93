@@ -686,6 +686,8 @@ class PlayerTank(Tank):
         self.invulnerable_timer = 0
         self.spawn_protection = 180
         self.helmet_timer = 0
+        self.venom_timer = 0
+        self.venom_level = 0
         # keep items? For balance, reset on respawn (or keep? we reset per classic)
         # We keep homing/spread if still has timer? For now keep them until timer expires
         # self.homing_timer and spread remain as is
