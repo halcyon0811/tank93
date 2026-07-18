@@ -1734,13 +1734,75 @@ class Game:
         elif pu_type == 'tank':
             player.apply_powerup('tank', self)
         elif pu_type == 'grenade':
-            # kill all enemies on screen
+            # NEW: Bomb does armor damage, only explodes if no armor left (user request)
+            # Previously it killed all enemies directly - now it causes BOMB_ARMOR_DAMAGE to armor
+            # If armor depleted, enemy explodes
+            try:
+                bomb_armor_dmg = BOMB_ARMOR_DAMAGE
+                bomb_power = BOMB_POWER_DAMAGE
+            except NameError:
+                bomb_armor_dmg = 100
+                bomb_power = 2
+            bomb_kills = 0
+            bomb_hits = 0
             for e in self.enemies[:]:
-                if e.alive:
-                    e.alive = False
-                    self.particles.add_explosion(e.rect.centerx, e.rect.centery, e.color, 20)
-                    player.score += e.score_value
-            # they will be counted next update as killed
+                if not e.alive:
+                    continue
+                bomb_hits += 1
+                # Apply armor damage
+                if hasattr(e, 'armor'):
+                    # Reduce armor
+                    old_armor = e.armor
+                    e.armor = max(0, e.armor - bomb_armor_dmg)
+                    e.armor_flash_timer = 20
+                    # Log
+                    try:
+                        _log_gameplay("BOMB_HIT", level_idx=self.current_level, data={"enemy_type": getattr(e, 'enemy_type', 'unknown'), "old_armor": old_armor, "new_armor": e.armor, "x": e.x, "y": e.y})
+                    except:
+                        pass
+                    # If no armor left, explode
+                    if e.armor <= 0:
+                        # Check if enemy already had no armor before bomb, or now depleted
+                        # If armor was >0 before and now 0, we consider it should explode if health low, or need extra power?
+                        # User says: if enemy has no armor left, it can explode
+                        # So: if armor <=0, kill enemy
+                        e.alive = False
+                        self.particles.add_explosion(e.rect.centerx, e.rect.centery, e.color, 25)
+                        player.score += e.score_value
+                        bomb_kills += 1
+                        try:
+                            _log_gameplay("BOMB_KILL", level_idx=self.current_level, data={"enemy_type": getattr(e, 'enemy_type', 'unknown'), "score": e.score_value})
+                        except:
+                            pass
+                    else:
+                        # Survives with reduced armor - show hit effect but not full explosion
+                        self.particles.add_explosion(e.rect.centerx, e.rect.centery, (255, 150, 0), 8)
+                        self.particles.add_hit(e.x, e.y)
+                else:
+                    # No armor attribute - fallback to old health damage logic
+                    # If enemy has health > bomb_power, reduce health, else kill
+                    if hasattr(e, 'health'):
+                        e.health -= bomb_power
+                        if e.health <= 0:
+                            e.alive = False
+                            self.particles.add_explosion(e.rect.centerx, e.rect.centery, e.color, 20)
+                            player.score += e.score_value
+                            bomb_kills += 1
+                        else:
+                            self.particles.add_hit(e.x, e.y)
+                    else:
+                        # No health either - kill
+                        e.alive = False
+                        self.particles.add_explosion(e.rect.centerx, e.rect.centery, e.color, 20)
+                        player.score += e.score_value
+                        bomb_kills += 1
+            # Log overall bomb usage
+            try:
+                _trace_log("POWERUP", f"Bomb used by {getattr(player, 'player_id', '?')} hits={bomb_hits} kills={bomb_kills} dmg={bomb_armor_dmg} level={self.current_level}", level="INFO")
+                _log_gameplay("BOMB_USE", level_idx=self.current_level, player_id=getattr(player, 'player_id', None), data={"hits": bomb_hits, "kills": bomb_kills, "armor_dmg": bomb_armor_dmg, "power_dmg": bomb_power})
+            except:
+                pass
+            # they will be counted next update as killed (if they died)
         elif pu_type == 'gun':
             player.bullet_power = 2
             player.cooldown = 0

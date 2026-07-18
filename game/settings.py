@@ -209,7 +209,12 @@ if not MEGA_ENABLED:
     BASE_POS = (12, 24)
 
 # Powerups - classic + new items (homing missile, 8-way spread, rapid fire 3x, shrink, giant)
+# grenade renamed to bomb per user request - now does armor damage, explodes only if no armor left
 POWERUP_TYPES = ['helmet', 'clock', 'shovel', 'star', 'grenade', 'tank', 'gun', 'homing', 'spread', 'rapid', 'shrink', 'giant']
+
+# Bomb (grenade) armor damage - new behavior: causes armor hurt, explodes only if no armor left
+BOMB_ARMOR_DAMAGE = 100  # how much armor damage bomb does to each enemy on screen
+BOMB_POWER_DAMAGE = 2    # health damage after armor gone (basic enemies health=1, armor enemies health=4, boss 18)
 POWERUP_DURATION = {
     'helmet': 10 * FPS,
     'clock': 5 * FPS,
