@@ -73,6 +73,34 @@ def get_enemy_spawns(is_mega=False):
 def get_screen_size(is_mega=False):
     return (MEGA_SCREEN_WIDTH, MEGA_SCREEN_HEIGHT) if (is_mega or MEGA_ENABLED) else (960,720)
 
+# Armor system
+ARMOR_INITIAL_PLAYER = 100
+ARMOR_INITIAL_ENEMY = {
+    'basic': 50,
+    'fast': 40,
+    'power': 80,
+    'armor': 150,
+    'boss': 300,
+    'monster_boss': 400,
+    'monster': 300,
+}
+ARMOR_MAX_PLAYER = 300
+ARMOR_UPGRADE_STAR = 25  # per star level
+ARMOR_UPGRADE_TANK = 50  # extra life also gives armor
+ARMOR_UPGRADE_GUN = 30   # gun powerup
+ARMOR_SHIELD_REDUCTION = 0.3  # armor absorbs 70% damage, 30% passes to health when armor exists
+ARMOR_REGEN_RATE = 0  # no auto regen
+
+# Brick durability - hits needed to destroy
+BRICK_HITS_NEEDED = {
+    'normal': 2,      # normal bullet 2 hits
+    'power': 1,       # power/gun 1 hit
+    'rapid': 3,       # rapid 3 hits (weaker per bullet)
+    'homing': 4,      # tracking missile 4 hits (balanced because it avoids walls)
+    'spread': 2,      # spread 2 hits
+    'venom': 2,       # venom 2 hits
+}
+
 # Sidebar HUD
 HUD_X = PLAYFIELD_X + PLAYFIELD_W + 20
 HUD_W = SCREEN_WIDTH - HUD_X - 20

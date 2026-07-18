@@ -533,23 +533,43 @@ class PlayerTank(Tank):
             # Mix base color with rapid pink
             base_color = (min(255, base_color[0]+30), base_color[1], min(255, base_color[2]+30)) if isinstance(base_color, tuple) else base_color
 
+        # Determine bullet type for brick durability system
+        def get_bullet_type_for_player():
+            if self.homing_active and self.spread_active:
+                return 'homing'
+            elif self.homing_active:
+                return 'homing'
+            elif self.spread_active and self.rapid_active:
+                return 'spread'
+            elif self.spread_active:
+                return 'spread'
+            elif self.rapid_active:
+                return 'rapid'
+            elif self.bullet_power >= 2:
+                return 'power'
+            else:
+                return 'normal'
+
         if self.spread_active:
             # Fire 8 directions at once
             for d in EIGHT_DIRS:
                 sx, sy = self.get_bullet_spawn_for(d)
-                # Homing spread: if homing active too, make each homing but with stagger for perf (avoid 8 A* same frame)
                 is_homing = self.homing_active
                 col = (255, 140, 0) if is_homing else base_color
                 if self.rapid_active and not is_homing:
                     col = (255, 100, 150) if col == self.color else col
-                bullet = Bullet(sx, sy, d, f"player{self.player_id}", power=self.bullet_power, color=col, homing=is_homing)
-                # stagger replan to avoid 8 A* spike same frame
+                b_type = get_bullet_type_for_player()
+                # spread overrides
+                if is_homing:
+                    b_type = 'homing'
+                elif self.rapid_active:
+                    b_type = 'rapid'
+                bullet = Bullet(sx, sy, d, f"player{self.player_id}", power=self.bullet_power, color=col, homing=is_homing, bullet_type=b_type)
                 if is_homing:
                     import random as _rnd
                     bullet.replan_timer = _rnd.randint(0, 25)
                 self.bullets.append(bullet)
                 bullets_created.append(bullet)
-            # Cooldown: base 25, /3 if rapid active = ~8
             base_cd = 25
             self.cooldown = max(3, base_cd // 3) if self.rapid_active else base_cd
         else:
@@ -557,10 +577,9 @@ class PlayerTank(Tank):
             is_homing = self.homing_active
             col = (255, 140, 0) if is_homing else base_color
             if self.rapid_active and not is_homing:
-                # Override with rapid color if not homing
                 col = (255, 50, 150)
-            bullet = Bullet(sx, sy, self.direction, f"player{self.player_id}", power=self.bullet_power, color=col, homing=is_homing)
-            # If rapid, bullet speed *1.2 for extra feel, but NOT for homing (keep tank speed)
+            b_type = get_bullet_type_for_player()
+            bullet = Bullet(sx, sy, self.direction, f"player{self.player_id}", power=self.bullet_power, color=col, homing=is_homing, bullet_type=b_type)
             if self.rapid_active and not is_homing:
                 bullet.speed *= 1.2
             self.bullets.append(bullet)
@@ -650,10 +669,14 @@ class PlayerTank(Tank):
         # clean bullets
         self.bullets = [b for b in self.bullets if b.alive]
 
-    def take_damage(self, power=1):
+    def take_damage(self, power=1, bullet_type='normal'):
         if self.helmet_timer > 0 or self.invulnerable_timer > 0 or self.spawn_protection > 0:
             return False
-        # die
+        # Use armor system from base Tank
+        if not super().take_damage(power, bullet_type):
+            # Armor absorbed
+            return False
+        # Armor depleted, die
         self.die()
         return True
 
@@ -676,6 +699,9 @@ class PlayerTank(Tank):
         self.base_speed = TANK_SPEED['player']
         self.venom_timer = 0
         self.venom_level = 0
+        self.armor = ARMOR_INITIAL_PLAYER
+        self.max_armor = ARMOR_INITIAL_PLAYER
+        self.armor_flash_timer = 0
         self._update_rect_size()
         self.update_bullet_power()
 
@@ -688,6 +714,10 @@ class PlayerTank(Tank):
         self.helmet_timer = 0
         self.venom_timer = 0
         self.venom_level = 0
+        # Restore armor on respawn
+        self.armor = ARMOR_INITIAL_PLAYER + self.star_level * ARMOR_UPGRADE_STAR
+        self.max_armor = max(self.max_armor, self.armor)
+        self.armor_flash_timer = 0
         # keep items? For balance, reset on respawn (or keep? we reset per classic)
         # We keep homing/spread if still has timer? For now keep them until timer expires
         # self.homing_timer and spread remain as is
@@ -696,46 +726,55 @@ class PlayerTank(Tank):
         if type_name == 'helmet':
             self.helmet_timer = POWERUP_DURATION.get('helmet', 10 * FPS)
             self.invulnerable_timer = POWERUP_DURATION.get('helmet', 10 * FPS)
+            self.add_armor(30)  # helmet also gives armor
         elif type_name == 'star':
             self.star_level = min(self.star_level + 1, STAR_LEVELS-1)
             self.update_bullet_power()
+            # Star upgrades armor as well
+            self.add_armor(ARMOR_UPGRADE_STAR)
+            self.max_armor = min(ARMOR_MAX_PLAYER, self.max_armor + 15)
         elif type_name == 'tank':
             self.lives += 1
             self.score += 500
+            self.add_armor(ARMOR_UPGRADE_TANK)
         elif type_name == 'gun':
             self.bullet_power = 2
-            # temporary? make 2x power for star level
+            self.add_armor(ARMOR_UPGRADE_GUN)
         elif type_name == 'shovel':
             if game:
                 game.tilemap.activate_shovel()
+            self.add_armor(20)
         elif type_name == 'homing':
-            # Tracking missile item: tank can fire tracking missile to attack nearest enemy
-            # Kept across stages, only lost on death (per user request)
-            # Set to permanent until death: timer = -1 means infinite
-            self.homing_timer = -1  # permanent until death
+            self.homing_timer = -1
             self.homing_active = True
             self.score += 200
+            self.add_armor(20)
         elif type_name == 'spread':
-            # 8-direction firing item - kept across stages, lost on death
-            self.spread_timer = -1  # permanent until death
+            self.spread_timer = -1
             self.spread_active = True
             self.score += 200
+            self.add_armor(20)
         elif type_name == 'rapid':
             self.rapid_timer = -1
             self.rapid_active = True
             self.score += 200
+            self.add_armor(15)
         elif type_name == 'shrink':
-            # Half size, double speed for 15s
             self.shrink_timer = POWERUP_DURATION.get('shrink', 15*FPS)
-            # cancel giant if active (can't be both)
             self.giant_timer = 0
             self.is_giant = False
             self.score += 150
+            self.add_armor(10)
             self.update_bullet_power()
         elif type_name == 'giant':
             self.giant_timer = GIANT_DURATION
             self.shrink_timer = 0
             self.is_shrunk = False
             self.score += 300
+            self.add_armor(40)
             self.update_bullet_power()
         # grenade, clock handled by game
+        elif type_name == 'armor':
+            # New armor powerup if added
+            self.add_armor(100)
+            self.score += 200

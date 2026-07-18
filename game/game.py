@@ -1483,11 +1483,11 @@ class Game:
             self.tilemap.draw(canvas)
             # base
             self.base.draw(canvas)
-            # tanks
+            # tanks - pass tilemap for forest hiding (player faintly visible in forest, enemies completely hidden)
             for e in self.enemies:
-                e.draw(canvas)
+                e.draw(canvas, tilemap=self.tilemap)
             for p in self.players:
-                p.draw(canvas)
+                p.draw(canvas, tilemap=self.tilemap)
             # bullets
             for b in self.bullets:
                 b.draw(canvas)

@@ -161,6 +161,29 @@ class HUD:
             screen.blit(star_txt, (xpos, ypos))
             ypos += 16
 
+            # Armor bar in HUD
+            if hasattr(p, 'armor') and hasattr(p, 'max_armor') and p.max_armor > 0:
+                armor_pct = max(0, p.armor / p.max_armor)
+                bar_w = 80
+                bar_h = 10
+                # Background
+                pygame.draw.rect(screen, (0,0,0), (xpos-1, ypos-1, bar_w+2, bar_h+2))
+                pygame.draw.rect(screen, (50,50,60), (xpos, ypos, bar_w, bar_h))
+                # Color based on health
+                if armor_pct > 0.6:
+                    col = (80, 180, 255)
+                elif armor_pct > 0.3:
+                    col = (255, 220, 80)
+                else:
+                    col = (255, 80, 80)
+                if getattr(p, 'armor_flash_timer', 0) % 4 < 2 and getattr(p, 'armor_flash_timer', 0) > 0:
+                    col = (255, 255, 255)
+                pygame.draw.rect(screen, col, (xpos, ypos, int(bar_w * armor_pct), bar_h))
+                # Text
+                armor_text = self.font_small.render(f"ARMOR {int(p.armor)}/{p.max_armor}", True, COLOR_WHITE)
+                screen.blit(armor_text, (xpos + bar_w + 5, ypos - 2))
+                ypos += 16
+
             statuses = []
             if p.helmet_timer > 0:
                 statuses.append("SHIELD")

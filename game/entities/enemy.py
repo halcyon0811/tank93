@@ -104,24 +104,32 @@ class EnemyTank(Tank):
             self.bullet_power = 1
             self.score_value = 100
             self.shoot_chance = 0.018
+            self.armor = ARMOR_INITIAL_ENEMY.get('basic', 50)
+            self.max_armor = self.armor
         elif enemy_type == 'fast':
             self.speed = TANK_SPEED['fast']
             self.health = 1
             self.bullet_power = 1
             self.score_value = 200
             self.shoot_chance = 0.025
+            self.armor = ARMOR_INITIAL_ENEMY.get('fast', 40)
+            self.max_armor = self.armor
         elif enemy_type == 'power':
             self.speed = TANK_SPEED['enemy'] * 1.1
             self.health = 1
             self.bullet_power = 1
             self.score_value = 300
             self.shoot_chance = 0.045
+            self.armor = ARMOR_INITIAL_ENEMY.get('power', 80)
+            self.max_armor = self.armor
         elif enemy_type == 'armor':
             self.speed = TANK_SPEED['enemy'] * 0.75
             self.health = 4
             self.bullet_power = 1
             self.score_value = 400
             self.shoot_chance = 0.020
+            self.armor = ARMOR_INITIAL_ENEMY.get('armor', 150)
+            self.max_armor = self.armor
         elif enemy_type in ('boss', 'monster_boss', 'monster'):
             # Monster boss - slowed to normal enemy speed per user request (was 1.5x player = 3.3, now 1.2 same as basic)
             # Further slowed shooting and venom per user request "slow down the venom and shooting speed of boss"
@@ -132,7 +140,9 @@ class EnemyTank(Tank):
             self.shoot_chance = 0.045  # slowed: was 0.12, now 0.045 similar to power enemy (user requested slower)
             self.is_boss = True
             self.venom_cooldown = 0
-            self.venom_shoot_chance = 0.025  # slowed venom: was 0.06, now 0.025
+            self.venom_shoot_chance = 0.025  # slowed venom: was 0.06, now 0.025 (user request slower)
+            self.armor = ARMOR_INITIAL_ENEMY.get('monster_boss', 400)
+            self.max_armor = self.armor
             # Make boss bigger
             self.rect = pygame.Rect(0,0, int((TANK_SIZE-4)*1.8), int((TANK_SIZE-4)*1.8))
             self.rect.center = (self.x, self.y)
@@ -142,6 +152,8 @@ class EnemyTank(Tank):
             self.bullet_power = 1
             self.score_value = 100
             self.shoot_chance = 0.018
+            self.armor = ARMOR_INITIAL_ENEMY.get('basic', 50)
+            self.max_armor = self.armor
 
         # Boss has less spawn protection but more flashy
         if enemy_type in ('boss', 'monster_boss', 'monster'):
@@ -575,20 +587,18 @@ class EnemyTank(Tank):
         # Handle spread - fire 8 directions at once (if item assigned)
         if getattr(self, 'spread_active', False):
             bullets = []
-            # Use EIGHT_DIRS if available, else cardinal + diagonal
             try:
                 from ..settings import EIGHT_DIRS
             except:
                 EIGHT_DIRS = ['UP','UP_RIGHT','RIGHT','DOWN_RIGHT','DOWN','DOWN_LEFT','LEFT','UP_LEFT']
             for d in EIGHT_DIRS:
                 sx, sy = self.get_bullet_spawn_for(d) if hasattr(self, 'get_bullet_spawn_for') else self.get_bullet_spawn()
-                # For spread, use that direction's spawn
                 if hasattr(self, 'get_bullet_spawn_for'):
                     sx, sy = self.get_bullet_spawn_for(d)
-                # Homing spread?
                 is_homing = getattr(self, 'homing_active', False)
-                b = Bullet(sx, sy, d, 'enemy', power=self.bullet_power, color=(255, 100, 100), homing=is_homing)
-                # Rapid: slightly faster bullet
+                is_rapid = getattr(self, 'rapid_active', False)
+                b_type = 'homing' if is_homing else 'rapid' if is_rapid else 'spread'
+                b = Bullet(sx, sy, d, 'enemy', power=self.bullet_power, color=(255, 100, 100), homing=is_homing, bullet_type=b_type)
                 if getattr(self, 'rapid_active', False):
                     b.speed *= 1.2
                 self.bullets.append(b)
@@ -613,7 +623,7 @@ class EnemyTank(Tank):
         sx, sy = self.get_bullet_spawn()
         if venom or (getattr(self, 'is_boss', False) and random.random() < 0.45):
             # venom shot from boss - slowed down per user request
-            b = Bullet(sx, sy, self.direction, 'enemy', power=1, venom=True)
+            b = Bullet(sx, sy, self.direction, 'enemy', power=1, venom=True, bullet_type='venom')
             b.owner = 'boss'
             self.bullets.append(b)
             if getattr(self, 'is_boss', False):
@@ -626,9 +636,12 @@ class EnemyTank(Tank):
                 pass
             return b
 
-        # Normal / homing / rapid single shot
         is_homing = getattr(self, 'homing_active', False)
-        b = Bullet(sx, sy, self.direction, 'enemy', power=self.bullet_power, color=(255, 100, 100), homing=is_homing)
+        is_rapid = getattr(self, 'rapid_active', False)
+        b_type = 'homing' if is_homing else 'rapid' if is_rapid else 'normal'
+        if self.bullet_power >= 2:
+            b_type = 'power'
+        b = Bullet(sx, sy, self.direction, 'enemy', power=self.bullet_power, color=(255, 100, 100), homing=is_homing, bullet_type=b_type)
         if getattr(self, 'rapid_active', False):
             b.speed *= 1.2
         self.bullets.append(b)
@@ -700,9 +713,25 @@ class EnemyTank(Tank):
             self.direction = best_dir
         return self.shoot(venom=True)
 
-    def take_damage(self, power=1):
+    def take_damage(self, power=1, bullet_type='normal'):
         if self.invulnerable_timer > 0 or self.spawn_protection > 0:
             return False
+        
+        # Use parent armor logic first
+        # If armor protects, don't reduce health
+        if hasattr(self, 'armor') and self.armor > 0:
+            # Call parent to handle armor damage - if returns False, armor protected
+            parent_result = super().take_damage(power, bullet_type)
+            if not parent_result:
+                # Armor absorbed it, flash
+                return False
+            # Armor broken, continue to health damage in this same hit? No, armor breaks absorb this hit
+            # Actually super returns False when armor protects, True would mean no armor - but we handled in super
+            # So if we reach here, armor was 0 or just broke, check health
+            if self.armor > 0:
+                return False
+        
+        # Armor depleted, damage health
         self.health -= power
         if self.health <= 0:
             self.die()

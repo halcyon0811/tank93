@@ -135,7 +135,7 @@ def _a_star_tile(tilemap, sx, sy, tx, ty):
 
 
 class Bullet:
-    def __init__(self, x, y, direction, owner, power=1, color=None, homing=False, venom=False):
+    def __init__(self, x, y, direction, owner, power=1, color=None, homing=False, venom=False, bullet_type=None):
         self.x = x
         self.y = y
         self.dir = direction
@@ -149,6 +149,17 @@ class Bullet:
         if venom:
             self.speed = VENOM_SPEED
             self.color = (80, 220, 80)
+        # bullet type for brick durability: normal, power, rapid, homing, spread, venom
+        if bullet_type:
+            self.bullet_type = bullet_type
+        elif venom:
+            self.bullet_type = 'venom'
+        elif homing:
+            self.bullet_type = 'homing'
+        elif power >= 2:
+            self.bullet_type = 'power'
+        else:
+            self.bullet_type = 'normal'
 
         self.alive = True
         sz = BULLET_SIZE if not venom else BULLET_SIZE+2
@@ -540,9 +551,9 @@ class Bullet:
                         # truly trapped, break brick to escape as last resort
                         destroyed = False
                         try:
-                            destroyed = tilemap.destroy_tile(gx, gy, self.power, self.dir)
+                            destroyed = tilemap.destroy_tile(gx, gy, self.power, self.dir, getattr(self, 'bullet_type', 'normal'))
                         except TypeError:
-                            destroyed = tilemap.destroy_tile(gx, gy, self.power)
+                            destroyed = tilemap.destroy_tile(gx, gy, self.power, self.dir, getattr(self, 'bullet_type', 'normal'))
                         self.alive = False
                         try:
                             from ..sound_manager import sound_manager
@@ -584,9 +595,9 @@ class Bullet:
                 else:
                     destroyed = False
                     try:
-                        destroyed = tilemap.destroy_tile(gx, gy, self.power, self.dir)
+                        destroyed = tilemap.destroy_tile(gx, gy, self.power, self.dir, getattr(self, 'bullet_type', 'normal'))
                     except TypeError:
-                        destroyed = tilemap.destroy_tile(gx, gy, self.power)
+                        destroyed = tilemap.destroy_tile(gx, gy, self.power, self.dir, getattr(self, 'bullet_type', 'normal'))
                     self.alive = False
                     try:
                         from ..sound_manager import sound_manager
@@ -604,9 +615,9 @@ class Bullet:
                     if self.power >= 2 and self.stuck_timer > HOMING_STUCK_DESTROY_THRESHOLD + 45:
                         destroyed = False
                         try:
-                            destroyed = tilemap.destroy_tile(gx, gy, self.power, self.dir)
+                            destroyed = tilemap.destroy_tile(gx, gy, self.power, self.dir, getattr(self, 'bullet_type', 'normal'))
                         except TypeError:
-                            destroyed = tilemap.destroy_tile(gx, gy, self.power)
+                            destroyed = tilemap.destroy_tile(gx, gy, self.power, self.dir, getattr(self, 'bullet_type', 'normal'))
                         self.alive = False
                         try:
                             from ..sound_manager import sound_manager
@@ -641,9 +652,9 @@ class Bullet:
                     destroyed = False
                     if self.power >= 2:
                         try:
-                            destroyed = tilemap.destroy_tile(gx, gy, self.power, self.dir)
+                            destroyed = tilemap.destroy_tile(gx, gy, self.power, self.dir, getattr(self, 'bullet_type', 'normal'))
                         except TypeError:
-                            destroyed = tilemap.destroy_tile(gx, gy, self.power)
+                            destroyed = tilemap.destroy_tile(gx, gy, self.power, self.dir, getattr(self, 'bullet_type', 'normal'))
                     self.alive = False
                     try:
                         from ..sound_manager import sound_manager
@@ -710,7 +721,8 @@ class Bullet:
                         # venom doesn't affect enemies
                         self.alive = False
                         return 'blocked'
-                if not tank.take_damage(self.power):
+                b_type = getattr(self, 'bullet_type', 'normal')
+                if not tank.take_damage(self.power, bullet_type=b_type):
                     self.alive = False
                     try:
                         from ..sound_manager import sound_manager

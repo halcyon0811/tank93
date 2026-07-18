@@ -43,6 +43,16 @@ class Tank:
         self.spawn_protection = 0
         self.on_ice = False
 
+        # Armor system
+        if is_player:
+            self.armor = ARMOR_INITIAL_PLAYER
+            self.max_armor = ARMOR_INITIAL_PLAYER
+        else:
+            # enemy armor set later in subclass, fallback
+            self.armor = ARMOR_INITIAL_ENEMY.get('basic', 50)
+            self.max_armor = self.armor
+        self.armor_flash_timer = 0  # for visual hit feedback
+
         # size effects
         self.shrink_timer = 0
         self.giant_timer = 0
@@ -269,6 +279,8 @@ class Tank:
             self.invulnerable_timer -= 1
         if self.spawn_protection > 0:
             self.spawn_protection -= 1
+        if self.armor_flash_timer > 0:
+            self.armor_flash_timer -= 1
 
         # size effects
         self.update_size_state()
@@ -293,28 +305,99 @@ class Tank:
         except:
             self.on_ice = False
 
-    def take_damage(self, power=1):
+    def take_damage(self, power=1, bullet_type='normal'):
         if self.invulnerable_timer > 0 or self.spawn_protection > 0:
             return False
-        # armor logic in subclass
+        
+        # Armor protection - absorbs damage first
+        if hasattr(self, 'armor') and self.armor > 0:
+            # Armor absorbs bullet, with flash feedback
+            damage_to_armor = power * 25  # each bullet does 25 armor damage base
+            # Different bullet types do different armor damage
+            if bullet_type == 'power' or power >= 2:
+                damage_to_armor *= 1.5
+            elif bullet_type == 'homing':
+                damage_to_armor *= 0.8  # homing weaker vs armor (3-4 hits for bricks, less armor damage)
+            elif bullet_type == 'rapid':
+                damage_to_armor *= 0.6
+            elif bullet_type == 'venom':
+                damage_to_armor *= 0.5
+                # venom bypasses partial armor
+                if self.armor > 0:
+                    self.armor = max(0, self.armor - damage_to_armor * 0.5)
+                    self.armor_flash_timer = 10
+                    # Still take partial health damage from venom
+                    return True
+            
+            self.armor = max(0, self.armor - damage_to_armor)
+            self.armor_flash_timer = 8
+            
+            # If armor still has value, it protects - no health damage
+            if self.armor > 0:
+                # Armor reduced but protects from death
+                return False
+            else:
+                # Armor just broke, but this bullet is absorbed by armor breaking
+                self.armor = 0
+                return False  # armor sacrifice saves this hit
+        
+        # No armor left, take real damage
         return True
+
+    def add_armor(self, amount):
+        """Add armor via upgrade, capped at max"""
+        if not hasattr(self, 'armor'):
+            self.armor = 0
+        if not hasattr(self, 'max_armor'):
+            self.max_armor = ARMOR_MAX_PLAYER if self.is_player else 200
+        self.armor = min(self.max_armor, self.armor + amount)
+        self.armor_flash_timer = 15
+        # Increase max_armor if upgrading beyond current max (for player progression)
+        if self.is_player and self.armor >= self.max_armor:
+            self.max_armor = min(ARMOR_MAX_PLAYER, self.max_armor + amount // 2)
+
+    def get_armor_percent(self):
+        if not hasattr(self, 'max_armor') or self.max_armor == 0:
+            return 0
+        return max(0, min(1, self.armor / self.max_armor))
 
     def die(self):
         self.alive = False
 
-    def draw(self, screen):
+    def draw(self, screen, tilemap=None):
         if not self.alive:
             return
+        
+        # Forest hiding check - if in forest, mostly hide tank
+        in_forest = False
+        if tilemap and hasattr(tilemap, 'is_in_forest'):
+            in_forest = tilemap.is_in_forest(self.x, self.y)
+        elif tilemap:
+            # fallback check
+            gx = int((self.x - PLAYFIELD_X) // TILE_SIZE)
+            gy = int((self.y - PLAYFIELD_Y) // TILE_SIZE)
+            if 0 <= gx < GRID_W and 0 <= gy < GRID_H:
+                if tilemap.tiles[gy][gx] == TILE_GRASS:
+                    in_forest = True
+        
+        # For enemy tanks in forest: completely hidden
+        if in_forest and not self.is_player:
+            # Enemy completely hidden in forest - don't draw at all
+            return
+        
+        # For player in forest: show subtle hint (15% visibility)
+        forest_alpha = 1.0
+        is_player_in_forest = False
+        if in_forest and self.is_player:
+            is_player_in_forest = True
+            forest_alpha = 0.18  # 18% visibility for own tank in forest
 
-        # Venom dissolve visual - tank gradually dissolves/green slime over 10s
+        # Venom dissolve visual
         venom_t = getattr(self, 'venom_timer', 0)
         venom_lv = getattr(self, 'venom_level', 0)
         if venom_t > 0 and hasattr(self, 'venom_timer'):
-            # flicker green and shrink visually
-            diss = venom_lv  # 0->1
-            # green overlay
+            diss = venom_lv
             if int(pygame.time.get_ticks()/100) % 2 == 0 or diss > 0.5:
-                # will draw extra below
                 pass
 
         # If authentic NES sprites available, use them for true retro look matching downloaded_maps
@@ -397,22 +480,33 @@ class Tank:
                         venom_lv = getattr(self, 'venom_level', 0)
                         draw_spr = spr
                         if venom_t > 0:
-                            # make sprite greener and partially transparent as it dissolves
-                            # create tinted copy
                             try:
                                 tinted = spr.copy()
-                                # green overlay with alpha based on level
                                 overlay = pygame.Surface(tinted.get_size(), pygame.SRCALPHA)
                                 alpha = int(120 * min(1.0, venom_lv*1.5 + 0.2))
                                 overlay.fill((40, 200, 40, alpha))
                                 tinted.blit(overlay, (0,0), special_flags=pygame.BLEND_RGBA_ADD)
-                                # dissolve: shrink alpha over time
                                 if venom_lv > 0.5:
                                     fade_alpha = int(255 * (1.0 - (venom_lv-0.5)*2))
                                     tinted.set_alpha(max(30, fade_alpha))
                                 draw_spr = tinted
                             except:
                                 draw_spr = spr
+                        
+                        # Apply forest hiding alpha - player slightly visible, enemy invisible (already returned above)
+                        if is_player_in_forest:
+                            try:
+                                forest_spr = draw_spr.copy()
+                                forest_spr.set_alpha(int(255 * forest_alpha * 0.8))
+                                draw_spr = forest_spr
+                                # Add subtle leaf rustle indicator
+                                if random.random() < 0.1:
+                                    rx = self.rect.centerx + random.randint(-4,4)
+                                    ry = self.rect.centery + random.randint(-4,4)
+                                    pygame.draw.circle(screen, (80,160,30), (rx, ry), 1)
+                            except:
+                                pass
+                        
                         rect = draw_spr.get_rect(center=self.rect.center)
                         screen.blit(draw_spr, rect)
 
@@ -434,11 +528,38 @@ class Tank:
                             screen.blit(txt_bg, (self.rect.centerx - txt.get_width()//2 -2, self.rect.top - 14))
                             screen.blit(txt, (self.rect.centerx - txt.get_width()//2, self.rect.top - 14))
 
+                        # Armor bar for all tanks with armor (player and enemies)
+                        if hasattr(self, 'armor') and hasattr(self, 'max_armor') and self.max_armor > 0 and self.armor > 0:
+                            bar_w = 24 if self.is_player else 20
+                            bar_h = 5 if self.is_player else 4
+                            cx = self.rect.centerx
+                            cy = self.rect.top - 10 if self.is_player else self.rect.bottom + 3
+                            # Flash white when armor just hit
+                            if getattr(self, 'armor_flash_timer', 0) > 0 and self.armor_flash_timer % 4 < 2:
+                                bar_col = (255, 255, 255)
+                            else:
+                                # Color based on armor percent: green -> yellow -> red -> blue for high
+                                armor_pct = self.armor / self.max_armor
+                                if armor_pct > 0.6:
+                                    bar_col = (100, 200, 255)  # blue-ish for high armor
+                                elif armor_pct > 0.3:
+                                    bar_col = (255, 220, 80)  # yellow for medium
+                                else:
+                                    bar_col = (255, 100, 100)  # red for low
+                            pygame.draw.rect(screen, (0,0,0), (cx-bar_w//2-1, cy-1, bar_w+2, bar_h+2))
+                            pygame.draw.rect(screen, (40,40,50), (cx-bar_w//2, cy, bar_w, bar_h))
+                            pygame.draw.rect(screen, bar_col, (cx-bar_w//2, cy, int(bar_w * max(0, self.armor/self.max_armor)), bar_h))
+                            # Small armor icon
+                            if self.is_player:
+                                font = pygame.font.Font(None, 12)
+                                txt = font.render(f"{int(self.armor)}", True, COLOR_WHITE)
+                                screen.blit(txt, (cx + bar_w//2 + 2, cy-2))
+                        
                         if getattr(self, 'enemy_type', '') == 'armor' and getattr(self, 'health',1) > 1 and not self.is_player:
                             bar_w = 20
                             bar_h = 4
                             cx = self.rect.centerx
-                            cy = self.rect.bottom + 2
+                            cy = self.rect.bottom + 10  # offset below armor bar
                             pygame.draw.rect(screen, (0,0,0), (cx-bar_w//2-1, cy-1, bar_w+2, bar_h+2))
                             pygame.draw.rect(screen, (60,60,60), (cx-bar_w//2, cy, bar_w, bar_h))
                             frac = self.health / 4.0
@@ -454,7 +575,6 @@ class Tank:
                                 sy = self.rect.centery + random.randint(-6,6)
                                 pygame.draw.circle(screen, (150, 220, 255), (sx, sy), 1)
                         if venom_t > 0:
-                            # dripping slime
                             for i in range(int(3 + venom_lv*4)):
                                 sx = self.rect.centerx + random.randint(-8,8)
                                 sy = self.rect.bottom - 4 + int(venom_lv*6) + i*3
@@ -512,3 +632,17 @@ class Tank:
 
         # turret center
         pygame.draw.circle(screen, (20,20,20), (cx, cy), 4)
+
+        # Armor bar fallback
+        if hasattr(self, 'armor') and hasattr(self, 'max_armor') and self.max_armor > 0 and self.armor > 0:
+            bar_w = 24
+            bar_h = 4
+            bx = cx
+            by = cy - size//2 - 10
+            pygame.draw.rect(screen, (0,0,0), (bx-bar_w//2-1, by-1, bar_w+2, bar_h+2))
+            pygame.draw.rect(screen, (40,40,50), (bx-bar_w//2, by, bar_w, bar_h))
+            pct = max(0, self.armor / self.max_armor)
+            col = (100,200,255) if pct > 0.6 else (255,220,80) if pct > 0.3 else (255,100,100)
+            if getattr(self, 'armor_flash_timer', 0) % 4 < 2 and getattr(self, 'armor_flash_timer', 0) > 0:
+                col = (255,255,255)
+            pygame.draw.rect(screen, col, (bx-bar_w//2, by, int(bar_w*pct), bar_h))
