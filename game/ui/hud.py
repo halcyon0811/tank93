@@ -359,6 +359,45 @@ class HUD:
                     start_hint = self.font_small.render("PRESS ENTER / A / START", True, COLOR_YELLOW)
                     screen.blit(start_hint, start_hint.get_rect(center=(tank_cx, y+card_h+14)))
 
+            # === Original NES Maps Preview on Main Screen - to make default obvious ===
+            # Show Stage 1 original map as preview to prove it defaults to original NES maps
+            if LVLS_13_PREVIEW and len(LVLS_13_PREVIEW) > 0:
+                preview = LVLS_13_PREVIEW[0]  # Stage 1 original
+                p_tile = 8
+                p_w = 13 * p_tile
+                p_h = 13 * p_tile
+                p_x = SCREEN_WIDTH - p_w - 30
+                p_y = start_y + 10
+                # Background
+                pygame.draw.rect(screen, (0,0,0), (p_x-6, p_y-26, p_w+12, p_h+36), border_radius=6)
+                pygame.draw.rect(screen, (100,100,130), (p_x-6, p_y-26, p_w+12, p_h+36), 2, border_radius=6)
+                # Label
+                lab = self.font_small.render(f"ORIGINAL NES MAP - STAGE 1 PREVIEW", True, (200,200,100))
+                screen.blit(lab, lab.get_rect(center=(p_x+p_w//2, p_y-14)))
+                lab2 = self.font_small.render(f"DEFAULT: 1P/2P USES THIS", True, (100,255,100))
+                screen.blit(lab2, lab2.get_rect(center=(p_x+p_w//2, p_y-2)))
+                for ry in range(13):
+                    for rx in range(13):
+                        t = preview[ry][rx]
+                        tx = p_x + rx * p_tile
+                        ty = p_y + ry * p_tile
+                        if t == 0:
+                            continue
+                        elif t == 1:
+                            pygame.draw.rect(screen, COLOR_BRICK, (tx, ty, p_tile, p_tile))
+                        elif t == 2:
+                            pygame.draw.rect(screen, COLOR_STEEL, (tx, ty, p_tile, p_tile))
+                        elif t == 3:
+                            pygame.draw.rect(screen, COLOR_WATER, (tx, ty, p_tile, p_tile))
+                        elif t == 4:
+                            pygame.draw.rect(screen, COLOR_GRASS, (tx, ty, p_tile, p_tile))
+                        elif t == 5:
+                            pygame.draw.rect(screen, COLOR_ICE, (tx, ty, p_tile, p_tile))
+                # Enemies for stage 1
+                if BOTS_RAW_ALL and len(BOTS_RAW_ALL) > 0:
+                    bot_txt = self.font_small.render(f"STAGE 1: {' '.join(BOTS_RAW_ALL[0])}", True, (180,180,200))
+                    screen.blit(bot_txt, (p_x-10, p_y+p_h+8))
+
             # === Secondary options below cards - Level Select, How to, Quit ===
             options_main = [
                 "LEVEL SELECT - 35 ORIGINAL NES MAPS",
