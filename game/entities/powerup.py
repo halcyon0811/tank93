@@ -1,7 +1,125 @@
 import pygame
 import random
 import math
+import os
+import pathlib
 from ..settings import *
+
+# Item icon loader using your downloaded assets - size similar to tank
+ITEMS_DIR = pathlib.Path(__file__).parent.parent / "assets" / "items"
+
+# Map your 7 classic icons to types (based on common Battle City icon order)
+# Battle City classic icons (from NES): helmet, clock, shovel, star, grenade, tank, gun
+# Your files battle_city_icon_1..7.png correspond to these - we'll auto-detect best guess by file existence
+# User provided 7 classic + we create 5 new: homing, spread, rapid, shrink, giant
+
+# Try to guess mapping: icon_1 helmet, 2 clock, 3 shovel, 4 star, 5 grenade, 6 tank, 7 gun
+CLASSIC_ICON_MAP = {
+    'helmet': 'battle_city_icon_1.png',
+    'clock': 'battle_city_icon_2.png',
+    'shovel': 'battle_city_icon_3.png',
+    'star': 'battle_city_icon_4.png',
+    'grenade': 'battle_city_icon_5.png',
+    'tank': 'battle_city_icon_6.png',
+    'gun': 'battle_city_icon_7.png',
+}
+
+NEW_ICON_MAP = {
+    'homing': 'battle_city_icon_homing.png',
+    'spread': 'battle_city_icon_spread.png',
+    'rapid': 'battle_city_icon_rapid.png',
+    'shrink': 'battle_city_icon_shrink.png',
+    'giant': 'battle_city_icon_giant.png',
+}
+
+ALL_ICON_MAP = {**CLASSIC_ICON_MAP, **NEW_ICON_MAP}
+
+# Cache for loaded images
+_ICON_CACHE = {}
+
+def load_item_icon(type_name, target_size=None):
+    """Load icon for powerup type, scaled to tank size (32)"""
+    if target_size is None:
+        target_size = TANK_SIZE  # similar as tank size per user request
+    
+    cache_key = (type_name, target_size)
+    if cache_key in _ICON_CACHE:
+        return _ICON_CACHE[cache_key]
+    
+    # Try to load from file
+    icon_filename = ALL_ICON_MAP.get(type_name)
+    if icon_filename:
+        icon_path = ITEMS_DIR / icon_filename
+        if icon_path.exists():
+            try:
+                surf = pygame.image.load(str(icon_path))
+                # For headless load, don't use convert_alpha before display exists
+                if pygame.display.get_surface():
+                    try:
+                        surf = surf.convert_alpha()
+                    except:
+                        pass
+                orig_w, orig_h = surf.get_size()
+                scale = target_size / max(orig_w, orig_h) * 0.95
+                new_w = int(orig_w * scale)
+                new_h = int(orig_h * scale)
+                try:
+                    scaled = pygame.transform.smoothscale(surf, (new_w, new_h))
+                except:
+                    scaled = pygame.transform.scale(surf, (new_w, new_h))
+                final = pygame.Surface((target_size, target_size), pygame.SRCALPHA)
+                final.fill((0,0,0,0))
+                fx = (target_size - new_w)//2
+                fy = (target_size - new_h)//2
+                final.blit(scaled, (fx, fy))
+                _ICON_CACHE[cache_key] = final
+                return final
+            except Exception as e:
+                print(f"Failed to load icon {icon_path}: {e}")
+    
+    # Fallback: generate pixel art style icon matching Battle City style
+    return generate_fallback_icon(type_name, target_size)
+
+def generate_fallback_icon(type_name, size):
+    """Generate fallback icon in same style: white border, dark bg, pixel art center"""
+    surf = pygame.Surface((size, size), pygame.SRCALPHA)
+    surf.fill((0,0,0,0))
+    # Draw Battle City style border (like original icons)
+    # outer black, inner white 2px, dark bg
+    inner = int(size*0.9)
+    off = (size-inner)//2
+    pygame.draw.rect(surf, (0,0,0,255), (off, off, inner, inner))
+    pygame.draw.rect(surf, (255,255,255,255), (off+2, off+2, inner-4, inner-4), 2)
+    pygame.draw.rect(surf, (5,25,35,255), (off+4, off+4, inner-8, inner-8))
+    
+    # Draw simple symbol based on type
+    cx, cy = size//2, size//2
+    if type_name == 'helmet':
+        pygame.draw.circle(surf, (200,200,200), (cx, cy-2), 6, 1)
+        pygame.draw.arc(surf, (220,220,220), (cx-5, cy-4, 10, 8), 0, 3.14, 1)
+    elif type_name == 'clock':
+        pygame.draw.circle(surf, (220,220,220), (cx, cy), 7, 1)
+        pygame.draw.line(surf, (255,255,255), (cx, cy), (cx, cy-5), 1)
+        pygame.draw.line(surf, (255,255,255), (cx, cy), (cx+4, cy), 1)
+    elif type_name == 'shovel':
+        pygame.draw.rect(surf, (180,180,180), (cx-1, cy-6, 2, 8))
+        pygame.draw.polygon(surf, (200,200,200), [(cx-5, cy+2), (cx+5, cy+2), (cx+3, cy+6), (cx-3, cy+6)])
+    elif type_name == 'star':
+        pts = [(cx, cy-7), (cx-2, cy-2), (cx-7, cy-2), (cx-3, cy+1), (cx-4, cy+7), (cx, cy+3), (cx+4, cy+7), (cx+3, cy+1), (cx+7, cy-2), (cx+2, cy-2)]
+        pygame.draw.polygon(surf, (255,255,180), pts)
+    elif type_name == 'grenade':
+        pygame.draw.circle(surf, (200,200,200), (cx, cy+2), 5)
+    elif type_name == 'tank':
+        pygame.draw.rect(surf, (200,200,200), (cx-6, cy-2, 12, 6))
+    elif type_name == 'gun':
+        pygame.draw.rect(surf, (200,200,200), (cx-1, cy-8, 2, 12))
+    else:
+        font = pygame.font.Font(None, size//2)
+        txt = font.render(type_name[0].upper(), True, (255,255,255))
+        surf.blit(txt, txt.get_rect(center=(cx, cy)))
+    
+    _ICON_CACHE[(type_name, size)] = surf
+    return surf
 
 class PowerUp:
     def __init__(self, x, y, type_name=None):
@@ -9,10 +127,14 @@ class PowerUp:
         self.y = y
         self.type = type_name or random.choice(POWERUP_TYPES)
         self.alive = True
-        self.rect = pygame.Rect(x - 16, y - 16, 32, 32)
+        # Size similar to tank size per user request (32)
+        self.base_size = TANK_SIZE
+        self.rect = pygame.Rect(x - self.base_size//2, y - self.base_size//2, self.base_size, self.base_size)
         self.spawn_time = pygame.time.get_ticks()
         self.blink_timer = 0
-        self.lifetime = 10000  # 10 sec
+        self.lifetime = 10000
+        self.rotation = 0
+        self.bob_offset = random.uniform(0, 6.28)
 
         self.colors = {
             'helmet': (80, 180, 255),
@@ -28,138 +150,18 @@ class PowerUp:
             'shrink': (80, 220, 255),
             'giant': (255, 80, 80),
         }
+        # Preload icon
+        try:
+            self.icon = load_item_icon(self.type, TANK_SIZE)
+        except:
+            self.icon = None
 
     def update(self):
         now = pygame.time.get_ticks()
         if now - self.spawn_time > self.lifetime:
             self.alive = False
         self.blink_timer += 1
-
-    # ---------- Icon draw helpers ----------
-    def _draw_icon_helmet(self, surf, cx, cy, col):
-        # Shield bubble + helmet dome
-        pygame.draw.circle(surf, (200, 230, 255), (cx, cy-2), 8, 2)
-        pygame.draw.arc(surf, col, (cx-7, cy-6, 14, 10), 0, math.pi, 2)
-        pygame.draw.rect(surf, col, (cx-8, cy-1, 16, 3), border_radius=2)
-
-    def _draw_icon_clock(self, surf, cx, cy, col):
-        # Clock face
-        pygame.draw.circle(surf, COLOR_WHITE, (cx, cy), 8, 2)
-        pygame.draw.circle(surf, col, (cx, cy), 2)
-        # hands at 10:10 frozen
-        pygame.draw.line(surf, COLOR_WHITE, (cx, cy), (cx-3, cy-5), 2)
-        pygame.draw.line(surf, COLOR_WHITE, (cx, cy), (cx+4, cy-2), 2)
-        # freeze ticks
-        for a in range(0, 360, 90):
-            rx = cx + 10*math.cos(math.radians(a))
-            ry = cy + 10*math.sin(math.radians(a))
-            pygame.draw.circle(surf, (150, 200, 255), (int(rx), int(ry)), 1)
-
-    def _draw_icon_shovel(self, surf, cx, cy, col):
-        # Shovel
-        pygame.draw.rect(surf, (150, 100, 30), (cx-2, cy-8, 4, 12), border_radius=1)
-        pygame.draw.polygon(surf, col, [(cx-7, cy+4), (cx+7, cy+4), (cx+5, cy+10), (cx-5, cy+10)])
-        pygame.draw.rect(surf, (80, 60, 30), (cx-8, cy-6, 16, 3))
-
-    def _draw_icon_star(self, surf, cx, cy, col):
-        # 5-point star
-        pts = []
-        for i in range(10):
-            r = 10 if i % 2 == 0 else 5
-            ang = math.radians(i * 36 - 90)
-            pts.append((cx + r*math.cos(ang), cy + r*math.sin(ang)))
-        pygame.draw.polygon(surf, col, pts)
-        pygame.draw.polygon(surf, COLOR_WHITE, pts, 2)
-        # sparkle
-        pygame.draw.circle(surf, COLOR_WHITE, (cx+3, cy-3), 2)
-
-    def _draw_icon_grenade(self, surf, cx, cy, col):
-        # Grenade body
-        pygame.draw.circle(surf, col, (cx, cy+3), 7)
-        pygame.draw.rect(surf, (100, 100, 100), (cx-4, cy-6, 8, 6))
-        pygame.draw.circle(surf, (80, 80, 80), (cx+3, cy-7), 2)
-        # fuse spark
-        for _ in range(3):
-            sx = cx+3 + random.randint(-1,1)
-            sy = cy-9 + random.randint(-1,1)
-            pygame.draw.circle(surf, (255, 220, 0), (sx, sy), 1)
-
-    def _draw_icon_tank(self, surf, cx, cy, col):
-        # Mini tank with + sign (extra life)
-        pygame.draw.rect(surf, col, (cx-8, cy-2, 16, 8), border_radius=2)
-        pygame.draw.rect(surf, (40,40,40), (cx-2, cy-8, 4, 8))
-        pygame.draw.circle(surf, COLOR_WHITE, (cx+6, cy-6), 5)
-        pygame.draw.line(surf, (0,180,0), (cx+3, cy-6), (cx+9, cy-6), 2)
-        pygame.draw.line(surf, (0,180,0), (cx+6, cy-9), (cx+6, cy-3), 2)
-
-    def _draw_icon_gun(self, surf, cx, cy, col):
-        # Double-barrel / power gun
-        pygame.draw.rect(surf, (60,60,60), (cx-2, cy-10, 4, 14))
-        pygame.draw.rect(surf, col, (cx-6, cy-12, 3, 16))
-        pygame.draw.rect(surf, col, (cx+3, cy-12, 3, 16))
-        pygame.draw.circle(surf, COLOR_YELLOW, (cx-5, cy-13), 2)
-        pygame.draw.circle(surf, COLOR_YELLOW, (cx+5, cy-13), 2)
-        # power rings
-        pygame.draw.circle(surf, COLOR_WHITE, (cx, cy+2), 6, 1)
-
-    def _draw_icon_homing(self, surf, cx, cy, col):
-        # Homing missile with trail + target lock
-        pygame.draw.circle(surf, col, (cx-4, cy), 4)
-        pygame.draw.circle(surf, (255, 220, 0), (cx-4, cy), 2)
-        pygame.draw.line(surf, (255, 100, 0), (cx-4, cy), (cx-10, cy+2), 2)
-        # target reticle
-        pygame.draw.circle(surf, COLOR_WHITE, (cx+6, cy-2), 5, 1)
-        pygame.draw.line(surf, COLOR_WHITE, (cx+6-2, cy-2), (cx+6+2, cy-2), 1)
-        pygame.draw.line(surf, COLOR_WHITE, (cx+6, cy-2-2), (cx+6, cy-2+2), 1)
-        # dotted line
-        for i in range(2):
-            pygame.draw.circle(surf, (255,140,0), (cx-1+i*4, cy), 1)
-
-    def _draw_icon_spread(self, surf, cx, cy, col):
-        # Center + 8 arrows outward
-        pygame.draw.circle(surf, COLOR_WHITE, (cx, cy), 3)
-        pygame.draw.circle(surf, col, (cx, cy), 2)
-        for ang in range(0, 360, 45):
-            rx = math.cos(math.radians(ang)) * 9
-            ry = math.sin(math.radians(ang)) * 9
-            pygame.draw.line(surf, col, (cx, cy), (cx+rx, cy+ry), 2)
-            pygame.draw.circle(surf, col, (cx+rx, cy+ry), 2)
-
-    def _draw_icon_rapid(self, surf, cx, cy, col):
-        # Three bullets stacked with speed lines
-        for i in range(3):
-            bx = cx - 6 + i*6
-            pygame.draw.circle(surf, col, (bx, cy), 3)
-            pygame.draw.circle(surf, COLOR_WHITE, (bx, cy), 1)
-        # speed motion lines
-        pygame.draw.line(surf, COLOR_WHITE, (cx-10, cy-6), (cx-4, cy-6), 1)
-        pygame.draw.line(surf, COLOR_WHITE, (cx-8, cy+6), (cx-2, cy+6), 1)
-
-    def _draw_icon_shrink(self, surf, cx, cy, col):
-        # Small tank inside big dashed outline + down arrow
-        # Big dashed outer
-        pygame.draw.rect(surf, (100, 180, 220), (cx-10, cy-8, 20, 12), 1, border_radius=2)
-        # Small inner solid
-        pygame.draw.rect(surf, col, (cx-4, cy-3, 8, 5), border_radius=2)
-        pygame.draw.rect(surf, (30,30,30), (cx-1, cy-7, 2, 5))
-        # down / shrink arrows
-        pygame.draw.polygon(surf, COLOR_WHITE, [(cx+8, cy-6), (cx+11, cy-6), (cx+9.5, cy-2)])
-        pygame.draw.polygon(surf, COLOR_WHITE, [(cx-8, cy+6), (cx-11, cy+6), (cx-9.5, cy+2)])
-        # speed streaks
-        pygame.draw.line(surf, (150, 220, 255), (cx-8, cy-9), (cx-2, cy-9), 1)
-
-    def _draw_icon_giant(self, surf, cx, cy, col):
-        # Giant tank stepping on brick
-        # Brick below
-        pygame.draw.rect(surf, (160, 60, 30), (cx-8, cy+6, 16, 6))
-        pygame.draw.line(surf, (100,30,10), (cx, cy+6), (cx, cy+12), 1)
-        # Giant tank above
-        pygame.draw.rect(surf, col, (cx-9, cy-8, 18, 10), border_radius=3)
-        pygame.draw.rect(surf, (40,40,40), (cx-2, cy-14, 4, 8))
-        pygame.draw.rect(surf, (20,20,20), (cx-11, cy+1, 5, 5), border_radius=1)
-        pygame.draw.rect(surf, (20,20,20), (cx+6, cy+1, 5, 5), border_radius=1)
-        # Crack on brick
-        pygame.draw.line(surf, COLOR_WHITE, (cx-4, cy+8), (cx+2, cy+10), 1)
+        self.rotation = (self.rotation + 1) % 360
 
     def draw(self, screen):
         if not self.alive:
@@ -167,33 +169,55 @@ class PowerUp:
         if pygame.time.get_ticks() - self.spawn_time > self.lifetime - 2000:
             if self.blink_timer % 20 < 10:
                 return
-        color = self.colors.get(self.type, COLOR_WHITE)
-        pulse = 2 * abs((self.blink_timer % 40) - 20) / 20
-        size = int(32 + pulse*6)
-        rect = pygame.Rect(0,0,size,size)
-        rect.center = (self.x, self.y)
-        # shadow
-        shadow = rect.inflate(4,4)
-        pygame.draw.rect(screen, (0,0,0,120), shadow, border_radius=8)
-        pygame.draw.rect(screen, color, rect, border_radius=8)
-        pygame.draw.rect(screen, COLOR_WHITE, rect, 2, border_radius=8)
-        # glow pulse
-        if pulse > 0.8:
-            glow = rect.inflate(8,8)
-            pygame.draw.rect(screen, (*color, 60), glow, 1, border_radius=10)
 
-        # draw icon centered
-        try:
-            draw_func = getattr(self, f"_draw_icon_{self.type}", None)
-            if draw_func:
-                draw_func(screen, self.x, self.y, color)
-            else:
-                font = pygame.font.Font(None, 20)
-                txt = font.render("?", True, COLOR_BLACK)
-                screen.blit(txt, txt.get_rect(center=(self.x, self.y)))
-        except Exception as e:
-            # fallback: just color block
-            pass
+        # Bobbing animation
+        bob = math.sin(pygame.time.get_ticks() * 0.005 + self.bob_offset) * 3
+        draw_x = self.x
+        draw_y = self.y + bob
+        
+        # Pulsing glow
+        pulse = 1.0 + 0.15 * abs(math.sin(self.blink_timer * 0.1))
+        size = int(self.base_size * pulse)
+        
+        # Shadow
+        shadow_rect = pygame.Rect(0,0,size+4,size+4)
+        shadow_rect.center = (draw_x+2, draw_y+2)
+        shadow_surf = pygame.Surface((size+4, size+4), pygame.SRCALPHA)
+        shadow_surf.fill((0,0,0,60))
+        screen.blit(shadow_surf, shadow_rect.topleft)
+        
+        # Glow behind icon (colored)
+        col = self.colors.get(self.type, COLOR_WHITE)
+        glow_size = size + 8
+        glow_rect = pygame.Rect(0,0,glow_size, glow_size)
+        glow_rect.center = (draw_x, draw_y)
+        glow_surf = pygame.Surface((glow_size, glow_size), pygame.SRCALPHA)
+        pygame.draw.rect(glow_surf, (*col, 30), (0,0,glow_size,glow_size), border_radius=6)
+        screen.blit(glow_surf, glow_rect.topleft)
+        
+        # Draw icon image (Battle City style) sized to tank
+        if self.icon:
+            try:
+                # Scale with pulse
+                icon_scaled = pygame.transform.smoothscale(self.icon, (size, size)) if pulse != 1.0 else self.icon
+                icon_rect = icon_scaled.get_rect(center=(draw_x, draw_y))
+                screen.blit(icon_scaled, icon_rect)
+                
+                # Shine effect on top
+                shine = pygame.Surface((size, size//3), pygame.SRCALPHA)
+                shine.fill((255,255,255,20))
+                screen.blit(shine, (draw_x - size//2, draw_y - size//2))
+            except:
+                # Fallback rect
+                rect = pygame.Rect(0,0,size,size)
+                rect.center = (draw_x, draw_y)
+                pygame.draw.rect(screen, col, rect, border_radius=4)
+                pygame.draw.rect(screen, COLOR_WHITE, rect, 2, border_radius=4)
+        else:
+            rect = pygame.Rect(0,0,size,size)
+            rect.center = (draw_x, draw_y)
+            pygame.draw.rect(screen, col, rect, border_radius=4)
+            pygame.draw.rect(screen, COLOR_WHITE, rect, 2, border_radius=4)
 
     def check_pickup(self, players):
         for p in players:
