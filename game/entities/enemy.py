@@ -90,9 +90,9 @@ def direction_from_big_path(start_bx, start_by, next_bx, next_by):
     return None
 
 class EnemyTank(Tank):
-    def __init__(self, grid_x, grid_y, enemy_type='basic'):
+    def __init__(self, grid_x, grid_y, enemy_type='basic', is_mega=None):
         color = ENEMY_COLORS.get(enemy_type, ENEMY_COLORS['basic'])
-        super().__init__(grid_x, grid_y, color, is_player=False)
+        super().__init__(grid_x, grid_y, color, is_player=False, is_mega=is_mega)
         self.enemy_type = enemy_type
         self.direction = 'DOWN'
         self.is_player = False

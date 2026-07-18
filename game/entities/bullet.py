@@ -8,37 +8,33 @@ from ..settings import *
 # Helpers for smart homing
 # ------------------------------------------------------------
 def _tile_at(tilemap, gx, gy):
-    if 0 <= gx < GRID_W and 0 <= gy < GRID_H:
+    gw = getattr(tilemap, 'grid_w', GRID_W)
+    gh = getattr(tilemap, 'grid_h', GRID_H)
+    if 0 <= gx < gw and 0 <= gy < gh:
         return tilemap.tiles[gy][gx]
     return None
 
 def _is_blocking_for_homing(tilemap, gx, gy):
-    """Brick and steel block homing missiles; water, grass, ice don't.
-       Water does block tanks but bullet can fly over.
-       For smart avoidance we treat BOTH brick and steel as walls to avoid.
-    """
     t = _tile_at(tilemap, gx, gy)
     if t is None:
-        return True  # out of bounds = blocking
+        return True
     if t == TILE_BRICK or t == TILE_STEEL:
         return True
-    # water blocks tank but missile can fly over? Requirement says avoid brick and walls.
-    # Don't treat water as wall for missile pathing, but we will avoid it if possible for realism?
-    # For now only brick/steel are hard walls.
     return False
 
-def _pixel_to_grid(px, py):
-    gx = int((px - PLAYFIELD_X) // TILE_SIZE)
-    gy = int((py - PLAYFIELD_Y) // TILE_SIZE)
+def _pixel_to_grid(px, py, tilemap=None):
+    ts = getattr(tilemap, 'tile_size', TILE_SIZE) if tilemap else TILE_SIZE
+    gx = int((px - PLAYFIELD_X) // ts)
+    gy = int((py - PLAYFIELD_Y) // ts)
     return gx, gy
 
-def _grid_to_pixel_center(gx, gy):
-    return PLAYFIELD_X + gx * TILE_SIZE + TILE_SIZE * 0.5, PLAYFIELD_Y + gy * TILE_SIZE + TILE_SIZE * 0.5
+def _grid_to_pixel_center(gx, gy, tilemap=None):
+    ts = getattr(tilemap, 'tile_size', TILE_SIZE) if tilemap else TILE_SIZE
+    return PLAYFIELD_X + gx * ts + ts * 0.5, PLAYFIELD_Y + gy * ts + ts * 0.5
 
 def _line_of_sight_clear(tilemap, x0, y0, x1, y1):
-    """Bresenham line check for brick/steel between two pixel points."""
-    gx0, gy0 = _pixel_to_grid(x0, y0)
-    gx1, gy1 = _pixel_to_grid(x1, y1)
+    gx0, gy0 = _pixel_to_grid(x0, y0, tilemap)
+    gx1, gy1 = _pixel_to_grid(x1, y1, tilemap)
     dx = abs(gx1 - gx0)
     dy = -abs(gy1 - gy0)
     sx = 1 if gx0 < gx1 else -1
@@ -66,19 +62,18 @@ def _line_of_sight_clear(tilemap, x0, y0, x1, y1):
 
 def _a_star_tile(tilemap, sx, sy, tx, ty):
     """A* on small 26x26 grid avoiding brick/steel. Returns list of (gx,gy) or None."""
-    # bounds check
-    if not (0 <= sx < GRID_W and 0 <= sy < GRID_H and 0 <= tx < GRID_W and 0 <= ty < GRID_H):
+    gw = getattr(tilemap, 'grid_w', GRID_W)
+    gh = getattr(tilemap, 'grid_h', GRID_H)
+    if not (0 <= sx < gw and 0 <= sy < gh and 0 <= tx < gw and 0 <= ty < gh):
         return None
     if sx == tx and sy == ty:
         return [(sx, sy)]
-    # if target itself is blocking, try neighbours
     if _is_blocking_for_homing(tilemap, tx, ty):
-        # find nearest free attorno
         for r in range(1, 4):
             for dx in range(-r, r+1):
                 for dy in range(-r, r+1):
                     nx, ny = tx+dx, ty+dy
-                    if 0 <= nx < GRID_W and 0 <= ny < GRID_H and not _is_blocking_for_homing(tilemap, nx, ny):
+                    if 0 <= nx < gw and 0 <= ny < gh and not _is_blocking_for_homing(tilemap, nx, ny):
                         tx, ty = nx, ny
                         break
                 else:
@@ -121,13 +116,12 @@ def _a_star_tile(tilemap, sx, sy, tx, ty):
             return path
         for dx, dy, cost in neighbours:
             nx, ny = x+dx, y+dy
-            if not (0 <= nx < GRID_W and 0 <= ny < GRID_H):
+            if not (0 <= nx < gw and 0 <= ny < gh):
                 continue
             if (nx, ny) in closed:
                 continue
             if _is_blocking_for_homing(tilemap, nx, ny):
                 continue
-            # diagonal corner check: don't cut through corners of walls
             if dx != 0 and dy != 0:
                 if _is_blocking_for_homing(tilemap, x+dx, y) and _is_blocking_for_homing(tilemap, x, y+dy):
                     continue
@@ -228,14 +222,14 @@ class Bullet:
         return best
 
     def _plan_path(self, tilemap, target_x, target_y):
-        """Plan A* from current bullet pos to target."""
-        sgx, sgy = _pixel_to_grid(self.x, self.y)
-        tgx, tgy = _pixel_to_grid(target_x, target_y)
-        # clamp
-        sgx = max(0, min(GRID_W-1, sgx))
-        sgy = max(0, min(GRID_H-1, sgy))
-        tgx = max(0, min(GRID_W-1, tgx))
-        tgy = max(0, min(GRID_H-1, tgy))
+        sgx, sgy = _pixel_to_grid(self.x, self.y, tilemap)
+        tgx, tgy = _pixel_to_grid(target_x, target_y, tilemap)
+        gw = getattr(tilemap, 'grid_w', GRID_W)
+        gh = getattr(tilemap, 'grid_h', GRID_H)
+        sgx = max(0, min(gw-1, sgx))
+        sgy = max(0, min(gh-1, sgy))
+        tgx = max(0, min(gw-1, tgx))
+        tgy = max(0, min(gh-1, tgy))
         path = _a_star_tile(tilemap, sgx, sgy, tgx, tgy)
         if not path:
             self.path = []
@@ -244,10 +238,9 @@ class Bullet:
             self.waypoint = None
             return False
         self.path = path
-        # convert to world points, skip first (current)
         world = []
         for gx, gy in path[1:]:
-            cx, cy = _grid_to_pixel_center(gx, gy)
+            cx, cy = _grid_to_pixel_center(gx, gy, tilemap)
             world.append((cx, cy))
         # smoothing: prune collinear points plus LOS shortcut
         if len(world) >= 3:
@@ -295,53 +288,49 @@ class Bullet:
     def _compute_avoidance(self, tilemap):
         """Compute steering avoidance vector from nearby brick/steel using multi-range lookahead."""
         avx, avy = 0.0, 0.0
+        ts = getattr(tilemap, 'tile_size', TILE_SIZE)
         offsets = [0, -0.65, 0.65, -1.3, 1.3]
-        # sample at two distances: near and far
         for look_mult in (0.6, 1.0):
-            look = TILE_SIZE * HOMING_AVOIDANCE_LOOKAHEAD * look_mult
+            look = ts * HOMING_AVOIDANCE_LOOKAHEAD * look_mult
             ahead_x = self.x + self.vx * look
             ahead_y = self.y + self.vy * look
             for off in offsets:
                 px = -self.vy
                 py = self.vx
-                sx = ahead_x + px * off * TILE_SIZE * 0.6
-                sy = ahead_y + py * off * TILE_SIZE * 0.6
-                gx, gy = _pixel_to_grid(sx, sy)
+                sx = ahead_x + px * off * ts * 0.6
+                sy = ahead_y + py * off * ts * 0.6
+                gx, gy = _pixel_to_grid(sx, sy, tilemap)
             for dx in (-1,0,1):
                 for dy in (-1,0,1):
                     if _is_blocking_for_homing(tilemap, gx+dx, gy+dy):
-                        # repulsion
-                        cx, cy = _grid_to_pixel_center(gx+dx, gy+dy)
+                        cx, cy = _grid_to_pixel_center(gx+dx, gy+dy, tilemap)
                         rx = self.x - cx
                         ry = self.y - cy
                         d = math.hypot(rx, ry)
                         if d < 1:
                             d = 1
-                        # weight inverse distance, stronger when closer
-                        weight = (TILE_SIZE*2.0) / d
-                        # forward look weight: more if in front (dot >0)
+                        weight = (ts*2.0) / d
                         to_obs = (cx - self.x, cy - self.y)
                         dot = to_obs[0]*self.vx + to_obs[1]*self.vy
                         if dot > 0:
-                            weight *= 2.0  # stronger for obstacles in front
+                            weight *= 2.0
                         avx += (rx / d) * weight
                         avy += (ry / d) * weight
-        # normalize
         norm = math.hypot(avx, avy)
         if norm > 0.01:
             avx /= norm
             avy /= norm
-            cgx, cgy = _pixel_to_grid(self.x, self.y)
+            cgx, cgy = _pixel_to_grid(self.x, self.y, tilemap)
             imminent = False
             very_close = False
             for dx in (-1,0,1):
                 for dy in (-1,0,1):
                     if _is_blocking_for_homing(tilemap, cgx+dx, cgy+dy):
-                        cx, cy = _grid_to_pixel_center(cgx+dx, cgy+dy)
+                        cx, cy = _grid_to_pixel_center(cgx+dx, cgy+dy, tilemap)
                         d = math.hypot(cx-self.x, cy-self.y)
-                        if d < TILE_SIZE*1.25:
+                        if d < ts*1.25:
                             imminent = True
-                        if d < TILE_SIZE*0.75:
+                        if d < ts*0.75:
                             very_close = True
             if very_close:
                 strength = 2.1
@@ -533,11 +522,13 @@ class Bullet:
             self.alive = False
             return 'out'
 
-        # tile collision - for homing missile, we AVOID rather than explode on brick/steel
-        # So if homing, check if we are colliding with blocking tile: instead try to slide away, only die if truly stuck inside wall
-        gx = int((self.x - PLAYFIELD_X) // TILE_SIZE)
-        gy = int((self.y - PLAYFIELD_Y) // TILE_SIZE)
-        if 0 <= gx < GRID_W and 0 <= gy < GRID_H:
+        # tile collision
+        ts = getattr(tilemap, 'tile_size', TILE_SIZE)
+        gw = getattr(tilemap, 'grid_w', GRID_W)
+        gh = getattr(tilemap, 'grid_h', GRID_H)
+        gx = int((self.x - PLAYFIELD_X) // ts)
+        gy = int((self.y - PLAYFIELD_Y) // ts)
+        if 0 <= gx < gw and 0 <= gy < gh:
             tt = tilemap.tiles[gy][gx]
             if tt == TILE_BRICK:
                 if self.homing:
@@ -568,7 +559,7 @@ class Bullet:
                         self.x -= self.vx * self.speed * 2.2
                         self.y -= self.vy * self.speed * 2.2
                         # inject strong perpendicular avoidance + away vector
-                        cx, cy = _grid_to_pixel_center(gx, gy)
+                        cx, cy = _grid_to_pixel_center(gx, gy, tilemap)
                         away_x = self.x - cx
                         away_y = self.y - cy
                         norm = math.hypot(away_x, away_y) or 1
@@ -629,7 +620,7 @@ class Bullet:
                         self.x -= self.vx * self.speed * 2.4
                         self.y -= self.vy * self.speed * 2.4
                         self.rect.center = (self.x, self.y)
-                        cx, cy = _grid_to_pixel_center(gx, gy)
+                        cx, cy = _grid_to_pixel_center(gx, gy, tilemap)
                         away_x = self.x - cx
                         away_y = self.y - cy
                         norm = math.hypot(away_x, away_y) or 1
@@ -801,14 +792,18 @@ class Bullet:
 
 # Base/Monster class - now a monster to protect, when hit releases boss
 class Base:
-    def __init__(self):
-        bx, by = BASE_POS
+    def __init__(self, is_mega=None):
+        is_mega = is_mega if is_mega is not None else MEGA_ENABLED
+        self.is_mega = is_mega
+        self.tile_size = MEGA_TILE_SIZE if is_mega else TILE_SIZE
+        self.base_pos = MEGA_BASE_POS if is_mega else BASE_POS
+        bx, by = self.base_pos
         self.grid_x = bx
         self.grid_y = by
-        self.x = PLAYFIELD_X + bx * TILE_SIZE
-        self.y = PLAYFIELD_Y + by * TILE_SIZE
+        self.x = PLAYFIELD_X + bx * self.tile_size
+        self.y = PLAYFIELD_Y + by * self.tile_size
         self.alive = True
-        self.rect = pygame.Rect(self.x, self.y, TILE_SIZE*2, TILE_SIZE*2)
+        self.rect = pygame.Rect(self.x, self.y, self.tile_size*2, self.tile_size*2)
         self.destroyed_timer = 0
         # Monster specific
         self.is_monster = True

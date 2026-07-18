@@ -10,13 +10,36 @@ SCREEN_HEIGHT = 720
 FPS = 60
 
 # Playfield - classic Battle City is 13x13 big tiles = 26x26 small tiles
-TILE_SIZE = 24  # small tile pixel size (modernized HD)
+# Mega maps: 4x area = 52x52 small tiles (double width+height)
+# To fit on screen, mega uses TILE_SIZE 12 (so PLAYFIELD still 624)
+TILE_SIZE = 24  # small tile pixel size (modernized HD) for normal mode
 GRID_W = 26
 GRID_H = 26
 PLAYFIELD_W = GRID_W * TILE_SIZE  # 624
 PLAYFIELD_H = GRID_H * TILE_SIZE  # 624
 PLAYFIELD_X = 48
 PLAYFIELD_Y = 48
+
+# Mega map constants - 4x area (2x width, 2x height)
+MEGA_ENABLED = True  # enable mega maps mode
+MEGA_GRID_W = 52
+MEGA_GRID_H = 52
+MEGA_TILE_SIZE = 12  # half size to keep same playfield pixel size (52*12=624)
+MEGA_PLAYFIELD_W = MEGA_GRID_W * MEGA_TILE_SIZE
+MEGA_PLAYFIELD_H = MEGA_GRID_H * MEGA_TILE_SIZE
+# Base at very center for mega maps (25,25) for 2x2 base in 52x52 grid
+MEGA_BASE_POS = (25, 25)
+# For normal mode compatibility, keep original base pos
+# Mega spawns - corners and center edges for more action
+MEGA_PLAYER_SPAWN = [
+    (8, 48),   # P1 bottom near center-west
+    (42, 48),  # P2 bottom near center-east
+]
+MEGA_ENEMY_SPAWNS = [(0, 0), (25, 0), (50, 0), (0, 25)]  # 4 corners + middle top
+MEGA_PLAYER_SPAWN_SAFE = [
+    (6, 46), (40, 46),  # slightly larger safe area
+]
+MEGA_BASE_STEEL_FORT_RADIUS = 2  # steel thickness around base
 
 # Sidebar HUD
 HUD_X = PLAYFIELD_X + PLAYFIELD_W + 20
@@ -104,6 +127,22 @@ PLAYER_SPAWN = [
 ]
 ENEMY_SPAWNS = [(0, 0), (12, 0), (24, 0)]
 BASE_POS = (12, 24)  # eagle position (top-left of 2x2)
+
+# When in mega mode, base is at center
+def get_base_pos(is_mega=False):
+    return MEGA_BASE_POS if is_mega else BASE_POS
+
+def get_player_spawns(is_mega=False):
+    return MEGA_PLAYER_SPAWN if is_mega else PLAYER_SPAWN
+
+def get_enemy_spawns(is_mega=False):
+    return MEGA_ENEMY_SPAWNS if is_mega else ENEMY_SPAWNS
+
+def get_grid_size(is_mega=False):
+    return (MEGA_GRID_W, MEGA_GRID_H) if is_mega else (GRID_W, GRID_H)
+
+def get_tile_size(is_mega=False):
+    return MEGA_TILE_SIZE if is_mega else TILE_SIZE
 
 # Powerups - classic + new items (homing missile, 8-way spread, rapid fire 3x, shrink, giant)
 POWERUP_TYPES = ['helmet', 'clock', 'shovel', 'star', 'grenade', 'tank', 'gun', 'homing', 'spread', 'rapid', 'shrink', 'giant']

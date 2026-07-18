@@ -5,10 +5,25 @@ import random
 from .settings import *
 
 class TileMap:
-    def __init__(self, level_data=None):
-        # 26x26 grid of tile types
-        self.grid_w = GRID_W
-        self.grid_h = GRID_H
+    def __init__(self, level_data=None, is_mega=None):
+        # Support both normal (26x26) and mega (52x52) maps
+        if is_mega is None:
+            is_mega = MEGA_ENABLED
+        self.is_mega = is_mega
+        if is_mega:
+            self.grid_w = MEGA_GRID_W
+            self.grid_h = MEGA_GRID_H
+            self.tile_size = MEGA_TILE_SIZE
+            self.base_pos = MEGA_BASE_POS
+            self.player_spawns = MEGA_PLAYER_SPAWN
+            self.enemy_spawns = MEGA_ENEMY_SPAWNS
+        else:
+            self.grid_w = GRID_W
+            self.grid_h = GRID_H
+            self.tile_size = TILE_SIZE
+            self.base_pos = BASE_POS
+            self.player_spawns = PLAYER_SPAWN
+            self.enemy_spawns = ENEMY_SPAWNS
         self.tiles = [[TILE_EMPTY for _ in range(self.grid_w)] for _ in range(self.grid_h)]
         self.shovel_timer = 0
         self.shovel_original = None
@@ -19,126 +34,181 @@ class TileMap:
             self.load_default()
 
     def load_from_data(self, data):
-        """data can be 13x13 big tiles or 26x26 small tiles"""
-        if len(data) == 13 and len(data[0]) == 13:
-            # convert big to small
+        """data can be 13x13 big tiles or 26x26 small tiles or 52x52 mega"""
+        if not data:
+            return
+        h = len(data)
+        w = len(data[0]) if h > 0 else 0
+        if h == 13 and w == 13:
+            # convert big to small - works for mega too (scale up)
+            gw, gh = self.grid_w, self.grid_h
+            # For mega, we need to scale 13x13 to 52x52 (4x), for normal 26x26 (2x)
+            scale_x = gw // 13
+            scale_y = gh // 13
             for by in range(13):
                 for bx in range(13):
                     t = data[by][bx]
-                    # place 2x2
-                    for dy in range(2):
-                        for dx in range(2):
-                            self.tiles[by*2+dy][bx*2+dx] = t
-        elif len(data) == 26:
-            for y in range(26):
-                for x in range(26):
+                    for dy in range(scale_y):
+                        for dx in range(scale_x):
+                            gx = bx*scale_x+dx
+                            gy = by*scale_y+dy
+                            if 0 <= gx < gw and 0 <= gy < gh:
+                                self.tiles[gy][gx] = t
+        elif h == 26 and w == 26:
+            # 26x26 to current grid (scale if mega)
+            if self.grid_w == 26:
+                for y in range(26):
+                    for x in range(26):
+                        self.tiles[y][x] = data[y][x]
+            else:  # scale to 52x52 (4x)
+                for y in range(26):
+                    for x in range(26):
+                        t = data[y][x]
+                        for dy in range(2):
+                            for dx in range(2):
+                                gx = x*2+dx
+                                gy = y*2+dy
+                                if 0 <= gx < self.grid_w and 0 <= gy < self.grid_h:
+                                    self.tiles[gy][gx] = t
+        elif h == 52 and w == 52:
+            # direct mega
+            for y in range(52):
+                for x in range(52):
+                    if 0 <= x < self.grid_w and 0 <= y < self.grid_h:
+                        self.tiles[y][x] = data[y][x]
+        else:
+            # arbitrary size - copy as much as fits
+            for y in range(min(h, self.grid_h)):
+                for x in range(min(w, self.grid_w)):
                     self.tiles[y][x] = data[y][x]
 
     def load_default(self):
-        # simple default with border base protection
-        # Base at 12,24 (2x2 eagle) surrounded by brick
-        for y in range(GRID_H):
-            for x in range(GRID_W):
+        for y in range(self.grid_h):
+            for x in range(self.grid_w):
                 self.tiles[y][x] = TILE_EMPTY
-        # add some walls
-        # base walls
-        bx, by = BASE_POS
-        walls = [
-            (bx-1, by-1, bx+2, by),   # top
-            (bx-1, by, bx-1, by+2), # left
-            (bx+2, by, bx+2, by+2), # right
-        ]
-        # will fill later in a proper method
         self.build_base_walls(TILE_BRICK)
 
     def clear_area(self, gx, gy, w=4, h=4):
         """Clear tiles around (gx,gy) to make spawn safe, centered"""
-        # gx,gy is top-left small tile, clear w x h area
+        bx, by = self.base_pos
+        base_cells = [(bx, by), (bx+1, by), (bx, by+1), (bx+1, by+1)]
         for y in range(gy, gy+h):
             for x in range(gx, gx+w):
-                if 0 <= x < GRID_W and 0 <= y < GRID_H:
-                    # don't clear the base eagle itself (12,24) 2x2
-                    if (x, y) in [(12,24),(13,24),(12,25),(13,25)]:
+                if 0 <= x < self.grid_w and 0 <= y < self.grid_h:
+                    if (x, y) in base_cells:
                         continue
                     self.tiles[y][x] = TILE_EMPTY
 
     def ensure_spawn_clear(self):
-        # Clear player spawns (4x4 area)
-        for px, py in PLAYER_SPAWN:
+        for px, py in self.player_spawns:
             self.clear_area(px-1, py-1, 4, 4)
-        # Clear enemy spawns
-        for sx, sy in ENEMY_SPAWNS:
+        for sx, sy in self.enemy_spawns:
             self.clear_area(sx, sy, 4, 3)
-        # Clear base area slightly (base itself should remain empty for eagle, but we will place walls after)
-        # Ensure base 2x2 is empty
-        bx, by = BASE_POS
+        bx, by = self.base_pos
         for y in range(by, by+2):
             for x in range(bx, bx+2):
-                if 0 <= x < GRID_W and 0 <= y < GRID_H:
+                if 0 <= x < self.grid_w and 0 <= y < self.grid_h:
                     self.tiles[y][x] = TILE_EMPTY
 
-    def build_base_walls(self, tile_type):
-        bx, by = BASE_POS
-        # 2x2 base occupies (12,24),(13,24),(12,25),(13,25)
-        # Wall around it: from (11,23) to (14,25)
-        coords = [
-            (bx-1, by-1), (bx, by-1), (bx+1, by-1), (bx+2, by-1),
-            (bx-1, by), (bx-1, by+1),
-            (bx+2, by), (bx+2, by+1),
-        ]
-        for (x, y) in coords:
-            if 0 <= x < GRID_W and 0 <= y < GRID_H:
-                self.tiles[y][x] = tile_type
+    def build_base_walls(self, tile_type, concrete_steel=False):
+        """Build walls around base. If concrete_steel=True or is_mega, use steel fort"""
+        bx, by = self.base_pos
+        if self.is_mega or concrete_steel:
+            # For mega: stronger fort with steel/concrete surrounding center base
+            # Double thickness steel fort
+            coords = []
+            for dy in range(-2, 4):
+                for dx in range(-2, 4):
+                    # outer ring steel, but leave opening gaps?
+                    if abs(dx) == 2 or abs(dy) == 2 or (abs(dx)==2 or abs(dy)==2):
+                        if dx == 0 and dy == 0:
+                            continue
+                        # skip base itself 2x2
+                        if (bx+dx, by+dy) in [(bx, by), (bx+1, by), (bx, by+1), (bx+1, by+1)]:
+                            continue
+                        # inner ring
+                        if abs(dx) <= 1 and abs(dy) <= 1:
+                            if dx == 0 and dy == 0:
+                                continue
+                        coords.append((bx+dx, by+dy))
+            # Override to simple thick fort: 8 surrounding + outer
+            coords = [
+                (bx-2, by-2), (bx-1, by-2), (bx, by-2), (bx+1, by-2), (bx+2, by-2), (bx+3, by-2),
+                (bx-2, by-1), (bx+3, by-1),
+                (bx-2, by), (bx+3, by),
+                (bx-2, by+1), (bx+3, by+1),
+                (bx-2, by+2), (bx-1, by+2), (bx, by+2), (bx+1, by+2), (bx+2, by+2), (bx+3, by+2),
+            ]
+            for (x, y) in coords:
+                if 0 <= x < self.grid_w and 0 <= y < self.grid_h:
+                    self.tiles[y][x] = TILE_STEEL
+            # inner brick layer for extra protection if requested steel, else brick
+            inner = [
+                (bx-1, by-1), (bx, by-1), (bx+1, by-1), (bx+2, by-1),
+                (bx-1, by), (bx+2, by),
+                (bx-1, by+1), (bx+2, by+1),
+            ]
+            # Keep inner as brick if building from shovel? For mega always steel fort
+            for (x, y) in inner:
+                if 0 <= x < self.grid_w and 0 <= y < self.grid_h:
+                    if self.tiles[y][x] == TILE_EMPTY:
+                        self.tiles[y][x] = TILE_STEEL if tile_type == TILE_STEEL else TILE_BRICK
+        else:
+            coords = [
+                (bx-1, by-1), (bx, by-1), (bx+1, by-1), (bx+2, by-1),
+                (bx-1, by), (bx-1, by+1),
+                (bx+2, by), (bx+2, by+1),
+            ]
+            for (x, y) in coords:
+                if 0 <= x < self.grid_w and 0 <= y < self.grid_h:
+                    self.tiles[y][x] = tile_type
 
     def get_tile_at_pixel(self, px, py):
-        gx = int((px - PLAYFIELD_X) // TILE_SIZE)
-        gy = int((py - PLAYFIELD_Y) // TILE_SIZE)
-        if 0 <= gx < GRID_W and 0 <= gy < GRID_H:
+        gx = int((px - PLAYFIELD_X) // self.tile_size)
+        gy = int((py - PLAYFIELD_Y) // self.tile_size)
+        if 0 <= gx < self.grid_w and 0 <= gy < self.grid_h:
             return self.tiles[gy][gx], gx, gy
         return None, -1, -1
 
     def get_tiles_in_rect(self, rect):
         """rect in playfield pixel coords, return list of (tile_type, gx, gy, tile_rect)"""
-        left = max(0, int((rect.left - PLAYFIELD_X) // TILE_SIZE))
-        right = min(GRID_W-1, int((rect.right - 1 - PLAYFIELD_X) // TILE_SIZE))
-        top = max(0, int((rect.top - PLAYFIELD_Y) // TILE_SIZE))
-        bottom = min(GRID_H-1, int((rect.bottom - 1 - PLAYFIELD_Y) // TILE_SIZE))
+        left = max(0, int((rect.left - PLAYFIELD_X) // self.tile_size))
+        right = min(self.grid_w-1, int((rect.right - 1 - PLAYFIELD_X) // self.tile_size))
+        top = max(0, int((rect.top - PLAYFIELD_Y) // self.tile_size))
+        bottom = min(self.grid_h-1, int((rect.bottom - 1 - PLAYFIELD_Y) // self.tile_size))
         result = []
         for gy in range(top, bottom+1):
             for gx in range(left, right+1):
                 t = self.tiles[gy][gx]
                 if t != TILE_EMPTY and t != TILE_GRASS and t != TILE_ICE:
                     tile_rect = pygame.Rect(
-                        PLAYFIELD_X + gx * TILE_SIZE,
-                        PLAYFIELD_Y + gy * TILE_SIZE,
-                        TILE_SIZE, TILE_SIZE
+                        PLAYFIELD_X + gx * self.tile_size,
+                        PLAYFIELD_Y + gy * self.tile_size,
+                        self.tile_size, self.tile_size
                     )
                     result.append((t, gx, gy, tile_rect))
         return result
 
     def is_blocking(self, gx, gy, for_bullet=False, bullet_power=1):
-        if not (0 <= gx < GRID_W and 0 <= gy < GRID_H):
+        if not (0 <= gx < self.grid_w and 0 <= gy < self.grid_h):
             return True
         t = self.tiles[gy][gx]
         if t == TILE_EMPTY or t == TILE_GRASS or t == TILE_ICE:
             return False
         if for_bullet:
-            # bullets can pass grass, ice
             if t == TILE_BRICK:
                 return True
             if t == TILE_STEEL:
-                return bullet_power >= 2 or True # steel blocks unless high power, but still counts as hit
+                return bullet_power >= 2 or True
             if t == TILE_WATER:
                 return False
         else:
-            # tank movement
             if t == TILE_BRICK or t == TILE_STEEL or t == TILE_WATER:
                 return True
         return False
 
     def destroy_tile(self, gx, gy, bullet_power=1, bullet_dir=None):
-        """Authentic Battle City brick destruction: destroys 2 small tiles per hit (half brick)"""
-        if not (0 <= gx < GRID_W and 0 <= gy < GRID_H):
+        if not (0 <= gx < self.grid_w and 0 <= gy < self.grid_h):
             return False
         # Determine which tiles to destroy based on direction - original destroys 2 tiles side by side
         tiles_to_destroy = [(gx, gy)]
@@ -161,7 +231,7 @@ class TileMap:
 
         destroyed = False
         for tx, ty in tiles_to_destroy:
-            if not (0 <= tx < GRID_W and 0 <= ty < GRID_H):
+            if not (0 <= tx < self.grid_w and 0 <= ty < self.grid_h):
                 continue
             t = self.tiles[ty][tx]
             if t == TILE_BRICK:
@@ -176,26 +246,22 @@ class TileMap:
         if self.shovel_timer > 0:
             self.shovel_timer -= 1
             if self.shovel_timer <= 0:
-                # revert to brick
                 self.build_base_walls(TILE_BRICK)
 
     def activate_shovel(self):
-        # save original around base then build steel
         self.build_base_walls(TILE_STEEL)
         self.shovel_timer = POWERUP_DURATION['shovel']
 
     def draw(self, screen):
-        # draw playfield background
         pf_rect = pygame.Rect(PLAYFIELD_X, PLAYFIELD_Y, PLAYFIELD_W, PLAYFIELD_H)
         pygame.draw.rect(screen, COLOR_PLAYFIELD_BG, pf_rect)
-        # draw tiles
-        for y in range(GRID_H):
-            for x in range(GRID_W):
+        for y in range(self.grid_h):
+            for x in range(self.grid_w):
                 t = self.tiles[y][x]
                 if t == TILE_EMPTY:
                     continue
-                rx = PLAYFIELD_X + x * TILE_SIZE
-                ry = PLAYFIELD_Y + y * TILE_SIZE
+                rx = PLAYFIELD_X + x * self.tile_size
+                ry = PLAYFIELD_Y + y * self.tile_size
                 if t == TILE_BRICK:
                     self.draw_brick(screen, rx, ry)
                 elif t == TILE_STEEL:
@@ -205,11 +271,11 @@ class TileMap:
                 # grass and ice drawn later overlay (after tanks)
 
     def draw_overlay(self, screen):
-        for y in range(GRID_H):
-            for x in range(GRID_W):
+        for y in range(self.grid_h):
+            for x in range(self.grid_w):
                 t = self.tiles[y][x]
-                rx = PLAYFIELD_X + x * TILE_SIZE
-                ry = PLAYFIELD_Y + y * TILE_SIZE
+                rx = PLAYFIELD_X + x * self.tile_size
+                ry = PLAYFIELD_Y + y * self.tile_size
                 if t == TILE_GRASS:
                     self.draw_grass(screen, rx, ry)
                 elif t == TILE_ICE:
@@ -322,8 +388,8 @@ class TileMap:
             s.set_at((2, by), BM)
             s.set_at((6, by), BM)
 
-        # Now scale to TILE_SIZE (24) with nearest
-        scaled = pygame.transform.scale(s, (TILE_SIZE, TILE_SIZE))
+        # Now scale to tile_size (dynamic)
+        scaled = pygame.transform.scale(s, (self.tile_size, self.tile_size))
         screen.blit(scaled, (x, y))
 
     def draw_steel(self, screen, x, y):
@@ -356,7 +422,7 @@ class TileMap:
         s.set_at((2,2), S_RIVET_D)
         s.set_at((1,1), S_RIVET_L)
 
-        scaled = pygame.transform.scale(s, (TILE_SIZE, TILE_SIZE))
+        scaled = pygame.transform.scale(s, (self.tile_size, self.tile_size))
         screen.blit(scaled, (x, y))
 
     def draw_water(self, screen, x, y):
@@ -388,8 +454,7 @@ class TileMap:
             else:
                 s.set_at((dx, dy), WHITE)
 
-        scaled = pygame.transform.scale(s, (TILE_SIZE, TILE_SIZE))
-        # For smoothness, use nearest? We'll use scale for crisp pixels
+        scaled = pygame.transform.scale(s, (self.tile_size, self.tile_size))
         screen.blit(scaled, (x, y))
 
     def draw_grass(self, screen, x, y):
@@ -424,7 +489,7 @@ class TileMap:
         s.set_at((2,2), LIGHT)
         s.set_at((5,5), LIGHT)
 
-        scaled = pygame.transform.scale(s, (TILE_SIZE, TILE_SIZE))
+        scaled = pygame.transform.scale(s, (self.tile_size, self.tile_size))
         screen.blit(scaled, (x, y))
 
     def draw_ice(self, screen, x, y):
@@ -454,7 +519,7 @@ class TileMap:
         s.set_at((1,1), VERY_LIGHT)
         s.set_at((5,2), VERY_LIGHT)
 
-        scaled = pygame.transform.scale(s, (TILE_SIZE, TILE_SIZE))
+        scaled = pygame.transform.scale(s, (self.tile_size, self.tile_size))
         screen.blit(scaled, (x, y))
 
 # ---- Classic 35 NES Maps ----

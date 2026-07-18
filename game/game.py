@@ -120,6 +120,19 @@ class Game:
         self.continue_timer = 0
         self.credits = {1: 0, 2: 0}
 
+        # Mega map mode flag
+        self.is_mega = MEGA_ENABLED
+        try:
+            from .levels.mega_maps import MEGA_LEVELS_52, MEGA_ENEMY_QUEUES, MEGA_STAGE_COUNT
+            self.mega_levels = MEGA_LEVELS_52
+            self.mega_queues = MEGA_ENEMY_QUEUES
+            self.mega_count = MEGA_STAGE_COUNT
+        except ImportError:
+            self.mega_levels = None
+            self.mega_queues = None
+            self.mega_count = 0
+            self.is_mega = False
+
         # LAN Multiplayer - Remote P2 join via same local network
         self.network_host = None
         self.network_host_ip = None
@@ -135,7 +148,7 @@ class Game:
             self.network_host = None
             self.network_host_ip = None
 
-        # Projector Mode - Stream game to any device/browser on same local network (for projector)
+        # Projector Mode
         self.projector_ip = None
         self.projector_port = 8080
         try:
@@ -168,32 +181,42 @@ class Game:
                 pass
 
     def _get_enemy_queue_for_level(self, level_idx):
-        """Return authentic enemy queue if available, else generate fallback."""
-        lvl = level_idx % len(LEVELS)
+        lvl = level_idx % (self.mega_count if self.is_mega and self.mega_levels else len(LEVELS))
+        if self.is_mega and self.mega_queues and lvl < len(self.mega_queues):
+            return list(self.mega_queues[lvl])
         if ENEMY_QUEUES_ORIGINAL and lvl < len(ENEMY_QUEUES_ORIGINAL):
-            return list(ENEMY_QUEUES_ORIGINAL[lvl])  # copy
-        # fallback: random weighted
+            return list(ENEMY_QUEUES_ORIGINAL[lvl])
         return None
 
     def _get_enemies_total_for_level(self, level_idx):
+        if self.is_mega and self.mega_queues:
+            lvl = level_idx % len(self.mega_queues)
+            base = len(self.mega_queues[lvl]) if lvl < len(self.mega_queues) else 30
+            extra = lvl * 3 + (lvl // 5) * 4
+            return base + extra
         lvl = level_idx % len(LEVELS)
-        # Gradual increase: base 20 + level*2 + extra for high levels
-        # Stage 1: 20, Stage 5: 30, Stage 10: 44, Stage 20: 68, Stage 35: 108
-        # This makes enemies increase gradually as requested
         if ENEMY_QUEUES_ORIGINAL and lvl < len(ENEMY_QUEUES_ORIGINAL):
             base = len(ENEMY_QUEUES_ORIGINAL[lvl])
-            # Add gradual increase: +2 per level + bonus every 5 levels
             extra = lvl * 2 + (lvl // 5) * 3
             return base + extra
         return ENEMIES_PER_LEVEL + lvl * 3 + (lvl // 4) * 2
 
     def init_level(self, level_idx, num_players=1):
-        self.current_level = level_idx % len(LEVELS)
-        level_data = LEVELS[self.current_level]
-        self.tilemap = TileMap(level_data)
-        self.tilemap.ensure_spawn_clear()
-        self.tilemap.build_base_walls(TILE_BRICK)
-        self.base = Base()
+        if self.is_mega and self.mega_levels:
+            self.current_level = level_idx % len(self.mega_levels)
+            level_data = self.mega_levels[self.current_level]
+            self.tilemap = TileMap(level_data, is_mega=True)
+            self.tilemap.ensure_spawn_clear()
+            # Steel fort around center base
+            self.tilemap.build_base_walls(TILE_STEEL, concrete_steel=True)
+            self.base = Base(is_mega=True)
+        else:
+            self.current_level = level_idx % len(LEVELS)
+            level_data = LEVELS[self.current_level]
+            self.tilemap = TileMap(level_data, is_mega=False)
+            self.tilemap.ensure_spawn_clear()
+            self.tilemap.build_base_walls(TILE_BRICK)
+            self.base = Base()
         self.players = []
         self.enemies = []
         self.bullets = []
@@ -206,10 +229,11 @@ class Game:
         # Keep grouped order authentic but allow occasional shuffle of remaining? We'll keep as-is for faithfulness
         # If queue is None, random weighted spawning will be used (legacy)
 
-        # players
+        # players - use mega spawns if mega mode
+        spawns = MEGA_PLAYER_SPAWN if self.is_mega else PLAYER_SPAWN
         for i in range(num_players):
-            gx, gy = PLAYER_SPAWN[i]
-            p = PlayerTank(i+1, gx, gy)
+            gx, gy = spawns[i]
+            p = PlayerTank(i+1, gx, gy, is_mega=self.is_mega)
             self.players.append(p)
 
         self.enemies_total = self._get_enemies_total_for_level(self.current_level)
@@ -248,12 +272,20 @@ class Game:
     def init_next_level(self):
         # preserve players
         prev_players = self.players
-        self.current_level = (self.current_level + 1) % len(LEVELS)
-        level_data = LEVELS[self.current_level]
-        self.tilemap = TileMap(level_data)
-        self.tilemap.ensure_spawn_clear()
-        self.tilemap.build_base_walls(TILE_BRICK)
-        self.base = Base()
+        if self.is_mega and self.mega_levels:
+            self.current_level = (self.current_level + 1) % len(self.mega_levels)
+            level_data = self.mega_levels[self.current_level]
+            self.tilemap = TileMap(level_data, is_mega=True)
+            self.tilemap.ensure_spawn_clear()
+            self.tilemap.build_base_walls(TILE_STEEL, concrete_steel=True)
+            self.base = Base(is_mega=True)
+        else:
+            self.current_level = (self.current_level + 1) % len(LEVELS)
+            level_data = LEVELS[self.current_level]
+            self.tilemap = TileMap(level_data, is_mega=False)
+            self.tilemap.ensure_spawn_clear()
+            self.tilemap.build_base_walls(TILE_BRICK)
+            self.base = Base()
         self.enemies = []
         self.bullets = []
         self.powerups = []
@@ -276,10 +308,11 @@ class Game:
         self.boss_fight_timer = 0
         self.monster_boss_defeated = False
         # respawn players at start with protections - preserve items across stages
+        spawns = MEGA_PLAYER_SPAWN if self.is_mega else PLAYER_SPAWN
         new_players = []
         for i, old_p in enumerate(prev_players):
-            gx, gy = PLAYER_SPAWN[i]
-            p = PlayerTank(old_p.player_id, gx, gy)
+            gx, gy = spawns[i]
+            p = PlayerTank(old_p.player_id, gx, gy, is_mega=self.is_mega)
             p.score = old_p.score
             p.lives = old_p.lives
             p.star_level = old_p.star_level
@@ -446,13 +479,15 @@ class Game:
         # Now we check distance > TANK_SIZE*1.8 to ensure separation and avoid deadlock where
         # two enemies occupy same spot and block each other's movement forever.
         tries = 0
+        enemy_spawns = MEGA_ENEMY_SPAWNS if self.is_mega else ENEMY_SPAWNS
+        ts = MEGA_TILE_SIZE if self.is_mega else TILE_SIZE
         while tries < 30:
-            sx, sy = random.choice(ENEMY_SPAWNS)
+            sx, sy = random.choice(enemy_spawns)
             # check if occupied - more robust
             blocked = False
-            spawn_cx = PLAYFIELD_X + sx * TILE_SIZE + TILE_SIZE//2
-            spawn_cy = PLAYFIELD_Y + sy * TILE_SIZE + TILE_SIZE//2
-            test_rect = pygame.Rect(PLAYFIELD_X + sx*TILE_SIZE, PLAYFIELD_Y + sy*TILE_SIZE, TANK_SIZE, TANK_SIZE)
+            spawn_cx = PLAYFIELD_X + sx * ts + ts//2
+            spawn_cy = PLAYFIELD_Y + sy * ts + ts//2
+            test_rect = pygame.Rect(PLAYFIELD_X + sx*ts, PLAYFIELD_Y + sy*ts, TANK_SIZE, TANK_SIZE)
             for e in self.enemies:
                 if not e.alive:
                     continue
@@ -496,7 +531,7 @@ class Game:
                     else:
                         weights = ['basic']*15 + ['fast']*25 + ['power']*30 + ['armor']*30
                     etype = random.choice(weights)
-                enemy = EnemyTank(sx, sy, etype)
+                enemy = EnemyTank(sx, sy, etype, is_mega=self.is_mega)
                 # Original NES: powerup tanks are at indices 3,7,12,17 (0-based) -> 4 per level
                 # feichao remix uses [3,7,12,17]; classic [3,10,17]. We'll follow remix for more fun.
                 # If queue is authentic, carrier logic already random 25% in EnemyTank; but we force original powerup positions for authenticity
@@ -517,12 +552,11 @@ class Game:
         print("[BOSS] Monster released! Spawning boss tank!")
         self.boss_released = True
         self.boss_fight_timer = 15 * FPS  # 15 seconds to kill boss before game over? Or just track
-        # Spawn boss at base position
-        bx, by = BASE_POS
-        # Clear area around base for boss spawn
+        # Spawn boss at base position (center for mega)
+        bx, by = self.tilemap.base_pos
         self.tilemap.clear_area(bx-1, by-1, 4, 4)
         from .entities.enemy import EnemyTank
-        boss = EnemyTank(bx, by, 'monster_boss')
+        boss = EnemyTank(bx, by, 'monster_boss', is_mega=self.is_mega)
         # Make boss extra strong and at base center
         boss.set_position(bx, by)
         # Give it some initial protection but less
@@ -1192,18 +1226,17 @@ class Game:
 
         # handle dead players respawn or game over
         all_dead = True
+        spawns = MEGA_PLAYER_SPAWN if self.is_mega else PLAYER_SPAWN
+        ts = MEGA_TILE_SIZE if self.is_mega else TILE_SIZE
         for p in self.players:
             if p.alive:
                 all_dead = False
             else:
-                # if lives remaining, respawn timer?
-                if p.lives >= 0:  # allow with lives =0 to respawn? Our die subtracts, so if lives >=0 still has lives left? Actually init 3 lives, after die lives goes 2 etc. If lives <0 then truly game over
+                if p.lives >= 0:
                     if p.lives >= 0:
-                        # check spawn point free
-                        gx, gy = PLAYER_SPAWN[p.player_id-1]
-                        # check collision at spawn
+                        gx, gy = spawns[p.player_id-1]
                         can_spawn = True
-                        test_rect = pygame.Rect(PLAYFIELD_X+gx*TILE_SIZE, PLAYFIELD_Y+gy*TILE_SIZE, TANK_SIZE, TANK_SIZE)
+                        test_rect = pygame.Rect(PLAYFIELD_X+gx*ts, PLAYFIELD_Y+gy*ts, TANK_SIZE, TANK_SIZE)
                         for en in self.enemies:
                             if en.alive and test_rect.colliderect(en.rect):
                                 can_spawn = False

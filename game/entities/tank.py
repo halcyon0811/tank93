@@ -14,11 +14,13 @@ except Exception:
         return None
 
 class Tank:
-    def __init__(self, grid_x, grid_y, color, is_player=False):
+    def __init__(self, grid_x, grid_y, color, is_player=False, is_mega=None):
         self.grid_x = grid_x
         self.grid_y = grid_y
-        self.x = PLAYFIELD_X + grid_x * TILE_SIZE + TILE_SIZE//2
-        self.y = PLAYFIELD_Y + grid_y * TILE_SIZE + TILE_SIZE//2
+        self.is_mega = is_mega if is_mega is not None else MEGA_ENABLED
+        self.tile_size = MEGA_TILE_SIZE if self.is_mega else TILE_SIZE
+        self.x = PLAYFIELD_X + grid_x * self.tile_size + self.tile_size//2
+        self.y = PLAYFIELD_Y + grid_y * self.tile_size + self.tile_size//2
         # Use full TANK_SIZE for collision to avoid visual overlapping with bricks
         self.base_size = TANK_SIZE
         self.current_scale = 1.0
@@ -93,8 +95,8 @@ class Tank:
     def set_position(self, grid_x, grid_y):
         self.grid_x = grid_x
         self.grid_y = grid_y
-        self.x = PLAYFIELD_X + grid_x * TILE_SIZE + TILE_SIZE//2
-        self.y = PLAYFIELD_Y + grid_y * TILE_SIZE + TILE_SIZE//2
+        self.x = PLAYFIELD_X + grid_x * self.tile_size + self.tile_size//2
+        self.y = PLAYFIELD_Y + grid_y * self.tile_size + self.tile_size//2
         self.rect.center = (self.x, self.y)
 
     def get_bullet_spawn(self):

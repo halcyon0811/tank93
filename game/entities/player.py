@@ -17,9 +17,9 @@ except ImportError:
         return {"maps":{}}
 
 class PlayerTank(Tank):
-    def __init__(self, player_id, grid_x, grid_y, lives=None):
+    def __init__(self, player_id, grid_x, grid_y, lives=None, is_mega=None):
         color = PLAYER_COLORS[player_id-1] if player_id <= len(PLAYER_COLORS) else PLAYER_COLORS[0]
-        super().__init__(grid_x, grid_y, color, is_player=True)
+        super().__init__(grid_x, grid_y, color, is_player=True, is_mega=is_mega)
         self.player_id = player_id
         self.lives = lives if lives is not None else INITIAL_LIVES
         self.score = 0
