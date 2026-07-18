@@ -174,7 +174,8 @@ class EnemyTank(Tank):
         if new_rect.top < PLAYFIELD_Y - 6 or new_rect.bottom > PLAYFIELD_Y + PLAYFIELD_H + 6:
             return False
 
-        check_rect = new_rect.inflate(-4, -4)
+        # Strict collision - full rect, no visual overlap with bricks
+        check_rect = new_rect.copy()
         tiles = tilemap.get_tiles_in_rect(check_rect)
         for ttype, gx, gy, trect in tiles:
             if not check_rect.colliderect(trect):
@@ -186,7 +187,7 @@ class EnemyTank(Tank):
         for other in other_tanks:
             if other is self or not other.alive:
                 continue
-            if new_rect.colliderect(other.rect.inflate(-4, -4)):
+            if new_rect.colliderect(other.rect):
                 return False
         return True
 

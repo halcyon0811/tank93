@@ -19,7 +19,8 @@ class Tank:
         self.grid_y = grid_y
         self.x = PLAYFIELD_X + grid_x * TILE_SIZE + TILE_SIZE//2
         self.y = PLAYFIELD_Y + grid_y * TILE_SIZE + TILE_SIZE//2
-        self.base_size = TANK_SIZE-4
+        # Use full TANK_SIZE for collision to avoid visual overlapping with bricks
+        self.base_size = TANK_SIZE
         self.current_scale = 1.0
         self.rect = pygame.Rect(0,0,self.base_size, self.base_size)
         self.rect.center = (self.x, self.y)
@@ -168,68 +169,63 @@ class Tank:
         if new_rect.top < PLAYFIELD_Y - 6 or new_rect.bottom > PLAYFIELD_Y + PLAYFIELD_H + 6:
             return False
 
-        # tile collision - giant can crush bricks but not steel/water/forest?
-        # Requirement: giant can run over bricks (but not steel or forest or water)
+        # tile collision - FIXED overlap bug: previous rect was 28 and check was 20 (inflate -4-4) causing 6px visual overlap with brick
+        # Now use full TANK_SIZE (32) for collision and 0 shrink for strict no-overlap, draw is 30 for visual gap
         is_giant = getattr(self, 'is_giant', False) and getattr(self, 'giant_timer', 0) > 0
-        check_rect = new_rect.inflate(-4, -4)
+        # Strict collision - no shrink, so no visual overlap at all. Giant also uses full rect but crushes bricks.
+        check_rect = new_rect.copy()
         tiles = tilemap.get_tiles_in_rect(check_rect)
         crushed_bricks = []
         for ttype, gx, gy, trect in tiles:
             if check_rect.colliderect(trect):
                 if ttype == TILE_BRICK and is_giant:
-                    # giant crushes brick - mark for destruction
                     crushed_bricks.append((gx, gy))
-                    continue  # don't block
-                # Try to nudge slightly if turning and close to wall
+                    continue
                 if is_turn and (abs(snap_x - self.x) > 0.1 or abs(snap_y - self.y) > 0.1):
+                    # Try without snap (original position + movement only) to allow turning near walls without clipping
                     new_rect2 = self.rect.copy()
                     new_rect2.center = (self.x + dx * self.speed * speed_mult, self.y + dy * self.speed * speed_mult)
-                    check_rect2 = new_rect2.inflate(-4, -4)
-                    blocked2 = False
+                    check_rect2 = new_rect2.copy()
                     tiles2 = tilemap.get_tiles_in_rect(check_rect2)
-                    for _, _, _, tr2 in tiles2:
-                        if check_rect2.colliderect(tr2):
-                            # giant can ignore bricks - check all tiles in rect for non-brick blockers
-                            has_non_brick_blocker = False
-                            for t2, gx2, gy2, tr2b in tiles2:
-                                if not check_rect2.colliderect(tr2b):
-                                    continue
-                                if t2 == TILE_BRICK and is_giant:
-                                    continue
-                                has_non_brick_blocker = True
-                                break
-                            blocked2 = has_non_brick_blocker
-                            if blocked2:
-                                break
+                    blocked2 = False
+                    for t2, gx2, gy2, tr2b in tiles2:
+                        if not check_rect2.colliderect(tr2b):
+                            continue
+                        if t2 == TILE_BRICK and is_giant:
+                            continue
+                        blocked2 = True
+                        break
                     if not blocked2:
                         snap_x, snap_y = self.x, self.y
                         new_x = self.x + dx * self.speed * speed_mult
                         new_y = self.y + dy * self.speed * speed_mult
                         new_rect = new_rect2
                         check_rect = check_rect2
-                        # crush bricks for new_rect2 as well
                         tiles = tiles2
+                        # collect crushed bricks for new_rect2
+                        for t2, gx2, gy2, _ in tiles2:
+                            if t2 == TILE_BRICK and is_giant and check_rect2.colliderect(_):
+                                if (gx2, gy2) not in crushed_bricks:
+                                    crushed_bricks.append((gx2, gy2))
                     else:
                         return False
                 else:
                     return False
 
-        # Destroy crushed bricks after deciding move is okay
         for gx, gy in crushed_bricks:
             try:
-                tilemap.destroy_tile(gx, gy, 2, dir_name)  # power 2 break
-                # add particles via game reference if available? we'll do via return flag
+                tilemap.destroy_tile(gx, gy, 2, dir_name)
             except:
                 try:
                     tilemap.destroy_tile(gx, gy, 2)
                 except:
                     pass
 
-        # tank-tank collision - giant can run over enemies and destroy them
+        # tank-tank collision - strict full rects to prevent any visual overlap, giant can run over enemies
         for other in other_tanks:
             if other is self or not other.alive:
                 continue
-            if new_rect.colliderect(other.rect.inflate(-2, -2)):
+            if new_rect.colliderect(other.rect):
                 # If self is player giant and other is enemy, crush it
                 if is_giant and self.is_player and not other.is_player:
                     # Crush enemy
@@ -370,9 +366,9 @@ class Tank:
                 # For authentic retro tanks we also want to mirror powerup flashing like original (red/silver flashing)
                 # Already handled color flashing above
 
-                # Get sprite scaled to current size (shrink/giant)
+                # Get sprite scaled to current size (shrink/giant) - draw slightly smaller than collision rect for visual gap
                 scale = getattr(self, 'current_scale', 1.0)
-                draw_size = int(TANK_SIZE * scale)
+                draw_size = int((TANK_SIZE - 2) * scale)  # 2px smaller than collision rect = 1px gap around
                 from ..assets.sprites import get_cached_tank
                 spr = get_cached_tank(sprite_color, self.direction, anim, sprite_level, draw_size)
                 if spr is None:
@@ -459,7 +455,7 @@ class Tank:
         # ---- Fallback procedural retro (if sheet missing) ----
         cx, cy = self.rect.center
         scale = getattr(self, 'current_scale', 1.0)
-        size = int((TANK_SIZE - 6) * scale)
+        size = int((TANK_SIZE - 8) * scale)  # 8px smaller for visual gap
 
         # Modern simplified fallback that resembles NES yellow/gray etc.
         body_rect = pygame.Rect(0,0,size-4, size-4)
