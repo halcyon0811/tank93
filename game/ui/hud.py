@@ -232,37 +232,6 @@ class HUD:
         screen.blit(sub, sub.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//2 + 30)))
 
     def draw_menu(self, screen, selected, mode='main'):
-        # background
-        screen.fill(COLOR_BG)
-        # title
-        big_font = pygame.font.Font(None, 72)
-        title = big_font.render("TANK 93", True, COLOR_YELLOW)
-        screen.blit(title, title.get_rect(center=(SCREEN_WIDTH//2, 160)))
-        # subtitle
-        small = pygame.font.Font(None, 28)
-        sub = small.render("Enhanced Edition - Battle City Tribute", True, (180,180,200))
-        screen.blit(sub, sub.get_rect(center=(SCREEN_WIDTH//2, 200)))
-
-        # Tank decoration
-        pygame.draw.rect(screen, PLAYER_COLORS[0], (SCREEN_WIDTH//2 - 60, 260, 40, 32), border_radius=4)
-        pygame.draw.rect(screen, (40,40,40), (SCREEN_WIDTH//2 - 64, 260, 6, 32))
-        pygame.draw.rect(screen, (40,40,40), (SCREEN_WIDTH//2 - 22, 260, 6, 32))
-        pygame.draw.rect(screen, (30,30,30), (SCREEN_WIDTH//2 - 42, 240, 4, 20))
-        pygame.draw.circle(screen, (20,20,20), (SCREEN_WIDTH//2 - 40, 276), 8)
-
-        pygame.draw.rect(screen, (180,180,180), (SCREEN_WIDTH//2 + 20, 260, 40, 32), border_radius=4)
-        pygame.draw.rect(screen, (40,40,40), (SCREEN_WIDTH//2 + 16, 260, 6, 32))
-        pygame.draw.rect(screen, (40,40,40), (SCREEN_WIDTH//2 + 58, 260, 6, 32))
-        pygame.draw.rect(screen, (30,30,30), (SCREEN_WIDTH//2 + 38, 240, 4, 20))
-
-        options_main = [
-            "1 PLAYER (35 STAGES)",
-            "2 PLAYERS CO-OP (35 STAGES)",
-            "LEVEL SELECT - 35 ORIGINAL NES MAPS",
-            "HOW TO PLAY",
-            "QUIT",
-        ]
-
         # Try to get total stage count from battle_city module (35)
         try:
             from ..levels.battle_city import STAGE_COUNT as TOTAL_STAGES, BOTS_RAW as BOTS_RAW_ALL, LEVELS_13 as LVLS_13_PREVIEW
@@ -276,16 +245,171 @@ class HUD:
                 LVLS_13_PREVIEW = []
 
         if mode == 'main':
-            options = options_main
-            for i, opt in enumerate(options):
-                color = COLOR_YELLOW if i == selected else (200,200,200)
-                font = pygame.font.Font(None, 38) if i == selected else pygame.font.Font(None, 32)
+            # === Publishable Main Screen UI - Original NES Maps, 1P/2P default ===
+            # Background with subtle retro grid
+            screen.fill(COLOR_BG)
+            # Top border retro
+            pygame.draw.rect(screen, (40,40,60), (0,0,SCREEN_WIDTH, SCREEN_HEIGHT), 4)
+            # Inner playfield mimic for title
+            inner_rect = pygame.Rect(20, 20, SCREEN_WIDTH-40, 120)
+            pygame.draw.rect(screen, (0,0,0), inner_rect, border_radius=8)
+            pygame.draw.rect(screen, (70,70,90), inner_rect, 2, border_radius=8)
+
+            # Animated background tanks (decoration) - simple moving dots
+            t = pygame.time.get_ticks()
+            for i in range(6):
+                x = (t//20 + i*160) % (SCREEN_WIDTH+100) - 50
+                y = 24 + (i%2)*80
+                # small tank silhouette
+                pygame.draw.rect(screen, (30,30,40), (x, y, 18, 12), border_radius=2)
+
+            # Title with shadow/outline for NES authentic feel
+            big_font = pygame.font.Font(None, 84)
+            title = big_font.render("TANK 93", True, COLOR_YELLOW)
+            shadow = big_font.render("TANK 93", True, (0,0,0))
+            # shadow offset
+            screen.blit(shadow, shadow.get_rect(center=(SCREEN_WIDTH//2+4, 84)))
+            screen.blit(title, title.get_rect(center=(SCREEN_WIDTH//2, 80)))
+            # Subtitle - original NES maps highlight
+            small = pygame.font.Font(None, 24)
+            sub = small.render(f"ENHANCED EDITION - {TOTAL_STAGES} ORIGINAL NES MAPS - AUTHENTIC TRIBUTE", True, (200,200,220))
+            screen.blit(sub, sub.get_rect(center=(SCREEN_WIDTH//2, 114)))
+            # Second subtitle with homing/spread new items
+            sub2 = self.font_small.render("NEW: HOMING MISSILE (M) + 8-WAY SPREAD (8) - PERSIST ACROSS STAGES", True, (255,140,0))
+            screen.blit(sub2, sub2.get_rect(center=(SCREEN_WIDTH//2, 134)))
+
+            # === Default 1P / 2P Selection - Large Cards with Original NES Maps ===
+            # Cards centered
+            card_w, card_h = 280, 180
+            gap = 40
+            total_w = card_w*2 + gap
+            start_x = SCREEN_WIDTH//2 - total_w//2
+            start_y = 160
+
+            # Card data
+            cards = [
+                {"title": "1 PLAYER", "sub": f"{TOTAL_STAGES} STAGES", "detail": "ORIGINAL NES MAPS", "color": PLAYER_COLORS[0], "icon": "P1", "enemies": "20 TANKS/STAGE", "maps": "700 ENEMIES TOTAL"},
+                {"title": "2 PLAYERS", "sub": f"{TOTAL_STAGES} STAGES CO-OP", "detail": "ORIGINAL NES MAPS", "color": PLAYER_COLORS[1], "icon": "P1+P2", "enemies": "20 TANKS/STAGE", "maps": "2P CO-OP - FRIENDLY FIRE OFF"},
+            ]
+
+            for idx, card in enumerate(cards):
+                x = start_x + idx*(card_w+gap)
+                y = start_y
+                is_selected = (selected == idx)  # 0=1P, 1=2P default
+                # Card background
+                bg_col = (60,60,90) if not is_selected else (80,80,120)
+                border_col = COLOR_YELLOW if is_selected else (100,100,130)
+                border_w = 4 if is_selected else 2
+                # Pulsing for selected
+                pulse = 0
+                if is_selected:
+                    pulse = int(3 * abs((t % 1000) / 1000 - 0.5))
+                rect = pygame.Rect(x, y, card_w, card_h)
+                pygame.draw.rect(screen, bg_col, rect, border_radius=12)
+                pygame.draw.rect(screen, border_col, rect.inflate(pulse*2, pulse*2), border_w, border_radius=12)
+
+                # Tank icon - big
+                # P1 yellow tank
+                tank_cx = x + card_w//2
+                tank_cy = y + 50
+                if idx == 0:
+                    # Single tank
+                    pygame.draw.rect(screen, card["color"], (tank_cx-30, tank_cy-12, 60, 32), border_radius=6)
+                    pygame.draw.rect(screen, (40,40,40), (tank_cx-36, tank_cy-12, 8, 32), border_radius=2)
+                    pygame.draw.rect(screen, (40,40,40), (tank_cx+28, tank_cy-12, 8, 32), border_radius=2)
+                    pygame.draw.rect(screen, (30,30,30), (tank_cx-3, tank_cy-28, 6, 22))
+                    pygame.draw.circle(screen, (20,20,20), (tank_cx, tank_cy+4), 8)
+                else:
+                    # Two tanks
+                    # P1 left
+                    pygame.draw.rect(screen, PLAYER_COLORS[0], (tank_cx-50, tank_cy-10, 40, 24), border_radius=4)
+                    pygame.draw.rect(screen, (30,30,30), (tank_cx-35, tank_cy-20, 4, 14))
+                    # P2 right
+                    pygame.draw.rect(screen, PLAYER_COLORS[1], (tank_cx+10, tank_cy-10, 40, 24), border_radius=4)
+                    pygame.draw.rect(screen, (30,30,30), (tank_cx+25, tank_cy-20, 4, 14))
+
+                # Title
+                f_title = pygame.font.Font(None, 36)
+                txt = f_title.render(card["title"], True, COLOR_YELLOW if is_selected else COLOR_WHITE)
+                screen.blit(txt, txt.get_rect(center=(tank_cx, y+90)))
+
+                # Subtitle
+                f_sub = pygame.font.Font(None, 22)
+                sub_txt = f_sub.render(card["sub"], True, (200,200,200))
+                screen.blit(sub_txt, sub_txt.get_rect(center=(tank_cx, y+112)))
+
+                # Detail with original maps highlight
+                f_det = self.font_small
+                det = f_det.render(card["detail"], True, (160,220,160))
+                screen.blit(det, det.get_rect(center=(tank_cx, y+130)))
+
+                # Enemies info
+                en = f_det.render(card["enemies"], True, (180,180,180))
+                screen.blit(en, en.get_rect(center=(tank_cx, y+148)))
+
+                # Maps info
+                mp = f_det.render(card["maps"], True, (200,180,100))
+                screen.blit(mp, mp.get_rect(center=(tank_cx, y+164)))
+
+                # Selected arrow and START hint
+                if is_selected:
+                    arrow = pygame.font.Font(None, 32).render("▶", True, COLOR_YELLOW)
+                    screen.blit(arrow, (x-28, y+card_h//2-10))
+                    # Press START
+                    start_hint = self.font_small.render("PRESS ENTER / A / START", True, COLOR_YELLOW)
+                    screen.blit(start_hint, start_hint.get_rect(center=(tank_cx, y+card_h+14)))
+
+            # === Secondary options below cards - Level Select, How to, Quit ===
+            options_main = [
+                "LEVEL SELECT - 35 ORIGINAL NES MAPS",
+                "HOW TO PLAY",
+                "QUIT",
+            ]
+            # Map secondary selected index: main selected 2,3,4 -> secondary 0,1,2
+            sec_start_y = start_y + card_h + 40
+            for i, opt in enumerate(options_main):
+                main_idx = i + 2
+                is_sel = (selected == main_idx)
+                color = COLOR_YELLOW if is_sel else (180,180,180)
+                font = pygame.font.Font(None, 26) if is_sel else pygame.font.Font(None, 22)
                 txt = font.render(opt, True, color)
-                y = 340 + i*44
-                if i == selected:
-                    arrow = pygame.font.Font(None, 32).render(">", True, COLOR_YELLOW)
-                    screen.blit(arrow, (SCREEN_WIDTH//2 - 160, y))
+                y = sec_start_y + i*28
+                # Box for level select is bigger and highlighted as original maps
+                if i == 0:  # Level select - emphasize original maps
+                    box_rect = pygame.Rect(SCREEN_WIDTH//2-200, y-4, 400, 26)
+                    box_col = (50,50,80) if not is_sel else (70,70,100)
+                    pygame.draw.rect(screen, box_col, box_rect, border_radius=6)
+                    pygame.draw.rect(screen, color, box_rect, 2 if is_sel else 1, border_radius=6)
+                if is_sel:
+                    arrow = pygame.font.Font(None, 22).render(">", True, COLOR_YELLOW)
+                    screen.blit(arrow, (SCREEN_WIDTH//2 - 220, y))
                 screen.blit(txt, txt.get_rect(center=(SCREEN_WIDTH//2, y)))
+
+            # === Footer - Publishing Info with Original NES Maps ===
+            footer_y = SCREEN_HEIGHT - 70
+            # Original NES maps banner
+            banner_rect = pygame.Rect(20, footer_y-8, SCREEN_WIDTH-40, 60)
+            pygame.draw.rect(screen, (0,0,0), banner_rect, border_radius=6)
+            pygame.draw.rect(screen, (50,50,70), banner_rect, 1, border_radius=6)
+            footer_lines = [
+                f"35 ORIGINAL NES MAPS - STAGE 1: 18*basic 2*fast ... STAGE 35: 4*power 6*fast 10*armor (700 ENEMIES)",
+                "TILES: BRICK RED, STEEL WHITE, WATER BLUE, FOREST GREEN, ICE GRAY - PIXEL PERFECT NES RIPS",
+                "CONTROLS: P1 WASD+SPACE / P2 ARROWS+ENTER / JOY-CON L/R or PRO / C=COIN 1/2=JOIN",
+            ]
+            for j, line in enumerate(footer_lines):
+                f = pygame.font.Font(None, 16)
+                c = (200,200,100) if j==0 else (140,140,160) if j==1 else (160,160,180)
+                txt = f.render(line, True, c)
+                screen.blit(txt, txt.get_rect(center=(SCREEN_WIDTH//2, footer_y + j*18)))
+
+            # Default hint
+            default_hint = self.font_small.render("DEFAULT: 1 PLAYER - 35 ORIGINAL NES MAPS - PRESS ENTER TO START", True, (100,255,100))
+            screen.blit(default_hint, default_hint.get_rect(center=(SCREEN_WIDTH//2, 360)))
+
+            # Insert coin flashing (publishable arcade feel)
+            if (t // 400) % 2 == 0:
+                coin_txt = pygame.font.Font(None, 20).render("INSERT COIN - PRESS C or 5 FOR 10 LIVES - 1/2 TO JOIN", True, COLOR_YELLOW)
+                screen.blit(coin_txt, coin_txt.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT-12)))
         elif mode == 'level':
             # Header
             header_font = pygame.font.Font(None, 30)
@@ -400,20 +524,23 @@ class HUD:
             overlay.fill((0,0,0,200))
             screen.blit(overlay, (0,100))
             lines = [
-                "HOW TO PLAY - TANK 93",
+                "HOW TO PLAY - TANK 93 - 35 ORIGINAL NES MAPS",
                 "",
                 "Goal: Protect your base (Eagle) and destroy all enemy tanks.",
                 "Movement: P1 WASD / P2 Arrows / Gamepad Stick / Joy-Con",
-                "Shoot: SPACE / ENTER / Gamepad A / Joy-Con Any",
+                "Shoot: SPACE / ENTER / Gamepad A / Joy-Con Any - Tank always faces aim",
                 "",
                 "Tiles: Brick=breakable, Steel=needs power gun, Water=blocked",
                 "Forest=hides tank, Ice=slippery",
-                "Powerups:",
-                " Star=upgrade tank (3 levels) gun+speed",
-                " Helmet=10s shield, Clock=freeze enemies 5s",
+                "Powerups (Original + New):",
+                " Star=upgrade tank (3 levels) gun+speed - kept across stages",
+                " Helmet=10s shield, Clock=freeze enemies 5s (now attackable while frozen)",
                 " Shovel=steel walls around base 15s",
                 " Tank=+1 life, Grenade=kill all enemies",
                 " Gun=steel-breaking bullets",
+                " NEW: Homing Missile (M-orange)=tracking nearest enemy - PERM until death",
+                " NEW: Spread Shot (8-purple)=8 directions at once - PERM until death",
+                "      Combo: M+8 = 8 homing missiles!",
                 "",
                 "ARCADE COIN SYSTEM:",
                 " Each coin = 10 lives, Press C or 5 to Insert Coin",
