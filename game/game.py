@@ -84,11 +84,30 @@ class Game:
         except:
             pass
 
+        # Screen size - bigger for mega maps to keep tank size same (32px tank vs 24px tile, playfield 1248px)
+        # For mega, need at least MEGA_PLAYFIELD_W + HUD + margins = 1248+250+96 = 1594, height 1248+96=1344
+        # Use 1600x1400 for mega, 960x720 for normal
+        self.is_mega = MEGA_ENABLED
+        screen_w, screen_h = (MEGA_SCREEN_WIDTH, MEGA_SCREEN_HEIGHT + 400) if self.is_mega else (SCREEN_WIDTH, SCREEN_HEIGHT)
+        # Cap to reasonable monitor size, but allow bigger for mega
+        if self.is_mega:
+            # 1248 playfield height needs taller window, use 1350 height
+            screen_w = MEGA_PLAYFIELD_W + 320  # 1248+320=1568
+            screen_h = MEGA_PLAYFIELD_H + 100  # 1348
+            # Limit to screen max but keep ratio - use 1600x1400 if fits, else scale?
+            # For Mac, max is usually 2560x1600, so 1568x1348 fits
+            # We'll create window 1600x900 and add internal scrolling? Simpler: 1600x900 with smaller HUD
+            # For now use 1600x900 and let playfield be scrollable? But requirement says just bigger map
+            # Let's use 1600x900 and center playfield with camera - simplest: keep screen 1600x900 and draw 1248 playfield fully visible
+            screen_w = MEGA_SCREEN_WIDTH  # 1600
+            screen_h = 900
+            # If mega playfield 1248 tall won't fit in 900, we need taller - use 1400
+            screen_h = 1400
         self.is_fullscreen = False
-        self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+        self.screen = pygame.display.set_mode((screen_w, screen_h))
         pygame.display.set_caption("Tank 93 Enhanced - Battle City Tribute - F11/F for Fullscreen")
         self.clock = pygame.time.Clock()
-        self.hud = HUD()
+        self.hud = HUD(is_mega=self.is_mega)
 
         self.state = 'menu'
         self.menu_selected = 0
@@ -120,14 +139,14 @@ class Game:
         self.continue_timer = 0
         self.credits = {1: 0, 2: 0}
 
-        # Mega map mode flag
-        self.is_mega = MEGA_ENABLED
+        # Mega map mode flag - already set above from MEGA_ENABLED
         try:
             from .levels.mega_maps import MEGA_LEVELS_52, MEGA_ENEMY_QUEUES, MEGA_STAGE_COUNT
             self.mega_levels = MEGA_LEVELS_52
             self.mega_queues = MEGA_ENEMY_QUEUES
             self.mega_count = MEGA_STAGE_COUNT
-        except ImportError:
+        except ImportError as e:
+            print(f"Mega maps not found: {e}, using normal")
             self.mega_levels = None
             self.mega_queues = None
             self.mega_count = 0

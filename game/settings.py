@@ -9,37 +9,70 @@ SCREEN_WIDTH = 960
 SCREEN_HEIGHT = 720
 FPS = 60
 
+MEGA_SCREEN_WIDTH = 1600
+MEGA_SCREEN_HEIGHT = 1400  # tall enough for 1248 playfield + margins
+
 # Playfield - classic Battle City is 13x13 big tiles = 26x26 small tiles
-# Mega maps: 4x area = 52x52 small tiles (double width+height)
-# To fit on screen, mega uses TILE_SIZE 12 (so PLAYFIELD still 624)
-TILE_SIZE = 24  # small tile pixel size (modernized HD) for normal mode
-GRID_W = 26
-GRID_H = 26
-PLAYFIELD_W = GRID_W * TILE_SIZE  # 624
-PLAYFIELD_H = GRID_H * TILE_SIZE  # 624
+# Mega maps 4x: 52x52 small tiles = 26x26 big tiles, keep TILE_SIZE 24 so tank size same (32px), playfield becomes 1248
+TILE_SIZE = 24
+MEGA_ENABLED = True
+MEGA_GRID_W = 52
+MEGA_GRID_H = 52
+MEGA_TILE_SIZE = 24  # KEEP SAME as TILE_SIZE so tanks same size!
+MEGA_PLAYFIELD_W = 52 * 24  # 1248
+MEGA_PLAYFIELD_H = 52 * 24  # 1248 bigger map, same tank size
+MEGA_PLAYFIELD_X = 48
+MEGA_PLAYFIELD_Y = 48
+MEGA_BASE_POS = (25, 25)  # center of 52x52
+MEGA_PLAYER_SPAWN = [(8, 48), (42, 48)]
+MEGA_ENEMY_SPAWNS = [(0, 0), (25, 0), (50, 0), (0, 25)]
+
+# When mega enabled, override normal constants to mega size so all logic uses bigger map but tank size same
+if MEGA_ENABLED:
+    GRID_W = MEGA_GRID_W
+    GRID_H = MEGA_GRID_H
+    PLAYFIELD_W = MEGA_PLAYFIELD_W
+    PLAYFIELD_H = MEGA_PLAYFIELD_H
+    BASE_POS = MEGA_BASE_POS
+    PLAYER_SPAWN = MEGA_PLAYER_SPAWN
+    ENEMY_SPAWNS = MEGA_ENEMY_SPAWNS
+    SCREEN_WIDTH = MEGA_SCREEN_WIDTH
+    SCREEN_HEIGHT = MEGA_SCREEN_HEIGHT
+else:
+    GRID_W = 26
+    GRID_H = 26
+    PLAYFIELD_W = 26 * 24
+    PLAYFIELD_H = 26 * 24
+    BASE_POS = (12, 24)
+    PLAYER_SPAWN = [(8, 24), (16, 24)]
+    ENEMY_SPAWNS = [(0, 0), (12, 0), (24, 0)]
+    SCREEN_WIDTH = 960
+    SCREEN_HEIGHT = 720
+
 PLAYFIELD_X = 48
 PLAYFIELD_Y = 48
 
-# Mega map constants - 4x area (2x width, 2x height)
-MEGA_ENABLED = True  # enable mega maps mode
-MEGA_GRID_W = 52
-MEGA_GRID_H = 52
-MEGA_TILE_SIZE = 12  # half size to keep same playfield pixel size (52*12=624)
-MEGA_PLAYFIELD_W = MEGA_GRID_W * MEGA_TILE_SIZE
-MEGA_PLAYFIELD_H = MEGA_GRID_H * MEGA_TILE_SIZE
-# Base at very center for mega maps (25,25) for 2x2 base in 52x52 grid
-MEGA_BASE_POS = (25, 25)
-# For normal mode compatibility, keep original base pos
-# Mega spawns - corners and center edges for more action
-MEGA_PLAYER_SPAWN = [
-    (8, 48),   # P1 bottom near center-west
-    (42, 48),  # P2 bottom near center-east
-]
-MEGA_ENEMY_SPAWNS = [(0, 0), (25, 0), (50, 0), (0, 25)]  # 4 corners + middle top
-MEGA_PLAYER_SPAWN_SAFE = [
-    (6, 46), (40, 46),  # slightly larger safe area
-]
-MEGA_BASE_STEEL_FORT_RADIUS = 2  # steel thickness around base
+# Compatibility helpers (still needed for old code)
+def get_playfield_size(is_mega=False):
+    return (MEGA_PLAYFIELD_W, MEGA_PLAYFIELD_H) if is_mega else (MEGA_PLAYFIELD_W if MEGA_ENABLED else 26*24, MEGA_PLAYFIELD_H if MEGA_ENABLED else 26*24)
+
+def get_tile_size(is_mega=False):
+    return 24  # always 24 to keep tank size same
+
+def get_grid_size(is_mega=False):
+    return (MEGA_GRID_W, MEGA_GRID_H) if (is_mega or MEGA_ENABLED) else (26, 26)
+
+def get_base_pos(is_mega=False):
+    return MEGA_BASE_POS if (is_mega or MEGA_ENABLED) else (12, 24)
+
+def get_player_spawns(is_mega=False):
+    return MEGA_PLAYER_SPAWN if (is_mega or MEGA_ENABLED) else [(8,24),(16,24)]
+
+def get_enemy_spawns(is_mega=False):
+    return MEGA_ENEMY_SPAWNS if (is_mega or MEGA_ENABLED) else [(0,0),(12,0),(24,0)]
+
+def get_screen_size(is_mega=False):
+    return (MEGA_SCREEN_WIDTH, MEGA_SCREEN_HEIGHT) if (is_mega or MEGA_ENABLED) else (960,720)
 
 # Sidebar HUD
 HUD_X = PLAYFIELD_X + PLAYFIELD_W + 20
@@ -121,28 +154,14 @@ HOMING_AVOIDANCE_LOOKAHEAD = 2.6  # tiles lookahead for obstacle avoidance (long
 HOMING_WALL_SAFE_MARGIN = 0.28  # safe margin from walls in tile units
 HOMING_STUCK_DESTROY_THRESHOLD = 16  # frames stuck before destroying brick fallback
 
-PLAYER_SPAWN = [
-    (8, 24),   # P1 grid position
-    (16, 24),  # P2
-]
-ENEMY_SPAWNS = [(0, 0), (12, 0), (24, 0)]
-BASE_POS = (12, 24)  # eagle position (top-left of 2x2)
-
-# When in mega mode, base is at center
-def get_base_pos(is_mega=False):
-    return MEGA_BASE_POS if is_mega else BASE_POS
-
-def get_player_spawns(is_mega=False):
-    return MEGA_PLAYER_SPAWN if is_mega else PLAYER_SPAWN
-
-def get_enemy_spawns(is_mega=False):
-    return MEGA_ENEMY_SPAWNS if is_mega else ENEMY_SPAWNS
-
-def get_grid_size(is_mega=False):
-    return (MEGA_GRID_W, MEGA_GRID_H) if is_mega else (GRID_W, GRID_H)
-
-def get_tile_size(is_mega=False):
-    return MEGA_TILE_SIZE if is_mega else TILE_SIZE
+# These are overridden per MEGA_ENABLED above, kept for fallback if mega disabled
+if not MEGA_ENABLED:
+    PLAYER_SPAWN = [
+        (8, 24),
+        (16, 24),
+    ]
+    ENEMY_SPAWNS = [(0, 0), (12, 0), (24, 0)]
+    BASE_POS = (12, 24)
 
 # Powerups - classic + new items (homing missile, 8-way spread, rapid fire 3x, shrink, giant)
 POWERUP_TYPES = ['helmet', 'clock', 'shovel', 'star', 'grenade', 'tank', 'gun', 'homing', 'spread', 'rapid', 'shrink', 'giant']
