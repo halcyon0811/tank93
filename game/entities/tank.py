@@ -646,3 +646,34 @@ class Tank:
             if getattr(self, 'armor_flash_timer', 0) % 4 < 2 and getattr(self, 'armor_flash_timer', 0) > 0:
                 col = (255,255,255)
             pygame.draw.rect(screen, col, (bx-bar_w//2, by, int(bar_w*pct), bar_h))
+
+    def draw_forest_hint(self, screen):
+        """Draw faint silhouette when player is inside forest for visibility hint"""
+        if not self.alive or not self.is_player:
+            return
+        cx, cy = self.rect.center
+        scale = getattr(self, 'current_scale', 1.0)
+        size = int((TANK_SIZE - 8) * scale * 0.8)
+        # Faint outline + tracks hint
+        s = pygame.Surface((size+8, size+8), pygame.SRCALPHA)
+        s.fill((0,0,0,0))
+        # Draw very faint tank shape
+        pygame.draw.rect(s, (*self.color[:3], 60), (4, 4, size, size), border_radius=3)
+        # Tracks hint
+        pygame.draw.rect(s, (40,40,40, 50), (2, 4, 4, size), border_radius=1)
+        pygame.draw.rect(s, (40,40,40, 50), (size+2, 4, 4, size), border_radius=1)
+        # Cannon faint
+        import math
+        ang = DIR_ANGLE.get(self.direction, 0)
+        vx = math.sin(math.radians(ang))
+        vy = -math.cos(math.radians(ang))
+        x2 = size//2 + 4 + vx * (size//2)
+        y2 = size//2 + 4 + vy * (size//2)
+        pygame.draw.line(s, (30,30,30, 70), (size//2+4, size//2+4), (x2, y2), 2)
+        screen.blit(s, (cx - (size+8)//2, cy - (size+8)//2))
+        
+        # Rustle particles - small leaf movement hint
+        if random.random() < 0.15:
+            rx = cx + random.randint(-8,8)
+            ry = cy + random.randint(-8,8)
+            pygame.draw.circle(screen, (90, 180, 50, 120), (rx, ry), 1)

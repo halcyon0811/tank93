@@ -1019,11 +1019,22 @@ class Game:
                         self.menu_selected = 0
 
     def handle_menu_select(self):
+        # Clear event queue when starting game to prevent queued UP/DOWN from menu going into game and vice versa
+        try:
+            pygame.event.clear()
+        except:
+            pass
+        # Reset stuck timers
+        self.menu_stuck_timer = 0
+        self.joystick_error_count = 0
+        
         if self.menu_selected == 0: # 1P
+            print("[Menu] Starting 1P game")
             self.num_players = 1
             self.current_level = 0
             self.init_level(self.current_level, 1)
         elif self.menu_selected == 1: # 2P
+            print("[Menu] Starting 2P game")
             self.num_players = 2
             self.current_level = 0
             self.init_level(self.current_level, 2)
@@ -1033,6 +1044,7 @@ class Game:
         elif self.menu_selected == 3: # how to
             self.menu_mode = 'howto'
         elif self.menu_selected == 4:
+            print("[Menu] Quit selected")
             pygame.quit()
             sys.exit()
 
@@ -1483,7 +1495,7 @@ class Game:
             self.tilemap.draw(canvas)
             # base
             self.base.draw(canvas)
-            # tanks - pass tilemap for forest hiding (player faintly visible in forest, enemies completely hidden)
+            # tanks - pass tilemap for forest hiding (player faintly visible, enemies completely hidden)
             for e in self.enemies:
                 e.draw(canvas, tilemap=self.tilemap)
             for p in self.players:
@@ -1494,8 +1506,13 @@ class Game:
             # powerups
             for pu in self.powerups:
                 pu.draw(canvas)
-            # overlay tiles (grass)
+            # overlay tiles (grass) - dense forest that completely hides tanks underneath
             self.tilemap.draw_overlay(canvas)
+            # Player forest visibility hint - draw faint silhouette of player tanks that are in forest AFTER overlay
+            # So player gets 15-20% visibility while enemies stay fully hidden
+            for p in self.players:
+                if p.alive and self.tilemap.is_in_forest(p.x, p.y):
+                    p.draw_forest_hint(canvas)
             # particles top
             self.particles.draw(canvas)
 
