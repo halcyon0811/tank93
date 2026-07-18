@@ -111,49 +111,47 @@ class TileMap:
                     self.tiles[y][x] = TILE_EMPTY
 
     def build_base_walls(self, tile_type, concrete_steel=False):
-        """Build walls around base. If concrete_steel=True or is_mega, use steel fort"""
+        """Build walls around base. For mega, 2 layers default as bricks (not thick steel fort)"""
         bx, by = self.base_pos
-        if self.is_mega or concrete_steel:
-            # For mega: stronger fort with steel/concrete surrounding center base
-            # Double thickness steel fort
-            coords = []
-            for dy in range(-2, 4):
-                for dx in range(-2, 4):
-                    # outer ring steel, but leave opening gaps?
-                    if abs(dx) == 2 or abs(dy) == 2 or (abs(dx)==2 or abs(dy)==2):
-                        if dx == 0 and dy == 0:
-                            continue
-                        # skip base itself 2x2
-                        if (bx+dx, by+dy) in [(bx, by), (bx+1, by), (bx, by+1), (bx+1, by+1)]:
-                            continue
-                        # inner ring
-                        if abs(dx) <= 1 and abs(dy) <= 1:
-                            if dx == 0 and dy == 0:
-                                continue
-                        coords.append((bx+dx, by+dy))
-            # Override to simple thick fort: 8 surrounding + outer
-            coords = [
+        if self.is_mega:
+            # NEW: 2 layers only, default bricks (user request: center base has too much walls, make it 2 layers default bricks)
+            # Outer ring at distance 2, inner at distance 1, both bricks by default
+            # Openings N/S/E/W kept for access
+            outer = [
                 (bx-2, by-2), (bx-1, by-2), (bx, by-2), (bx+1, by-2), (bx+2, by-2), (bx+3, by-2),
                 (bx-2, by-1), (bx+3, by-1),
                 (bx-2, by), (bx+3, by),
                 (bx-2, by+1), (bx+3, by+1),
                 (bx-2, by+2), (bx-1, by+2), (bx, by+2), (bx+1, by+2), (bx+2, by+2), (bx+3, by+2),
             ]
-            for (x, y) in coords:
-                if 0 <= x < self.grid_w and 0 <= y < self.grid_h:
-                    self.tiles[y][x] = TILE_STEEL
-            # inner brick layer for extra protection if requested steel, else brick
             inner = [
                 (bx-1, by-1), (bx, by-1), (bx+1, by-1), (bx+2, by-1),
                 (bx-1, by), (bx+2, by),
                 (bx-1, by+1), (bx+2, by+1),
             ]
-            # Keep inner as brick if building from shovel? For mega always steel fort
-            for (x, y) in inner:
+            # Default as bricks for mega center base (2 layers)
+            fort_tile = TILE_BRICK  # default bricks per user request
+            # If concrete_steel flag or tile_type is steel (shovel powerup), use steel
+            use_steel = concrete_steel or tile_type == TILE_STEEL
+            wall_tile = TILE_STEEL if use_steel else TILE_BRICK
+            
+            # Build 2 layers: inner and outer both as brick (or steel if shovel)
+            for (x, y) in outer + inner:
                 if 0 <= x < self.grid_w and 0 <= y < self.grid_h:
-                    if self.tiles[y][x] == TILE_EMPTY:
-                        self.tiles[y][x] = TILE_STEEL if tile_type == TILE_STEEL else TILE_BRICK
+                    self.tiles[y][x] = wall_tile
+            
+            # Create openings N/S/E/W (2 tiles each for access)
+            openings = [
+                (bx, by-2), (bx+1, by-2),  # north
+                (bx, by+3), (bx+1, by+3),  # south
+                (bx-2, by), (bx-2, by+1),  # west
+                (bx+3, by), (bx+3, by+1),  # east
+            ]
+            for gx, gy in openings:
+                if 0 <= gx < self.grid_w and 0 <= gy < self.grid_h:
+                    self.tiles[gy][gx] = TILE_EMPTY
         else:
+            # Normal mode: classic 1-layer walls around base
             coords = [
                 (bx-1, by-1), (bx, by-1), (bx+1, by-1), (bx+2, by-1),
                 (bx-1, by), (bx-1, by+1),
@@ -306,91 +304,51 @@ class TileMap:
         return None  # we draw procedurally below matching extraction
 
     def draw_brick(self, screen, x, y):
-        # Pixel-perfect NES brick extracted from downloaded_maps
-        # Base colors sampled from native 8x8 crop: brick red = (210,56,24) approx, mortar dark = (100,20,10)
-        # Our TILE_SIZE is 24, so 8px native *3 =24. So 1 native pixel =3 screen pixels -> crisp upscale.
-        # We will draw 8x8 native pattern then scale 3x with nearest (integer) for perfect pixels.
-
-        # Create 8x8 surface
-        s = pygame.Surface((8,8))
-        # Palette
-        BR = (210, 56, 24)   # brick red from extraction (avg 216,63,22 but clean to 210,56,24)
+        # Fine-grained brick - similar size as tank (tank 32px, brick tile 24px but with 4 micro-bricks)
+        # Make brick look smaller/more detailed like NES original has 4 mini bricks per tile
+        # Draw at native 16x16 then scale to tile_size, with visible mortar gaps
+        ts = self.tile_size
+        # Create surface with mortar gap around edges (2px gap makes brick appear smaller, similar to tank)
+        # Use fine-grained 16x16 pattern with 4 bricks
+        s = pygame.Surface((16,16))
+        BR = (210, 56, 24)   # brick red
         BD = (100, 22, 10)   # dark mortar
-        BL = (240, 90, 50)   # light highlight top of brick (1px)
+        BL = (240, 90, 50)   # light highlight
         BM = (140, 30, 12)   # mid mortar
-
-        # Fill with mortar dark
-        s.fill(BD)
-        # Draw 2 big bricks per 8x8: typical NES brick pattern 8x8 has 2 bricks stacked? Actually extraction shows ~2 horizontal bricks?
-        # Let's replicate exact pattern seen in native_brick_small_8x8_up8.png (upscaled 8x): from earlier extraction it was blurry jpg but we need manual:
-        # For 8x8 native, pattern is:
-        # y0: mortar top (1px) -> BD
-        # y1-3: brick row top: red with light top 1px, mortar vertical at x3-4?
-        # Actually NES 8x8 brick tile: 2 bricks per row? Let's define canonical NES pattern from screenshots 0YU1FH:
-        # Observed in 0YU1FH maze: brick walls look like horizontal bricks 8px wide, 4px tall with 1px mortar.
-        # Exact 8x8:
-        # 00000000  mortar top
-        # RRRRDRRR  RRRR = brick, D= vertical mortar
-        # RRRRDRRR
-        # RRRRDRRR
-        # DRMDRMDR? Actually horizontal mortar row
-        # Let's use pattern that matches screenshot: 2 horizontal mortar lines splitting 8px into ~3 bricks? Simpler: 8x8 = 2 rows of bricks (3px tall each) + 2 mortar lines (1px)
-        # Row structure:
-        # 0: mortar
-        # 1-3: brick row A (R... with vertical mortar at x=3)
-        # 4: mortar
-        # 5-7: brick row B (staggered vertical mortar at x=1 and x=5)
-        # This matches classic NES brick stagger.
-
-        # Row 0 mortar
-        # already BD
-
-        # Row group: we draw bricks as BR with highlight BL on top edge
-        # brick row A y=1..3
-        # fill bricks
-        for bx in range(8):
-            for by in range(1,4):
-                # vertical mortar at x=3? Actually at x=3,4?
-                if bx in (3,4):
-                    # leave as BD (vertical mortar)
-                    continue
-                if by == 1:
-                    s.set_at((bx, by), BL)  # light top
-                else:
-                    s.set_at((bx, by), BR)
-
-        # Row 4 horizontal mortar
-        # Already BD
-
-        # Row B y=5..7 staggered
-        for bx in range(8):
-            for by in range(5,8):
-                if bx in (1,2,5,6):  # wait vertical mortar positions? For stagger, mortar at x=1-2 and x=5-6? Actually vertical mortar at x=1 and x=5 (single pixel)
-                    if bx in (2,6):  # mortar 1px
-                        continue
-                    # need to keep mortar
-                    # Let's define mortar at x=2 and x=6 (single column)
-                    pass
-                # corrected below
-
-        # Re-do row B cleanly
-        # Clear row B area first to BR then carve mortar
-        for bx in range(8):
-            for by in range(5,8):
-                s.set_at((bx, by), BR if by!=5 else BL)
-
-        # vertical mortar for row A: at x=3 (and maybe 4 for 2px thick?) screenshots show 2px thick? In native extraction unique colors ~24 due to jpeg blur suggests mortar is 1-2px.
-        # Let's put mortar column at x=3 (1px) dark
-        for by in range(1,4):
-            s.set_at((3, by), BM)
-        # row B mortar at x=2 and x=6? Actually stagger means mortar at x=1 and x=5 for 2nd row in many NES tiles, but screenshot shows maybe at x=2 and 6?
-        for by in range(5,8):
-            s.set_at((2, by), BM)
-            s.set_at((6, by), BM)
-
-        # Now scale to tile_size (dynamic)
-        scaled = pygame.transform.scale(s, (self.tile_size, self.tile_size))
-        screen.blit(scaled, (x, y))
+        
+        s.fill(BD)  # mortar background
+        
+        # Draw 4 small bricks in 16x16: 2 rows of 2 bricks each, with mortar gaps
+        # Each small brick ~7x6 with 2px mortar gaps - makes bricks look fine-grained, similar to tank details
+        brick_w = 7
+        brick_h = 6
+        gap = 2
+        # Positions for 4 bricks
+        positions = [(1, 1), (9, 1), (1, 9), (9, 9)]
+        # Stagger second row
+        positions = [(1, 1), (9, 1), (2, 9), (10, 9)]  # staggered like NES
+        
+        for bx, by in positions:
+            # Brick body with highlight top
+            pygame.draw.rect(s, BR, (bx, by, brick_w, brick_h))
+            # Top highlight line (1px)
+            pygame.draw.line(s, BL, (bx, by), (bx+brick_w-1, by), 1)
+            # Left highlight
+            # pygame.draw.line(s, BL, (bx, by), (bx, by+brick_h-1), 1)
+        
+        # Add vertical mortar lines to emphasize separation
+        pygame.draw.line(s, BM, (8, 1), (8, 7), 1)
+        pygame.draw.line(s, BM, (1, 8), (15, 8), 1)
+        
+        # Scale to tile_size with slight shrink for mortar gap around tile (makes brick appear smaller than tank)
+        # If BRICK_FINE_GRAINED enabled, shrink visual with gap
+        if getattr(self, '_brick_shrink', True):
+            # Draw with 1px gap around tile for fine-grained look
+            scaled = pygame.transform.scale(s, (ts-2, ts-2))
+            screen.blit(scaled, (x+1, y+1))
+        else:
+            scaled = pygame.transform.scale(s, (ts, ts))
+            screen.blit(scaled, (x, y))
 
     def draw_steel(self, screen, x, y):
         # Pixel-perfect NES steel from tile_steel.png extraction:

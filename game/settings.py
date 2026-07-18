@@ -137,14 +137,22 @@ ENEMY_COLORS = {
 }
 
 # Gameplay
-TANK_SIZE = 32  # visual tank size slightly bigger than tile
-TANK_SPEED = {"player": 2.2, "enemy": 1.2, "fast": 2.0}
+TANK_SIZE = 32  # visual tank size similar to tile size now (fine-grained bricks)
+TANK_SPEED = {"player": 3.3, "enemy": 1.8, "fast": 3.0}  # 1.5x faster: player was 2.2 -> 3.3
 BULLET_SPEED = 5.5
 BULLET_SIZE = 6
 MAX_BULLETS = {"player": 2, "enemy": 1}  # classic limiting
 
+# Brick fine-grained: make brick tiles smaller visual detail similar to tank size
+# Previously brick was full tile (24px). Now we want fine-grained like sub-tiles, but keep collision same
+# We'll achieve via drawing: brick pattern more detailed, but collision grid stays same
+# For finer feel, reduce TILE effective? Keep TILE_SIZE 24 but TANK 32 similar, so brick looks similar size
+# Actually make brick slightly smaller visually: still 24px tile but with mortar gaps so brick appears ~20px ~ tank
+BRICK_FINE_GRAINED = True
+BRICK_VISUAL_SHRINK = 2  # shrink brick visual by 2px for mortar gap, making it feel similar to tank size
+
 # Smart M (homing) missile - new behavior: tank speed, limited range, avoids walls
-HOMING_SPEED = TANK_SPEED["player"] * 1.08  # ~2.38, very similar to tank moving speed (2.2)
+HOMING_SPEED = TANK_SPEED["player"] * 1.08  # ~3.56 now with 1.5x tank speed, keeps ratio
 HOMING_MAX_DISTANCE = GRID_W * TILE_SIZE * 0.92  # ~574 px = 24 tiles travel limit (limited but allows going around walls)
 HOMING_TURN_SPEED = 0.068  # slightly higher than before for wall avoidance agility, still smooth (was 0.18 before, now smarter slower)
 HOMING_DETECTION_RANGE = PLAYFIELD_W * 0.92  # only track enemies within range
