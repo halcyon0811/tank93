@@ -200,8 +200,12 @@ class EnemyTank(Tank):
         if new_rect.top < PLAYFIELD_Y - 6 or new_rect.bottom > PLAYFIELD_Y + PLAYFIELD_H + 6:
             return False
 
-        # Strict collision - full rect, no visual overlap with bricks
-        check_rect = new_rect.copy()
+        # Fixed: tank 32 vs tile 24 - use 24x24 collision for tiles so single destroyed brick is passable
+        # Same fix as player tank: inflate -8 for normal tanks
+        if getattr(self, 'is_boss', False) or getattr(self, 'is_giant', False):
+            check_rect = new_rect.copy()  # boss/giant full for crushing
+        else:
+            check_rect = new_rect.inflate(-8, -8)  # 32->24
         tiles = tilemap.get_tiles_in_rect(check_rect)
         for ttype, gx, gy, trect in tiles:
             if not check_rect.colliderect(trect):

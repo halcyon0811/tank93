@@ -240,17 +240,27 @@ class Tank:
         if new_rect.top < PLAYFIELD_Y - 6 or new_rect.bottom > PLAYFIELD_Y + PLAYFIELD_H + 6:
             return False
 
-        # tile collision - FIXED overlap bug: previous rect was 28 and check was 20 (inflate -4-4) causing 6px visual overlap with brick
-        # Now use full TANK_SIZE (32) for collision and 0 shrink for strict no-overlap, draw is 30 for visual gap
+        # tile collision - FIXED: tank 32px vs brick tile 24px
+        # Previously used full 32 rect for tile collision -> destroying 1 brick (24px) not enough for 32px tank to pass
+        # User reported: destroyed brick area smaller than tank width, cannot pass through
+        # Fix: use smaller collision rect for tile checks (24x24 = TANK_SIZE-8) so single destroyed brick = passable
+        # For tank-tank collision, keep full rect to prevent overlapping tanks
+        # Visual gap: tank drawn 30 vs collision 24 = 3px visual overlap with adjacent bricks when squeezing through 1-tile gap - acceptable and matches classic Battle City feel
+        # Also log for debug: if tank cannot pass through destroyed area, we can see via breadcrumbs
         is_giant = getattr(self, 'is_giant', False) and getattr(self, 'giant_timer', 0) > 0
         is_boss = getattr(self, 'is_boss', False)  # boss monster can also crush bricks (free-for-all threat)
         can_crush_brick = is_giant or is_boss
-        # Strict collision - no shrink, so no visual overlap at all. Giant/boss also uses full rect but crushes bricks.
-        check_rect = new_rect.copy()
-        tiles = tilemap.get_tiles_in_rect(check_rect)
+
+        # For tile collision, use 24x24 for normal tanks (allows 1-tile gap pass), full for giant/boss crushing detection
+        if can_crush_brick:
+            tile_check_rect = new_rect.copy()  # full for crush detection
+        else:
+            tile_check_rect = new_rect.inflate(-8, -8)  # 32->24, matches tile size, allows passing through single destroyed brick
+
+        tiles = tilemap.get_tiles_in_rect(tile_check_rect)
         crushed_bricks = []
         for ttype, gx, gy, trect in tiles:
-            if check_rect.colliderect(trect):
+            if tile_check_rect.colliderect(trect):
                 if ttype == TILE_BRICK and can_crush_brick:
                     crushed_bricks.append((gx, gy))
                     continue
@@ -258,11 +268,14 @@ class Tank:
                     # Try without snap (original position + movement only) to allow turning near walls without clipping
                     new_rect2 = self.rect.copy()
                     new_rect2.center = (self.x + dx * self.speed * speed_mult, self.y + dy * self.speed * speed_mult)
-                    check_rect2 = new_rect2.copy()
-                    tiles2 = tilemap.get_tiles_in_rect(check_rect2)
+                    if can_crush_brick:
+                        tile_check_rect2 = new_rect2.copy()
+                    else:
+                        tile_check_rect2 = new_rect2.inflate(-8, -8)
+                    tiles2 = tilemap.get_tiles_in_rect(tile_check_rect2)
                     blocked2 = False
                     for t2, gx2, gy2, tr2b in tiles2:
-                        if not check_rect2.colliderect(tr2b):
+                        if not tile_check_rect2.colliderect(tr2b):
                             continue
                         if t2 == TILE_BRICK and can_crush_brick:
                             continue
@@ -273,11 +286,11 @@ class Tank:
                         new_x = self.x + dx * self.speed * speed_mult
                         new_y = self.y + dy * self.speed * speed_mult
                         new_rect = new_rect2
-                        check_rect = check_rect2
+                        tile_check_rect = tile_check_rect2
                         tiles = tiles2
                         # collect crushed bricks for new_rect2
                         for t2, gx2, gy2, _ in tiles2:
-                            if t2 == TILE_BRICK and can_crush_brick and check_rect2.colliderect(_):
+                            if t2 == TILE_BRICK and can_crush_brick and tile_check_rect2.colliderect(_):
                                 if (gx2, gy2) not in crushed_bricks:
                                     crushed_bricks.append((gx2, gy2))
                     else:
