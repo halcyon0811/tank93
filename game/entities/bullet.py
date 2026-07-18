@@ -552,56 +552,81 @@ class Bullet:
             tt = tilemap.tiles[gy][gx]
             if tt == TILE_BRICK:
                 if self.homing:
-                    # Smart missile: NEVER destroy brick unless absolutely trapped.
-                    # Requirement: avoid hitting brick and walls.
-                    # So we do elastic bounce + aggressive replanning.
-                    # Only after 45+ stuck frames in tight corridor and target beyond, we allow destroy as last resort.
-                    if self.stuck_timer > HOMING_STUCK_DESTROY_THRESHOLD + 30:
-                        # truly trapped, break brick to escape as last resort
-                        destroyed = False
-                        try:
-                            destroyed = tilemap.destroy_tile(gx, gy, self.power, self.dir, getattr(self, 'bullet_type', 'normal'))
-                        except TypeError:
-                            destroyed = tilemap.destroy_tile(gx, gy, self.power, self.dir, getattr(self, 'bullet_type', 'normal'))
-                        self.alive = False
-                        try:
-                            from ..sound_manager import sound_manager
-                            if destroyed:
-                                sound_manager.play_brick_break()
-                            else:
-                                sound_manager.play_hit_brick()
-                            sound_manager.brick_break_count += 1
-                        except:
-                            pass
-                        return 'hit_brick'
-                    else:
-                        # elastic bounce: step back 2.2x speed
-                        self.x -= self.vx * self.speed * 2.2
-                        self.y -= self.vy * self.speed * 2.2
-                        # inject strong perpendicular avoidance + away vector
+                    # NEW BEHAVIOR (user request): homing missile damages brick walls progressively
+                    # Previously it tried to avoid 100% and only destroyed if trapped >45 frames
+                    # Now: missile tries to avoid (bounce) but also chips brick with 35% chance on near-miss
+                    # If direct hit / heavily stuck, it fully damages brick (needs 4 hits from BRICK_HITS_NEEDED to destroy)
+                    # Missile explodes after dealing damage
+                    if self.stuck_timer < HOMING_STUCK_DESTROY_THRESHOLD:
+                        # Try to avoid: bounce and replan, with occasional chip damage
+                        import random as _rnd_bounce
+                        chipped = False
+                        destroyed_chip = False
+                        if _rnd_bounce.random() < 0.35:
+                            try:
+                                destroyed_chip = tilemap.destroy_tile(gx, gy, self.power, self.dir, getattr(self, 'bullet_type', 'normal'))
+                                chipped = True
+                            except TypeError:
+                                try:
+                                    destroyed_chip = tilemap.destroy_tile(gx, gy, self.power, self.dir, getattr(self, 'bullet_type', 'normal'))
+                                    chipped = True
+                                except:
+                                    pass
+                            if chipped:
+                                try:
+                                    from ..logger_integration import safe_log_gameplay
+                                    safe_log_gameplay("HOMING_CHIP", data={"x": gx, "y": gy, "stuck": self.stuck_timer, "destroyed": destroyed_chip})
+                                except:
+                                    pass
+                        # Bounce physics for avoidance
+                        self.x -= self.vx * self.speed * 1.5
+                        self.y -= self.vy * self.speed * 1.5
                         cx, cy = _grid_to_pixel_center(gx, gy, tilemap)
                         away_x = self.x - cx
                         away_y = self.y - cy
                         norm = math.hypot(away_x, away_y) or 1
                         away_x /= norm
                         away_y /= norm
-                        # add perpendicular jitter to escape corridors
                         perp_x = -away_y
                         perp_y = away_x
-                        # alternate left/right based on stuck parity
                         sign = 1 if (self.stuck_timer % 2 == 0) else -1
-                        self.vx = away_x * 0.7 + perp_x * 0.35 * sign + self.vx * 0.15
-                        self.vy = away_y * 0.7 + perp_y * 0.35 * sign + self.vy * 0.15
+                        self.vx = away_x * 0.65 + perp_x * 0.35 * sign + self.vx * 0.15
+                        self.vy = away_y * 0.65 + perp_y * 0.35 * sign + self.vy * 0.15
                         n = math.hypot(self.vx, self.vy) or 1
                         self.vx /= n
                         self.vy /= n
-                        # boost avoidance vector for next frames
-                        self.avoid_vector = (away_x * 2.0, away_y * 2.0)
+                        self.avoid_vector = (away_x * 1.8, away_y * 1.8)
                         self.rect.center = (self.x, self.y)
                         self.replan_timer = 0
-                        self.stuck_timer += 7
-                        # continue flying
+                        self.stuck_timer += 4
+                        # If we only chipped and not heavily stuck, keep missile alive to continue hunting
+                        if self.stuck_timer < HOMING_STUCK_DESTROY_THRESHOLD:
+                            return None  # keep flying after bounce/chip
+
+                    # Heavily stuck or direct hit: full damage, missile explodes
+                    destroyed = False
+                    try:
+                        destroyed = tilemap.destroy_tile(gx, gy, self.power, self.dir, getattr(self, 'bullet_type', 'normal'))
+                    except TypeError:
+                        destroyed = tilemap.destroy_tile(gx, gy, self.power, self.dir, getattr(self, 'bullet_type', 'normal'))
+                    self.alive = False
+                    try:
+                        from ..sound_manager import sound_manager
+                        if destroyed:
+                            sound_manager.play_brick_break()
+                        else:
+                            sound_manager.play_hit_brick()
+                        sound_manager.brick_break_count += 1
+                    except:
+                        pass
+                    try:
+                        from ..logger_integration import safe_log_gameplay
+                        safe_log_gameplay("HOMING_HIT_BRICK", data={"x": gx, "y": gy, "destroyed": destroyed, "travelled": getattr(self, 'travelled', 0)})
+                    except:
+                        pass
+                    return 'hit_brick'
                 else:
+                    # Normal bullet behavior for brick
                     destroyed = False
                     try:
                         destroyed = tilemap.destroy_tile(gx, gy, self.power, self.dir, getattr(self, 'bullet_type', 'normal'))

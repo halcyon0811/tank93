@@ -147,11 +147,21 @@ COLOR_RED = (235, 50, 50)
 # Retro brick pattern as used in NES: 2 rows of bricks per 16px tile, offset
 # We'll draw exact pattern in tilemap.py draw_brick retro
 
-# Player colors
+# Player colors and names - P1=Chad, P2=Lida (user request)
 PLAYER_COLORS = [
-    (255, 220, 0),   # P1 Yellow - modern
-    (0, 200, 100),   # P2 Green
+    (255, 220, 0),   # Chad (was P1) Yellow - modern
+    (0, 200, 100),   # Lida (was P2) Green
 ]
+PLAYER_NAMES = ["Chad", "Lida"]
+# Keep backward compat for places that still say P1/P2
+PLAYER_DISPLAY_NAMES = PLAYER_NAMES
+# Mapping for old references
+
+def get_player_display_name(player_id):
+    """Get display name Chad/Lida for player id 1/2"""
+    if 1 <= player_id <= len(PLAYER_NAMES):
+        return PLAYER_NAMES[player_id-1]
+    return f"P{player_id}"
 
 ENEMY_COLORS = {
     'basic': (180, 180, 180),

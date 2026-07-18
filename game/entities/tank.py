@@ -531,6 +531,12 @@ class Tank:
 
                         if self.is_player:
                             pid = getattr(self, 'player_id', 1)
+                            # Use Chad/Lida names instead of P1/P2
+                            try:
+                                from ..settings import PLAYER_NAMES, get_player_display_name
+                                display_name = get_player_display_name(pid)
+                            except:
+                                display_name = PLAYER_NAMES[pid-1] if 'PLAYER_NAMES' in globals() and 0 <= pid-1 < 2 else (f"Chad" if pid==1 else f"Lida")
                             font = pygame.font.Font(None, 14)
                             # show size effect
                             extra = ""
@@ -540,19 +546,21 @@ class Tank:
                                 extra = " MINI"
                             if venom_t > 0:
                                 extra += f" VENOM {venom_t//FPS}s"
-                            label = f"P{pid}{extra}"
+                            label = f"{display_name}{extra}"
                             txt = font.render(label, True, COLOR_WHITE if pid==1 else (100,255,100))
                             txt_bg = pygame.Surface((txt.get_width()+4, txt.get_height()+2))
                             txt_bg.fill((0,0,0))
-                            screen.blit(txt_bg, (self.rect.centerx - txt.get_width()//2 -2, self.rect.top - 14))
-                            screen.blit(txt, (self.rect.centerx - txt.get_width()//2, self.rect.top - 14))
+                            # Fix overlap: name higher above armor bar
+                            screen.blit(txt_bg, (self.rect.centerx - txt.get_width()//2 -2, self.rect.top - 28))
+                            screen.blit(txt, (self.rect.centerx - txt.get_width()//2, self.rect.top - 28))
 
                         # Armor bar for all tanks with armor (player and enemies)
                         if hasattr(self, 'armor') and hasattr(self, 'max_armor') and self.max_armor > 0 and self.armor > 0:
                             bar_w = 24 if self.is_player else 20
                             bar_h = 5 if self.is_player else 4
                             cx = self.rect.centerx
-                            cy = self.rect.top - 10 if self.is_player else self.rect.bottom + 3
+                            # Fix overlap: armor bar just above tank, name is higher at -28, so armor at -12
+                            cy = self.rect.top - 12 if self.is_player else self.rect.bottom + 3
                             # Flash white when armor just hit
                             if getattr(self, 'armor_flash_timer', 0) > 0 and self.armor_flash_timer % 4 < 2:
                                 bar_col = (255, 255, 255)

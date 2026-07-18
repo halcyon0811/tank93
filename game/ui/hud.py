@@ -146,10 +146,18 @@ class HUD:
             if idx >= 2:
                 break
             color = PLAYER_COLORS[idx]
+            # Use Chad/Lida names
+            try:
+                from ..settings import PLAYER_NAMES
+                display_name = PLAYER_NAMES[idx] if idx < len(PLAYER_NAMES) else f"P{idx+1}"
+            except:
+                display_name = ["Chad", "Lida"][idx] if idx < 2 else f"P{idx+1}"
             pygame.draw.rect(screen, color, (xpos, ypos, 22, 22), border_radius=4)
-            p_num = self.font_small.render(f"P{idx+1}", True, COLOR_BLACK)
-            screen.blit(p_num, (xpos+2, ypos+3))
-            lives_txt = self.font_mid.render(f"x {p.lives if p.alive else max(0,p.lives)}", True, COLOR_WHITE)
+            # Show first letter or short name in box, full name next to lives
+            short = display_name[0]  # C / L
+            p_num = self.font_small.render(short, True, COLOR_BLACK)
+            screen.blit(p_num, (xpos+5, ypos+3))
+            lives_txt = self.font_mid.render(f"{display_name} x {p.lives if p.alive else max(0,p.lives)}", True, COLOR_WHITE)
             screen.blit(lives_txt, (xpos+28, ypos))
 
             ypos += 22
@@ -259,7 +267,12 @@ class HUD:
         ypos += 18
         for p in game.players:
             if not p.alive and p.lives < 0:
-                need_txt = self.font_small.render(f"P{p.player_id} NEED COIN! Press C/5", True, COLOR_RED)
+                try:
+                    from ..settings import get_player_display_name
+                    dname = get_player_display_name(p.player_id)
+                except:
+                    dname = f"P{p.player_id}"
+                need_txt = self.font_small.render(f"{dname} NEED COIN! Press C/5", True, COLOR_RED)
                 screen.blit(need_txt, (xpos, ypos))
                 ypos += 16
 
@@ -268,8 +281,8 @@ class HUD:
         ypos += 10
 
         hints = [
-            "P1: WASD+SPACE",
-            "P2: ARROWS+ENTER",
+            "Chad: WASD+SPACE",
+            "Lida: ARROWS+ENTER",
             "C/5: Coin 1/2: Join",
             "P: Pause ESC: Menu",
             "F11: Full | Cmd+F Mac",
@@ -312,7 +325,14 @@ class HUD:
         if game.players:
             p1_score = game.players[0].score if len(game.players)>0 else 0
             p2_score = game.players[1].score if len(game.players)>1 else 0
-            top_text = f"SCORE P1:{p1_score} P2:{p2_score} HI:{game.high_score} COINS:{game.coins}"
+            # Use Chad/Lida names in score display
+            try:
+                from ..settings import PLAYER_NAMES
+                n1 = PLAYER_NAMES[0]
+                n2 = PLAYER_NAMES[1]
+            except:
+                n1, n2 = "Chad", "Lida"
+            top_text = f"SCORE {n1}:{p1_score} {n2}:{p2_score} HI:{game.high_score} COINS:{game.coins}"
         else:
             top_text = f"HI:{game.high_score} COINS:{game.coins}"
         top_surf = self.font_small.render(top_text, True, (180,180,200))
@@ -371,8 +391,8 @@ class HUD:
             start_y = 150
 
             cards = [
-                {"title": "1 PLAYER", "color": PLAYER_COLORS[0]},
-                {"title": "2 PLAYERS", "color": PLAYER_COLORS[1]},
+                {"title": "CHAD", "color": PLAYER_COLORS[0]},  # was 1 PLAYER - now Chad
+                {"title": "CHAD & LIDA", "color": PLAYER_COLORS[1]},  # was 2 PLAYERS - now Chad & Lida co-op
             ]
 
             for idx, card in enumerate(cards):
@@ -622,7 +642,7 @@ class HUD:
                     "",
                     "CONTROLS:",
                     "  Press C or 5 = Insert Coin (+10 Lives)",
-                    "  Press 1 = P1 Join / Continue  |  Press 2 = P2 Join",
+                    "  Press 1 = Chad Join / Continue  |  Press 2 = Lida Join",
                     "  Joy-Con: Minus (-) = Coin  |  Plus (+) = Start/Join",
                     "",
                     "Current Status:",
@@ -637,17 +657,22 @@ class HUD:
 
                 y += 5
                 for p in game.players:
+                    try:
+                        from ..settings import get_player_display_name
+                        dname = get_player_display_name(p.player_id)
+                    except:
+                        dname = ["Chad", "Lida"][p.player_id-1] if 1 <= p.player_id <= 2 else f"P{p.player_id}"
                     if p.lives < 0 and not p.alive:
-                        status = f"P{p.player_id} DEAD - Press C/5 for {COIN_LIVES} Lives or {p.player_id} to Join"
+                        status = f"{dname} DEAD - Press C/5 for {COIN_LIVES} Lives or {p.player_id} to Join"
                         c = COLOR_RED
                     else:
-                        status = f"P{p.player_id} Lives: {p.lives}"
+                        status = f"{dname} Lives: {p.lives}"
                         c = COLOR_WHITE
                     txt = pygame.font.Font(None, 22).render(status, True, c)
                     screen.blit(txt, txt.get_rect(center=(SCREEN_WIDTH//2, y)))
                     y += 20
                 if len(game.players) < 2:
-                    txt = pygame.font.Font(None, 22).render("P2 not playing - Press 2 to Join (+10 Lives)", True, (100,200,100))
+                    txt = pygame.font.Font(None, 22).render("Lida (P2) not playing - Press 2 to Join (+10 Lives)", True, (100,200,100))
                     screen.blit(txt, txt.get_rect(center=(SCREEN_WIDTH//2, y)))
                     y += 20
 
