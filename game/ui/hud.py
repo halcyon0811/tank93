@@ -231,10 +231,10 @@ class HUD:
             "P2: ARROWS+ENTER",
             "C/5: Coin 1/2: Join",
             "P: Pause ESC: Menu",
-            "F11/F10: Fullscreen",
+            "F11: Full | Cmd+F Mac",
+            "Fn+F11 Mac | F10 Win",
             "Joy: -:Coin +=Start",
             "J:Rescan I:InvY U:InvX",
-            "O:Swap K:RotDpad",
         ]
         for h in hints:
             txt = self.font_small.render(h, True, (140,140,160))

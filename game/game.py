@@ -750,14 +750,23 @@ class Game:
                     pass
 
             if event.type == pygame.KEYDOWN:
-                # Global fullscreen toggle - F11 / F10 for projector / immersive, F for fullscreen in menu
+                # Global fullscreen toggle - works on Mac and Win
+                # Mac: Fn+F11, Cmd+F, Cmd+Ctrl+F, Option+Enter, Cmd+Enter
+                mods = pygame.key.get_mods()
+                # F11 / F10 for projector / immersive (need Fn on Mac)
                 if event.key in (pygame.K_F11, pygame.K_F10):
                     self.toggle_fullscreen()
+                # F alone in menu (easy for Mac)
                 if event.key == pygame.K_f and self.state != 'playing':
-                    # F for fullscreen in menu (F is shoot in playing, so only in non-playing)
                     self.toggle_fullscreen()
-                # Alt+Enter also toggles fullscreen (common)
-                if event.key == pygame.K_RETURN and (pygame.key.get_mods() & pygame.KMOD_ALT):
+                # Cmd+F / Ctrl+F for Mac/Win fullscreen (common shortcuts)
+                if event.key == pygame.K_f and (mods & pygame.KMOD_META or mods & pygame.KMOD_CTRL):
+                    self.toggle_fullscreen()
+                # Alt+Enter, Option+Enter (Mac), Cmd+Enter
+                if event.key == pygame.K_RETURN and (mods & pygame.KMOD_ALT or mods & pygame.KMOD_META):
+                    self.toggle_fullscreen()
+                # Cmd+Ctrl+F is standard macOS fullscreen
+                if event.key == pygame.K_f and (mods & pygame.KMOD_META and mods & pygame.KMOD_CTRL):
                     self.toggle_fullscreen()
                 # ESC in fullscreen first exits fullscreen
                 if event.key == pygame.K_ESCAPE and self.is_fullscreen:
