@@ -140,9 +140,15 @@ class Game:
 
     def _get_enemies_total_for_level(self, level_idx):
         lvl = level_idx % len(LEVELS)
+        # Gradual increase: base 20 + level*2 + extra for high levels
+        # Stage 1: 20, Stage 5: 30, Stage 10: 44, Stage 20: 68, Stage 35: 108
+        # This makes enemies increase gradually as requested
         if ENEMY_QUEUES_ORIGINAL and lvl < len(ENEMY_QUEUES_ORIGINAL):
-            return len(ENEMY_QUEUES_ORIGINAL[lvl])
-        return ENEMIES_PER_LEVEL + lvl * 2
+            base = len(ENEMY_QUEUES_ORIGINAL[lvl])
+            # Add gradual increase: +2 per level + bonus every 5 levels
+            extra = lvl * 2 + (lvl // 5) * 3
+            return base + extra
+        return ENEMIES_PER_LEVEL + lvl * 3 + (lvl // 4) * 2
 
     def init_level(self, level_idx, num_players=1):
         self.current_level = level_idx % len(LEVELS)
@@ -174,6 +180,14 @@ class Game:
         self.enemies_spawned = 0
         self.spawn_timer = 0
         self.freeze_timer = 0
+        # Gradual enemy increase - more enemies as level progresses and within level
+        # Max on field: start 4, +1 per 2 levels, capped at 8, plus ramp within level
+        self.max_enemies_on_field = min(8, MAX_ENEMIES_ON_FIELD + self.current_level // 2)
+        self.base_max_enemies = self.max_enemies_on_field
+        # Spawn interval: start 2.5s, -0.1s per level, min 0.8s, plus within-level ramp
+        self.dynamic_spawn_interval = max(int(0.8 * FPS), int(ENEMY_SPAWN_INTERVAL - self.current_level * 0.12 * FPS))
+        self.base_spawn_interval = self.dynamic_spawn_interval
+        self.difficulty_ramp_timer = 0
         # Monster boss system
         self.boss_enemy = None
         self.boss_released = False
@@ -213,6 +227,12 @@ class Game:
         self.enemies_spawned = 0
         self.spawn_timer = 0
         self.freeze_timer = 0
+        # Gradual increase per level
+        self.max_enemies_on_field = min(8, MAX_ENEMIES_ON_FIELD + self.current_level // 2)
+        self.base_max_enemies = self.max_enemies_on_field
+        self.dynamic_spawn_interval = max(int(0.8 * FPS), int(ENEMY_SPAWN_INTERVAL - self.current_level * 0.12 * FPS))
+        self.base_spawn_interval = self.dynamic_spawn_interval
+        self.difficulty_ramp_timer = 0
         # Monster boss system - reset per level
         self.boss_enemy = None
         self.boss_released = False
@@ -379,7 +399,9 @@ class Game:
     def spawn_enemy(self):
         if self.enemies_spawned >= self.enemies_total:
             return
-        if len(self.enemies) >= MAX_ENEMIES_ON_FIELD:
+        # Use dynamic max that increases gradually
+        max_on_field = getattr(self, 'max_enemies_on_field', MAX_ENEMIES_ON_FIELD)
+        if len(self.enemies) >= max_on_field:
             return
         # find spawn point that is not blocked - improved to prevent enemy stuck bug
         # Previous logic only checked exact spawn rect overlap, but after first enemy moves slightly (36px),
@@ -812,13 +834,36 @@ class Game:
         # Powerup 8-bit BGM loop for flashing powerup tank (original Battle City flashes)
         pass
 
-        # spawn enemies
+        # spawn enemies - with gradual increase
         self.spawn_timer += 1
-        if self.spawn_timer >= ENEMY_SPAWN_INTERVAL:
+        self.difficulty_ramp_timer += 1
+
+        # Gradual ramp within level: every 12 seconds (720 frames), increase max on field and decrease spawn interval
+        # This makes enemies come more gradually as time goes on
+        if self.difficulty_ramp_timer % (12 * FPS) == 0 and self.difficulty_ramp_timer > 0:
+            # Increase max enemies on field by 1 up to 8
+            if self.max_enemies_on_field < 8:
+                self.max_enemies_on_field += 1
+                print(f"[Difficulty] Max enemies on field increased to {self.max_enemies_on_field} (ramp)")
+            # Decrease spawn interval by 8 frames (~0.13s) down to 0.8*FPS
+            if self.dynamic_spawn_interval > int(0.8 * FPS):
+                self.dynamic_spawn_interval = max(int(0.8 * FPS), self.dynamic_spawn_interval - 8)
+                print(f"[Difficulty] Spawn interval decreased to {self.dynamic_spawn_interval/FPS:.2f}s (ramp)")
+
+        # Also ramp based on kills: every 5 kills, slightly faster spawn
+        if self.enemies_killed > 0 and self.enemies_killed % 5 == 0 and self.spawn_timer == 1:
+            # Check if we just killed 5th, 10th, etc. - small extra ramp
+            if self.dynamic_spawn_interval > int(1.0 * FPS):
+                self.dynamic_spawn_interval = max(int(1.0 * FPS), self.dynamic_spawn_interval - 2)
+
+        # Use dynamic interval
+        spawn_interval = getattr(self, 'dynamic_spawn_interval', ENEMY_SPAWN_INTERVAL)
+        if self.spawn_timer >= spawn_interval:
             self.spawn_enemy()
             self.spawn_timer = 0
-        # initial fast spawns
-        if self.enemies_spawned < MAX_ENEMIES_ON_FIELD and self.spawn_timer % 30 == 0:
+        # initial fast spawns - use dynamic max
+        max_on_field = getattr(self, 'max_enemies_on_field', MAX_ENEMIES_ON_FIELD)
+        if self.enemies_spawned < max_on_field and self.spawn_timer % 30 == 0:
             self.spawn_enemy()
 
         # players

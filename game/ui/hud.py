@@ -93,11 +93,27 @@ class HUD:
         pygame.draw.line(screen, (60,60,80), (xpos, ypos), (xpos+HUD_W-24, ypos), 2)
         ypos += 12
 
-        # Enemies remaining
+        # Enemies remaining - with gradual increase display
         remaining = game.enemies_total - game.enemies_killed
         en_txt = self.font_mid.render(f"ENEMY {remaining}", True, (200,200,200))
         screen.blit(en_txt, (xpos, ypos))
         ypos += 22
+        # Gradual increase info
+        try:
+            max_on = getattr(game, 'max_enemies_on_field', 4)
+            total = getattr(game, 'enemies_total', 20)
+            base_total = 20  # original base
+            # Show total and max, with ramp indicator
+            ramp_txt = self.font_small.render(f"TOTAL {total} (BASE {base_total}+LVL) MAX {max_on}", True, (180,220,180))
+            screen.blit(ramp_txt, (xpos, ypos))
+            ypos += 16
+            # Spawn interval
+            spawn_int = getattr(game, 'dynamic_spawn_interval', 0) / FPS if hasattr(game, 'dynamic_spawn_interval') else 2.5
+            interval_txt = self.font_small.render(f"SPAWN {spawn_int:.1f}s RAMP {game.difficulty_ramp_timer//FPS if hasattr(game, 'difficulty_ramp_timer') else 0}s", True, (150,180,200))
+            screen.blit(interval_txt, (xpos, ypos))
+            ypos += 16
+        except:
+            pass
         # icons grid 2 cols
         icon_size = 16
         gap = 4
