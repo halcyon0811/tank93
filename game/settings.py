@@ -13,21 +13,20 @@ MEGA_SCREEN_WIDTH = 1600
 MEGA_SCREEN_HEIGHT = 1400  # tall enough for 1248 playfield + margins
 
 # Playfield - classic Battle City is 13x13 big tiles = 26x26 small tiles
-# Mega maps 4x: 52x52 small tiles = 26x26 big tiles, keep TILE_SIZE 24 so tank size same (32px), playfield becomes 1248
 TILE_SIZE = 24
-MEGA_ENABLED = True
+MEGA_ENABLED = False  # Restore original 35 maps with original size (user: big map too empty)
 MEGA_GRID_W = 52
 MEGA_GRID_H = 52
-MEGA_TILE_SIZE = 24  # KEEP SAME as TILE_SIZE so tanks same size!
-MEGA_PLAYFIELD_W = 52 * 24  # 1248
-MEGA_PLAYFIELD_H = 52 * 24  # 1248 bigger map, same tank size
+MEGA_TILE_SIZE = 24
+MEGA_PLAYFIELD_W = 52 * 24
+MEGA_PLAYFIELD_H = 52 * 24
 MEGA_PLAYFIELD_X = 48
 MEGA_PLAYFIELD_Y = 48
-MEGA_BASE_POS = (25, 25)  # center of 52x52
+MEGA_BASE_POS = (25, 25)
 MEGA_PLAYER_SPAWN = [(8, 48), (42, 48)]
 MEGA_ENEMY_SPAWNS = [(0, 0), (25, 0), (50, 0), (0, 25)]
 
-# When mega enabled, override normal constants to mega size so all logic uses bigger map but tank size same
+# When mega enabled, override to big map; otherwise use original 26x26
 if MEGA_ENABLED:
     GRID_W = MEGA_GRID_W
     GRID_H = MEGA_GRID_H
@@ -43,7 +42,7 @@ else:
     GRID_H = 26
     PLAYFIELD_W = 26 * 24
     PLAYFIELD_H = 26 * 24
-    BASE_POS = (12, 24)
+    BASE_POS = (12, 24)  # original bottom center
     PLAYER_SPAWN = [(8, 24), (16, 24)]
     ENEMY_SPAWNS = [(0, 0), (12, 0), (24, 0)]
     SCREEN_WIDTH = 960

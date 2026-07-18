@@ -208,8 +208,34 @@ class TileMap:
     def destroy_tile(self, gx, gy, bullet_power=1, bullet_dir=None):
         if not (0 <= gx < self.grid_w and 0 <= gy < self.grid_h):
             return False
-        # NEW: Only destroy 1 brick per hit (tank-sized), not 2 like old authentic logic
+        # 1.5 bricks per hit: destroy 1 guaranteed + 50% chance for adjacent (same as old 2-brick logic second half)
+        # Tank-sized ~1 brick but user wants 1.5 average
         tiles_to_destroy = [(gx, gy)]
+        # Determine potential second tile as in original authentic logic
+        second_tile = None
+        if bullet_dir in ('UP', 'DOWN'):
+            bx = gx // 2
+            by = gy // 2
+            row_in_big = gy % 2
+            other_x = bx*2 + (1 if gx % 2 == 0 else 0 if gx % 2 == 1 else 0)
+            # simpler: other column in same big row
+            if gx % 2 == 0:
+                second_tile = (gx+1, gy)
+            else:
+                second_tile = (gx-1, gy)
+            # Only if both are within same big tile row
+            if second_tile and second_tile[1] // 2 != by:
+                second_tile = None
+        elif bullet_dir in ('LEFT', 'RIGHT'):
+            if gy % 2 == 0:
+                second_tile = (gx, gy+1)
+            else:
+                second_tile = (gx, gy-1)
+        # 50% chance to also destroy second tile -> average 1.5
+        if second_tile is not None:
+            import random as _rnd
+            if _rnd.random() < 0.5:
+                tiles_to_destroy.append(second_tile)
 
         destroyed = False
         for tx, ty in tiles_to_destroy:
