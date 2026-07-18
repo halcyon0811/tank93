@@ -91,14 +91,15 @@ PLAYER_SPAWN = [
 ENEMY_SPAWNS = [(0, 0), (12, 0), (24, 0)]
 BASE_POS = (12, 24)  # eagle position (top-left of 2x2)
 
-# Powerups - classic + new items (homing missile, 8-way spread)
-POWERUP_TYPES = ['helmet', 'clock', 'shovel', 'star', 'grenade', 'tank', 'gun', 'homing', 'spread']
+# Powerups - classic + new items (homing missile, 8-way spread, rapid fire 3x)
+POWERUP_TYPES = ['helmet', 'clock', 'shovel', 'star', 'grenade', 'tank', 'gun', 'homing', 'spread', 'rapid']
 POWERUP_DURATION = {
     'helmet': 10 * FPS,
     'clock': 5 * FPS,
     'shovel': 15 * FPS,
-    'homing': 15 * FPS,   # tracking missile active for 15 sec
-    'spread': 12 * FPS,   # 8-direction firing for 12 sec
+    'homing': 15 * FPS,   # tracking missile active for 15 sec (now PERM until death)
+    'spread': 12 * FPS,   # 8-direction firing for 12 sec (now PERM until death)
+    'rapid': 10 * FPS,    # rapid fire 3x attack speed - now PERM until death
 }
 STAR_LEVELS = 4
 

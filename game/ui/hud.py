@@ -151,9 +151,26 @@ class HUD:
                     statuses.append(f"8-WAY {secs}s")
                 elif getattr(p, 'spread_active', False):
                     statuses.append(f"8-WAY")
+            # Rapid 3x attack - permanent until death
+            rapid_t = getattr(p, 'rapid_timer', 0)
+            if getattr(p, 'rapid_active', False) or rapid_t != 0:
+                if rapid_t == -1:
+                    statuses.append(f"RAPID x3 PERM")
+                elif rapid_t > 0:
+                    secs = rapid_t // FPS
+                    statuses.append(f"RAPID x3 {secs}s")
+                elif getattr(p, 'rapid_active', False):
+                    statuses.append(f"RAPID x3")
             if statuses:
                 for st in statuses:
-                    col = (255,140,0) if "MISSILE" in st else (160,80,255) if "8-WAY" in st else (80,200,255)
+                    if "MISSILE" in st:
+                        col = (255,140,0)
+                    elif "8-WAY" in st:
+                        col = (160,80,255)
+                    elif "RAPID" in st:
+                        col = (255,50,150)
+                    else:
+                        col = (80,200,255)
                     stat = self.font_small.render(st, True, col)
                     screen.blit(stat, (xpos, ypos))
                     ypos += 16
@@ -579,7 +596,8 @@ class HUD:
                 " Gun=steel-breaking bullets",
                 " NEW: Homing Missile (M-orange)=tracking nearest enemy - PERM until death",
                 " NEW: Spread Shot (8-purple)=8 directions at once - PERM until death",
-                "      Combo: M+8 = 8 homing missiles!",
+                " NEW: Rapid Fire (R-pink)=attack speed x3 - PERM until death",
+                "      Combo: M+8+R = 8 homing missiles at 3x speed!",
                 "",
                 "ARCADE COIN SYSTEM:",
                 " Each coin = 10 lives, Press C or 5 to Insert Coin",

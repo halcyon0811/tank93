@@ -15,11 +15,13 @@ class PlayerTank(Tank):
         self.helmet_timer = 0
         self.spawn_protection = 120  # initial protection
         self.speed = TANK_SPEED['player']
-        # New item system: tracking missile and 8-way firing
+        # New item system: tracking missile and 8-way firing and rapid 3x attack
         self.homing_timer = 0    # tracking missile active
         self.spread_timer = 0    # 8-direction active
+        self.rapid_timer = 0     # rapid 3x attack speed
         self.homing_active = False
         self.spread_active = False
+        self.rapid_active = False
         self.update_bullet_power()
 
     def add_lives(self, n=COIN_LIVES):
@@ -446,13 +448,19 @@ class PlayerTank(Tank):
 
     def shoot(self):
         # Check if we can shoot at all (considers max bullets)
-        # For spread, we need to allow up to 8 bullets, so we check more loosely
+        # For spread and rapid, we need to allow more bullets
+        max_b = MAX_BULLETS['player'] if isinstance(MAX_BULLETS['player'], int) else 2
+        alive = len([b for b in self.bullets if b.alive])
+
         if self.spread_active:
-            # For spread, need at least 1 slot free
-            alive = len([b for b in self.bullets if b.alive])
-            max_b = MAX_BULLETS['player'] if isinstance(MAX_BULLETS['player'], int) else 2
-            # Allow spread even if near limit, but cap total at max*4 to avoid spam
-            if alive >= max_b * 4:
+            # For spread, need at least 1 slot free, but allow up to max*4
+            # If rapid also active, allow even more (max*6) for 3x attack
+            limit = max_b * 6 if self.rapid_active else max_b * 4
+            if alive >= limit:
+                return None
+        elif self.rapid_active:
+            # Rapid 3x attack: allow 3x bullets on screen
+            if alive >= max_b * 3:
                 return None
         else:
             if not self.can_shoot():
@@ -460,8 +468,12 @@ class PlayerTank(Tank):
 
         bullets_created = []
 
-        # Normal bullet color
+        # Normal bullet color - rapid has pinkish tint if active
         base_color = COLOR_YELLOW if self.bullet_power >= 2 else self.color
+        if self.rapid_active and not self.homing_active:
+            # Make rapid bullets have slight pink tint for visual feedback
+            # Mix base color with rapid pink
+            base_color = (min(255, base_color[0]+30), base_color[1], min(255, base_color[2]+30)) if isinstance(base_color, tuple) else base_color
 
         if self.spread_active:
             # Fire 8 directions at once
@@ -470,18 +482,30 @@ class PlayerTank(Tank):
                 # Homing spread: if homing active too, make each homing
                 is_homing = self.homing_active
                 col = (255, 140, 0) if is_homing else base_color
+                if self.rapid_active and not is_homing:
+                    # rapid visual: add pink
+                    col = (255, 100, 150) if col == self.color else col
                 bullet = Bullet(sx, sy, d, f"player{self.player_id}", power=self.bullet_power, color=col, homing=is_homing)
                 self.bullets.append(bullet)
                 bullets_created.append(bullet)
-            self.cooldown = 25  # slightly longer for spread
+            # Cooldown: base 25, /3 if rapid active = ~8
+            base_cd = 25
+            self.cooldown = max(3, base_cd // 3) if self.rapid_active else base_cd
         else:
             sx, sy = self.get_bullet_spawn()
             is_homing = self.homing_active
             col = (255, 140, 0) if is_homing else base_color
+            if self.rapid_active and not is_homing:
+                # Override with rapid color if not homing
+                col = (255, 50, 150)
             bullet = Bullet(sx, sy, self.direction, f"player{self.player_id}", power=self.bullet_power, color=col, homing=is_homing)
+            # If rapid, bullet speed *1.5 for extra feel of 3x attack?
+            if self.rapid_active:
+                bullet.speed *= 1.2
             self.bullets.append(bullet)
             bullets_created.append(bullet)
-            self.cooldown = 15 if self.star_level >= 1 else 20
+            base_cd = 15 if self.star_level >= 1 else 20
+            self.cooldown = max(3, base_cd // 3) if self.rapid_active else base_cd
 
         # Classic Battle City shoot SFX
         try:
@@ -528,6 +552,18 @@ class PlayerTank(Tank):
             if self.spread_timer != -1:
                 self.spread_active = False
 
+        # Rapid 3x attack speed - permanent until death
+        if self.rapid_timer == -1:
+            self.rapid_active = True
+        elif self.rapid_timer > 0:
+            self.rapid_timer -= 1
+            self.rapid_active = True
+            if self.rapid_timer <= 0:
+                self.rapid_active = False
+        else:
+            if self.rapid_timer != -1:
+                self.rapid_active = False
+
         # clean bullets
         self.bullets = [b for b in self.bullets if b.alive]
 
@@ -545,8 +581,10 @@ class PlayerTank(Tank):
         self.star_level = 0
         self.homing_timer = 0
         self.spread_timer = 0
+        self.rapid_timer = 0
         self.homing_active = False
         self.spread_active = False
+        self.rapid_active = False
         self.update_bullet_power()
 
     def respawn(self, grid_x, grid_y):
@@ -587,5 +625,10 @@ class PlayerTank(Tank):
             # 8-direction firing item - kept across stages, lost on death
             self.spread_timer = -1  # permanent until death
             self.spread_active = True
+            self.score += 200
+        elif type_name == 'rapid':
+            # Rapid fire item: speed up attacking to *3
+            self.rapid_timer = -1  # permanent until death
+            self.rapid_active = True
             self.score += 200
         # grenade, clock handled by game

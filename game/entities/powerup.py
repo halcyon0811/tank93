@@ -24,6 +24,7 @@ class PowerUp:
             # new items
             'homing': (255, 140, 0),   # orange for tracking missile
             'spread': (160, 80, 255),  # purple for 8-way
+            'rapid': (255, 50, 150),   # pink/red for rapid 3x attack
         }
 
     def update(self):
@@ -61,6 +62,7 @@ class PowerUp:
             # new items
             'homing': 'M',  # missile
             'spread': '8',  # 8-way
+            'rapid': 'R',   # rapid 3x attack
         }
         txt = font.render(icons.get(self.type, '?'), True, COLOR_BLACK)
         screen.blit(txt, txt.get_rect(center=(self.x, self.y)))

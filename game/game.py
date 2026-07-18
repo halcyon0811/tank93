@@ -201,11 +201,13 @@ class Game:
             p.score = old_p.score
             p.lives = old_p.lives
             p.star_level = old_p.star_level
-            # Preserve items across stages (homing, spread) - only lost on death, not on stage clear
+            # Preserve items across stages (homing, spread, rapid) - only lost on death, not on stage clear
             p.homing_timer = getattr(old_p, 'homing_timer', 0)
             p.spread_timer = getattr(old_p, 'spread_timer', 0)
+            p.rapid_timer = getattr(old_p, 'rapid_timer', 0)
             p.homing_active = getattr(old_p, 'homing_active', False)
             p.spread_active = getattr(old_p, 'spread_active', False)
+            p.rapid_active = getattr(old_p, 'rapid_active', False)
             # Also preserve helmet if still active? Keep star level only per classic, but items should persist
             p.helmet_timer = getattr(old_p, 'helmet_timer', 0)
             p.invulnerable_timer = getattr(old_p, 'helmet_timer', 0)  # if had helmet, keep shield briefly
@@ -962,6 +964,8 @@ class Game:
             player.apply_powerup('homing', self)
         elif pu_type == 'spread':
             player.apply_powerup('spread', self)
+        elif pu_type == 'rapid':
+            player.apply_powerup('rapid', self)
 
     def draw(self):
         if self.state == 'menu':
