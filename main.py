@@ -54,6 +54,7 @@ os.environ['SDL_IME_SHOWUI'] = '0'
 os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = '1'
 
 from game.game import Game
+from game.debug_logger import debug_logger
 import traceback
 
 if __name__ == "__main__":
@@ -66,10 +67,31 @@ if __name__ == "__main__":
             # Use toggle to go fullscreen (starts windowed, toggle to fullscreen)
             # Need to have display already created, so toggle after init
             game.toggle_fullscreen()
+        # Log session start already done in Game.__init__
+        try:
+            debug_logger.log_event("MAIN", "Game started via main.py", level="INFO", extra={"argv": sys.argv, "fullscreen": fullscreen_arg})
+        except:
+            pass
         game.run()
+    except SystemExit:
+        # Normal exit via menu quit
+        try:
+            debug_logger.log_event("MAIN", "Game exited via SystemExit (quit)", level="INFO")
+            debug_logger.end_session()
+            debug_logger.stop()
+        except:
+            pass
+        raise
     except Exception as e:
         print(f"CRASH: {e}")
         traceback.print_exc()
+        try:
+            debug_logger.log_exception("main.py", e, extra={"argv": sys.argv})
+            debug_logger.log_event("CRASH", f"Fatal crash in main.py: {e}", level="FATAL", extra={"argv": sys.argv}, with_stack=True)
+            debug_logger.end_session()
+            debug_logger.stop()
+        except:
+            pass
         # Write crash log
         try:
             with open("crash.log", "w") as f:

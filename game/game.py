@@ -3,8 +3,65 @@ import pygame
 import random
 import math
 import sys
+import pathlib
+import datetime
+import traceback as tb
 from .settings import *
 from .tilemap import TileMap, LEVELS
+
+# --- Comprehensive debug logger (SQLite 0-latency) ---
+try:
+    from .debug_logger import debug_logger, DB_PATH as DEBUG_DB_PATH, LOG_TXT_PATH as DEBUG_TXT_PATH
+    from .debug_logger import log_event as _log_event, log_state as _log_state_change_db, log_gameplay as _log_gameplay, log_crash as _log_crash, log_input as _log_input
+    HAS_DEBUG_LOGGER = True
+    TRACE_LOG_PATH = DEBUG_TXT_PATH
+    DEBUG_DB_ENABLED = True
+except ImportError as e:
+    print(f"[DebugLogger] Failed to import debug_logger: {e}, falling back to file-only")
+    HAS_DEBUG_LOGGER = False
+    DEBUG_DB_ENABLED = False
+    DEBUG_DB_PATH = pathlib.Path(__file__).parent.parent / "debug.db"
+    TRACE_LOG_PATH = pathlib.Path(__file__).parent.parent / "bug_trace.log"
+
+    def _log_event(tag, message, level="INFO", extra=None, with_stack=False):
+        try:
+            import datetime as _dt
+            ts = _dt.datetime.now().isoformat()
+            from .debug_logger import LOG_TXT_PATH as _p
+            with open(_p, "a", encoding="utf-8") as f:
+                f.write(f"[{ts}] [{level}] [{tag}] {message}\n")
+        except:
+            pass
+    def _log_state_change_db(old_state, new_state, reason, extra=None):
+        pass
+    def _log_gameplay(*a, **kw):
+        pass
+    def _log_crash(*a, **kw):
+        pass
+    def _log_input(*a, **kw):
+        pass
+
+# Legacy shims for existing instrumented code
+def _trace_log(tag, msg, with_stack=False, level="INFO"):
+    # Route to new logger
+    try:
+        _log_event(tag, msg, level=level, extra=None, with_stack=with_stack)
+    except Exception:
+        print(f"[{level}] [{tag}] {msg}")
+
+def _trace_state_change(old_state, new_state, reason, extra=""):
+    try:
+        # extra may be string in old code, convert to dict if needed
+        extra_dict = extra if isinstance(extra, dict) else {"extra": extra} if extra else None
+        if HAS_DEBUG_LOGGER:
+            debug_logger.log_state_change(old_state, new_state, reason, extra=extra_dict)
+        else:
+            _log_state_change_db(old_state, new_state, reason, extra=extra_dict)
+        # Also text log via _log_event
+        level = "WARN" if new_state == 'menu' and old_state == 'playing' else "INFO"
+        _log_event("STATE", f"{old_state} -> {new_state} | reason={reason} | {extra}", level=level, extra=extra_dict, with_stack=True)
+    except Exception:
+        print(f"[STATE] {old_state} -> {new_state} | {reason}")
 # Try import authentic 35-stage data
 try:
     from .levels.battle_city import ENEMY_QUEUES as ENEMY_QUEUES_ORIGINAL, BOTS_RAW as BOTS_RAW_ORIGINAL, STAGE_COUNT as ORIGINAL_STAGE_COUNT
@@ -109,6 +166,35 @@ class Game:
         self.clock = pygame.time.Clock()
         self.hud = HUD(is_mega=self.is_mega)
 
+        # --- Comprehensive debug session start (SQLite + text) ---
+        try:
+            joystick_info_str = ""
+            if self.joysticks:
+                infos = []
+                for js in self.joysticks:
+                    try:
+                        infos.append(f"{js.get_name()} axes={js.get_numaxes()} btns={js.get_numbuttons()} hats={js.get_numhats()} iid={js.get_instance_id()}")
+                    except Exception as ex:
+                        infos.append(f"error {ex}")
+                joystick_info_str = "; ".join(infos)
+            if HAS_DEBUG_LOGGER:
+                debug_logger.start_session(screen_w=screen_w, screen_h=screen_h, is_fullscreen=self.is_fullscreen,
+                                           is_mega=self.is_mega, fps_target=FPS,
+                                           joystick_count=len(self.joysticks), joystick_info=joystick_info_str,
+                                           initial_level=0, num_players=1)
+            _trace_log("INIT", f"Game init complete is_mega={self.is_mega} joysticks={len(self.joysticks)} screen={screen_w}x{screen_h}", level="INFO")
+            if self.joysticks:
+                for idx, js in enumerate(self.joysticks):
+                    try:
+                        _trace_log("INIT", f"  JS{idx}: {js.get_name()} axes={js.get_numaxes()} btns={js.get_numbuttons()} hats={js.get_numhats()} iid={js.get_instance_id()}")
+                    except Exception as e:
+                        _trace_log("INIT", f"  JS{idx}: error getting info {e}", level="WARN")
+            _log_gameplay("SESSION_START", level_idx=0, data={"screen_w": screen_w, "screen_h": screen_h, "is_mega": self.is_mega, "joysticks": joystick_info_str})
+        except Exception as e:
+            print(f"[Trace] Failed to init log: {e}")
+            import traceback
+            traceback.print_exc()
+
         self.state = 'menu'
         self.menu_selected = 0
         self.menu_mode = 'main'
@@ -182,24 +268,30 @@ class Game:
 
     def toggle_fullscreen(self):
         """Toggle fullscreen mode - for projector or immersive play, with content zoomed"""
+        old_fs = getattr(self, 'is_fullscreen', False)
         try:
             self.is_fullscreen = not self.is_fullscreen
+            _trace_log("FULLSCREEN", f"Toggling fullscreen {old_fs} -> {self.is_fullscreen} state={getattr(self,'state','?')} stack:", with_stack=True)
             if self.is_fullscreen:
                 # Use SCALED flag so 960x720 content is zoomed to fill fullscreen (fixes 'content not zoomed' issue)
                 # SCALED keeps logical size as SCREEN_WIDTH x SCREEN_HEIGHT but scales to desktop res
                 try:
                     self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.FULLSCREEN | pygame.SCALED)
                     print(f"[Display] Switched to FULLSCREEN SCALED mode {SCREEN_WIDTH}x{SCREEN_HEIGHT} -> fullscreen, content zoomed - press F11/F to exit, ESC to exit fullscreen")
+                    _trace_log("FULLSCREEN", f"Entered FULLSCREEN SCALED {SCREEN_WIDTH}x{SCREEN_HEIGHT}")
                 except Exception as e:
                     # Fallback to (0,0) fullscreen if SCALED not supported
                     print(f"[Display] SCALED fullscreen failed ({e}), trying (0,0) fullscreen")
+                    _trace_log("FULLSCREEN", f"SCALED failed {e}, fallback (0,0)", level="WARN")
                     self.screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
                     print("[Display] Switched to FULLSCREEN mode (0,0) - press F11/F to exit, ESC to exit fullscreen")
             else:
                 self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
                 print("[Display] Switched to WINDOWED mode")
+                _trace_log("FULLSCREEN", "Entered WINDOWED mode")
             pygame.display.set_caption("Tank 93 Enhanced - Battle City Tribute - F11/F for Fullscreen - Content Zoomed")
         except Exception as e:
+            _trace_log("FULLSCREEN", f"Toggle failed {e} old_fs={old_fs} new={self.is_fullscreen}", with_stack=True, level="ERROR")
             print(f"[Display] Fullscreen toggle failed: {e}")
             try:
                 self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
@@ -229,6 +321,8 @@ class Game:
         return ENEMIES_PER_LEVEL + lvl * 3 + (lvl // 4) * 2
 
     def init_level(self, level_idx, num_players=1):
+        old_state = getattr(self, 'state', 'unknown')
+        _trace_log("LEVEL", f"init_level called level_idx={level_idx} num_players={num_players} old_state={old_state} is_mega={self.is_mega} current_level_before={self.current_level}", with_stack=True)
         if self.is_mega and self.mega_levels:
             self.current_level = level_idx % len(self.mega_levels)
             level_data = self.mega_levels[self.current_level]
@@ -281,7 +375,14 @@ class Game:
         self.boss_released = False
         self.boss_fight_timer = 0
         self.monster_boss_defeated = False
+        prev_state = getattr(self, '_prev_state_for_trace', old_state)
         self.state = 'playing'
+        _trace_state_change(old_state, 'playing', f"init_level level={self.current_level} players={num_players}", extra=f"enemies_total={self.enemies_total}")
+        # Comprehensive gameplay log
+        try:
+            _log_gameplay("LEVEL_INIT", level_idx=self.current_level, data={"num_players": num_players, "enemies_total": self.enemies_total, "max_on_field": self.max_enemies_on_field, "spawn_interval": self.dynamic_spawn_interval, "enemy_queue_len": len(self.enemy_queue) if self.enemy_queue else 0})
+        except:
+            pass
         # SFX: For first stage (new game), play authentic NES intro "Battle City Tank 1990 NES Intro Live 8bit by deegee (5.59 sec)"
         # For subsequent stages, play stage_start jingle. Battlefield has NO BGM (authentic NES) - removed silly loop.
         if snd_mgr:
@@ -482,6 +583,11 @@ class Game:
 
     def player_join(self, player_id):
         """Player presses START to join, needs coin (10 lives)"""
+        _trace_log("INPUT", f"player_join called player_id={player_id} state={self.state} players={len(self.players)}")
+        try:
+            _log_gameplay("PLAYER_JOIN_ATTEMPT", level_idx=self.current_level, player_id=player_id, data={"state": self.state, "players": len(self.players)})
+        except:
+            pass
         # If player already exists and dead with lives<0, insert coin for him
         for p in self.players:
             if p.player_id == player_id:
@@ -569,6 +675,10 @@ class Game:
                 self.enemies.append(enemy)
                 self.enemies_spawned += 1
                 self.particles.add_spawn(enemy.rect.centerx, enemy.rect.centery)
+                try:
+                    _log_gameplay("ENEMY_SPAWN", level_idx=self.current_level, data={"type": etype, "grid_x": sx, "grid_y": sy, "spawned": self.enemies_spawned, "total": self.enemies_total, "on_field": len(self.enemies), "carrier": getattr(enemy, 'powerup_carrier', False)})
+                except:
+                    pass
                 break
             tries+=1
 
@@ -706,6 +816,7 @@ class Game:
             events = pygame.event.get()
         except (SystemError, KeyError, Exception) as e:
             self.joystick_error_count = getattr(self, 'joystick_error_count', 0) + 1
+            _trace_log("JOY_ERR", f"Joystick event error count={self.joystick_error_count} err={e} state={self.state}", with_stack=True, level="ERROR")
             print(f"Joystick event error ({self.joystick_error_count}) recovering: {e}")
             try:
                 pygame.event.clear()
@@ -720,6 +831,7 @@ class Game:
             # After 8 errors, disable joysticks entirely - keyboard will work
             if self.joystick_error_count > 8 and len(getattr(self, 'joysticks', [])) > 0:
                 print("Too many joystick errors - disabling all joysticks, using keyboard only")
+                _trace_log("JOY_ERR", f"Disabling all joysticks after {self.joystick_error_count} errors", level="ERROR")
                 try:
                     self.joysticks.clear()
                     pygame.joystick.quit()
@@ -728,6 +840,7 @@ class Game:
             # Force start on joystick error - assume user wants to play
             if self.state == 'menu' and self.menu_stuck_timer > 180:
                 print("Force starting game due to joystick spam")
+                _trace_log("MENU_STUCK", f"Force starting game from joystick error state={self.state} stuck_timer={self.menu_stuck_timer}", with_stack=True)
                 self.handle_menu_select()
                 return
         for event in events:
@@ -786,37 +899,57 @@ class Game:
                                     continue
                     except:
                         pass
+                    # Log joystick button input
+                    try:
+                        _log_input("JOYBUTTONDOWN", device=f"joy{getattr(event, 'joy', '?')}", code=f"btn{event.button}", value=float(event.button), mapped_action=f"p{joy_player_id} state={self.state}", extra={"button": event.button, "instance_id": getattr(event, 'instance_id', None), "joy_count": len(self.joysticks)})
+                    except:
+                        pass
                     # Coin: Minus button 8 on Switch, Select/View on Xbox/PS (6,8)
                     if event.button in (8, 6):  # Minus / Select / View = Coin
                         self.insert_coin(joy_player_id)
                     # allow menu navigation with controller
+                    _trace_log("JOY_BTN", f"JOYBUTTONDOWN btn={event.button} player_id_hint={joy_player_id} state={self.state} menu_mode={self.menu_mode} iid={getattr(event, 'instance_id', '?')} joy_count={len(self.joysticks)}")
                     if self.state == 'menu':
                         if event.button in (0, 1, 9):  # A/B/Plus
+                            _trace_log("JOY_BTN", f"Menu navigation A/B/Plus btn={event.button} -> handle_menu_select selected={self.menu_selected}")
                             self.handle_menu_select()
                     elif self.state in ('gameover', 'stage_clear'):
                         if event.button in (0, 9):  # A / Plus = Continue or Menu
                             if self.gameover_won:
+                                _trace_log("JOY_BTN", f"Gameover won RETURN -> init_next_level btn={event.button}")
                                 self.init_next_level()
                             else:
                                 if self.continue_timer <= 0 or all(p.lives < 0 for p in self.players):
+                                    _trace_log("JOY_BTN", f"Gameover lost timer expired or all dead -> menu btn={event.button} timer={self.continue_timer}", level="WARN")
+                                    old = self.state
                                     total = sum(p.score for p in self.players)
                                     self.high_score = max(self.high_score, total)
                                     self.state = 'menu'
                                     self.menu_mode = 'main'
+                                    _trace_state_change(old, 'menu', f"JOY btn {event.button} gameover timer")
                                 else:
                                     if joy_player_id:
+                                        _trace_log("JOY_BTN", f"Gameover lost but continue possible -> player_join {joy_player_id}")
                                         self.player_join(joy_player_id)
                         elif event.button in (7,):  # Start for P2 join
                             if joy_player_id:
+                                _trace_log("JOY_BTN", f"Gameover P2 join btn 7 player {joy_player_id}")
                                 self.player_join(joy_player_id)
                     elif self.state == 'playing':
                         if event.button == 9: # Plus/Options pauses
+                            _trace_log("JOY_BTN", f"Playing btn 9 -> paused")
+                            old = self.state
                             self.state = 'paused'
+                            _trace_state_change(old, 'paused', "JOY Plus pressed")
                         elif event.button == 7: # P2 join mid-game via Start
                             if joy_player_id and (len(self.players) < joy_player_id or not any(p.player_id==joy_player_id for p in self.players)):
+                                _trace_log("JOY_BTN", f"Playing btn 7 -> P2 join {joy_player_id}")
                                 self.player_join(joy_player_id)
                     elif self.state == 'paused' and event.button in (0, 9):
+                        _trace_log("JOY_BTN", f"Paused btn {event.button} -> playing")
+                        old = self.state
                         self.state = 'playing'
+                        _trace_state_change(old, 'playing', f"JOY resume btn {event.button}")
                 except Exception as e:
                     # Don't crash on joystick quirks
                     pass
@@ -832,6 +965,12 @@ class Game:
 
             if event.type == pygame.JOYHATMOTION:
                 try:
+                    # Log hat motion
+                    try:
+                        hx, hy = getattr(event, 'value', (0,0))
+                        _log_input("JOYHATMOTION", device=f"joy{getattr(event, 'joy', '?')}", code=f"hat{getattr(event, 'hat', 0)}", value=float(hy*10+hx), mapped_action=f"{hx},{hy}", extra={"value": getattr(event, 'value', None), "state": self.state})
+                    except:
+                        pass
                     if self.state == 'menu' and self.menu_hat_cooldown == 0:
                         opts = 5 if self.menu_mode=='main' else (len(LEVELS) + 1 if self.menu_mode=='level' else 1)
                         hx, hy = getattr(event, 'value', (0,0))
@@ -860,9 +999,15 @@ class Game:
                     pass
 
             if event.type == pygame.KEYDOWN:
+                # Comprehensive input logging for debug
+                try:
+                    mods = pygame.key.get_mods()
+                    key_name = pygame.key.name(event.key)
+                    _log_input("KEYDOWN", device="keyboard", code=key_name, value=float(event.key), mapped_action=f"state={self.state}", extra={"mods": mods, "key": event.key, "unicode": getattr(event, 'unicode', '')})
+                except:
+                    mods = pygame.key.get_mods()
                 # Global fullscreen toggle - works on Mac and Win
                 # Mac: Fn+F11, Cmd+F, Cmd+Ctrl+F, Option+Enter, Cmd+Enter
-                mods = pygame.key.get_mods()
                 # F11 / F10 for projector / immersive (need Fn on Mac)
                 if event.key in (pygame.K_F11, pygame.K_F10):
                     self.toggle_fullscreen()
@@ -978,7 +1123,10 @@ class Game:
                             self.menu_selected = 0
                 elif self.state == 'playing':
                     if event.key == pygame.K_p:
+                        _trace_log("KEY", f"P pressed -> paused from playing", with_stack=False)
+                        old = self.state
                         self.state = 'paused'
+                        _trace_state_change(old, 'paused', 'KEY P pressed')
                         if snd_mgr:
                             snd_mgr.play('pause')
                     elif event.key == pygame.K_m:
@@ -987,39 +1135,54 @@ class Game:
                         if snd_mgr:
                             snd_mgr.toggle_mute()
                         print(f"{'🔇 MUTED' if self.muted else '🔊 SOUND ON'} - 35 original NES maps with retro SFX")
+                        _trace_log("KEY", f"M muted={self.muted} state={self.state}")
                     elif event.key == pygame.K_ESCAPE:
+                        _trace_log("KEY", f"ESC pressed in PLAYING -> will go MENU! mods={mods} is_fullscreen={self.is_fullscreen} key={event.key}", with_stack=True, level="WARN")
+                        old = self.state
                         self.state = 'menu'
                         self.menu_mode = 'main'
                         self.menu_selected = 0
+                        _trace_state_change(old, 'menu', f"KEY ESC in playing mods={mods}")
                         if snd_mgr:
                             snd_mgr.stop_bgm()
                 elif self.state == 'paused':
                     if event.key == pygame.K_p or event.key == pygame.K_ESCAPE:
+                        _trace_log("KEY", f"ESC/P in PAUSED -> playing key={event.key} mods={mods}")
+                        old = self.state
                         self.state = 'playing'
+                        _trace_state_change(old, 'playing', f"KEY {event.key} in paused")
                         if snd_mgr:
                             snd_mgr.play('pause')
                 elif self.state in ('gameover', 'stage_clear'):
                     if event.key == pygame.K_RETURN:
                         if self.gameover_won:
                             # next level
+                            _trace_log("KEY", f"RETURN in stage_clear -> next level")
                             self.init_next_level()
                         else:
                             # back to menu
+                            _trace_log("KEY", f"RETURN in gameover lost -> menu", level="WARN")
+                            old = self.state
                             self.state = 'menu'
                             self.menu_mode = 'main'
                             self.menu_selected = 0
+                            _trace_state_change(old, 'menu', "KEY RETURN in gameover")
                             # update high score
                             total = sum(p.score for p in self.players)
                             self.high_score = max(self.high_score, total)
                     elif event.key == pygame.K_ESCAPE:
+                        _trace_log("KEY", f"ESC in gameover/stage_clear -> menu gameover_won={self.gameover_won}", with_stack=True, level="WARN")
+                        old = self.state
                         total = sum(p.score for p in self.players)
                         self.high_score = max(self.high_score, total)
                         self.state = 'menu'
                         self.menu_mode = 'main'
                         self.menu_selected = 0
+                        _trace_state_change(old, 'menu', "KEY ESC in gameover/stage_clear")
 
     def handle_menu_select(self):
         # Clear event queue when starting game to prevent queued UP/DOWN from menu going into game and vice versa
+        _trace_log("MENU", f"handle_menu_select called menu_selected={self.menu_selected} menu_mode={self.menu_mode} state={self.state}", with_stack=True)
         try:
             pygame.event.clear()
         except:
@@ -1030,25 +1193,32 @@ class Game:
         
         if self.menu_selected == 0: # 1P
             print("[Menu] Starting 1P game")
+            _trace_log("MENU", "Starting 1P game")
             self.num_players = 1
             self.current_level = 0
             self.init_level(self.current_level, 1)
         elif self.menu_selected == 1: # 2P
             print("[Menu] Starting 2P game")
+            _trace_log("MENU", "Starting 2P game")
             self.num_players = 2
             self.current_level = 0
             self.init_level(self.current_level, 2)
         elif self.menu_selected == 2: # level select
+            _trace_log("MENU", "Going to level select")
             self.menu_mode = 'level'
             self.menu_selected = 0
         elif self.menu_selected == 3: # how to
+            _trace_log("MENU", "Going to howto")
             self.menu_mode = 'howto'
         elif self.menu_selected == 4:
+            _trace_log("MENU", "Quit selected -> exit", level="WARN")
             print("[Menu] Quit selected")
             pygame.quit()
             sys.exit()
 
     def update_playing(self, dt):
+        import time as _time
+        _update_start = _time.time()
         keys = pygame.key.get_pressed()
         # timers
         if self.tilemap:
@@ -1221,6 +1391,10 @@ class Game:
             all_tanks = self.players + self.enemies
             result = b.update(self.tilemap, all_tanks, self.base)
             if result:
+                try:
+                    _log_gameplay(f"BULLET_{result.upper()}", level_idx=self.current_level, data={"x": b.x, "y": b.y, "owner": b.owner, "type": getattr(b, 'bullet_type', 'unknown'), "power": b.power})
+                except:
+                    pass
                 if result in ('hit_brick', 'hit_steel'):
                     self.particles.add_hit(b.x, b.y)
                 elif result == 'hit_tank':
@@ -1273,6 +1447,10 @@ class Game:
             pu.update()
             picker = pu.check_pickup(self.players)
             if picker:
+                try:
+                    _log_gameplay("POWERUP_PICK", level_idx=self.current_level, player_id=getattr(picker, 'player_id', None), data={"type": pu.type, "x": pu.x, "y": pu.y})
+                except:
+                    pass
                 self.apply_powerup(pu.type, picker)
                 if snd_mgr:
                     snd_mgr.play_powerup_pick()
@@ -1295,20 +1473,30 @@ class Game:
         for e in self.enemies[:]:
             if not e.alive:
                 # score
+                killer_id = None
                 if self.players:
                     alive_ps = [p for p in self.players if p.alive] or self.players
                     killer = min(alive_ps, key=lambda p: math.hypot(p.x - e.x, p.y - e.y)) if alive_ps else self.players[0]
                     killer.score += e.score_value
+                    killer_id = getattr(killer, 'player_id', None)
                 self.particles.add_explosion(e.rect.centerx, e.rect.centery, e.color, 25)
                 # Authentic NES explosion SFX - varies by enemy type
                 if snd_mgr:
                     snd_mgr.play_explosion(big=(e.enemy_type=='armor'))
+                try:
+                    _log_gameplay("ENEMY_KILL", level_idx=self.current_level, player_id=killer_id, data={"enemy_type": getattr(e, 'enemy_type', 'unknown'), "x": e.x, "y": e.y, "carrier": e.powerup_carrier, "score_value": e.score_value, "killed": self.enemies_killed+1, "total": self.enemies_total})
+                except:
+                    pass
                 # powerup spawn if carrier - play appear jingle (authentic 8-bit)
                 if e.powerup_carrier:
                     pu = PowerUp(e.rect.centerx, e.rect.centery)
                     self.powerups.append(pu)
                     if snd_mgr:
                         snd_mgr.play_powerup_appear()
+                    try:
+                        _log_gameplay("POWERUP_SPAWN", level_idx=self.current_level, data={"type": pu.type, "x": pu.x, "y": pu.y, "from": "enemy_carrier"})
+                    except:
+                        pass
                 self.enemies.remove(e)
                 self.enemies_killed += 1
 
@@ -1399,30 +1587,45 @@ class Game:
             else:
                 # Original game over logic for non-monster base (fallback)
                 if self.state != 'gameover':
+                    _trace_log("GAMEOVER", f"Base destroyed fallback -> gameover old_state={self.state} base_alive={self.base.alive} boss_released={self.boss_released}", with_stack=True, level="ERROR")
+                    old = self.state
                     self.continue_timer = CONTINUE_TIME
                     if snd_mgr:
                         snd_mgr.play_explosion(big=True)
                         snd_mgr.play_game_over()
                     self._on_game_over()
-                self.state = 'gameover'
-                self.gameover_won = False
+                    self.state = 'gameover'
+                    self.gameover_won = False
+                    _trace_state_change(old, 'gameover', "BASE_DESTROYED_FALLBACK")
+                else:
+                    self.state = 'gameover'
+                    self.gameover_won = False
                 return
 
         # check if all players out of lives and dead
         if all_dead and all(p.lives < 0 for p in self.players):
             if self.state != 'gameover':
+                _trace_log("GAMEOVER", f"All players dead -> gameover all_dead={all_dead} lives={[p.lives for p in self.players]}", with_stack=True, level="WARN")
+                old = self.state
                 self.continue_timer = CONTINUE_TIME
                 if snd_mgr:
                     snd_mgr.play_game_over()
                 self._on_game_over()
-            self.state = 'gameover'
-            self.gameover_won = False
+                self.state = 'gameover'
+                self.gameover_won = False
+                _trace_state_change(old, 'gameover', "ALL_PLAYERS_DEAD")
+            else:
+                self.state = 'gameover'
+                self.gameover_won = False
             return
 
         # win condition - stage clear with authentic NES jingle (35 maps loop)
         if self.enemies_killed >= self.enemies_total and len(self.enemies) == 0:
+            _trace_log("STAGE", f"Stage clear! level={self.current_level} killed={self.enemies_killed} total={self.enemies_total}")
+            old = self.state
             self.state = 'stage_clear'
             self.gameover_won = True
+            _trace_state_change(old, 'stage_clear', f"stage {self.current_level} cleared")
             if snd_mgr:
                 snd_mgr.play_stage_clear()
             # Log 35-stage progress
@@ -1552,16 +1755,30 @@ class Game:
 
     def run(self):
         import traceback
+        import time as _time
         crash_count = 0
+        last_perf_log = _time.time()
+        fps_counter = 0
+        # For perf measurement
+        _last_update_ms = 0
+        _last_draw_ms = 0
         while True:
             try:
+                frame_start = _time.time()
                 dt = self.clock.tick(FPS)
+                # Increment frame in debug logger
+                try:
+                    if HAS_DEBUG_LOGGER:
+                        debug_logger.increment_frame()
+                except:
+                    pass
                 self.handle_events()
 
                 # LAN Remote P2 auto-join from menu - if remote client connected while in menu, auto-start 2P
                 if self.state == 'menu' and self.network_host and self.network_host.is_client_connected():
                     # If menu is in main mode and 1P is selected or no game yet, auto-start 2P with original maps
                     if self.menu_mode == 'main':
+                        _trace_log("NETWORK", f"Remote P2 detected in menu -> auto-starting 2P! state={self.state} mode={self.menu_mode}", with_stack=True)
                         print("[Network] Remote P2 detected in menu - auto-starting 2P with original NES maps!")
                         self.num_players = 2
                         self.current_level = 0
@@ -1572,15 +1789,29 @@ class Game:
 
                 if self.state == 'playing':
                     try:
+                        update_start = _time.time()
                         self.update_playing(dt)
+                        # store update ms for perf log in outer scope
+                        try:
+                            _last_update_ms = (_time.time() - update_start) * 1000
+                        except:
+                            pass
                     except Exception as e:
+                        _trace_log("CRASH", f"update_playing failed: {e} crash_count={crash_count} level={self.current_level} players={[ (p.alive, p.lives, p.x, p.y) for p in self.players]} enemies={len(self.enemies)} bullets={len(self.bullets)}", with_stack=True, level="ERROR")
+                        try:
+                            _log_crash("Game.update_playing", e, extra={"level": self.current_level, "players": [(p.alive, p.lives) for p in self.players], "enemies": len(self.enemies), "crash_count": crash_count})
+                        except:
+                            pass
                         print(f"[CRASH GUARD] update_playing failed: {e}")
                         traceback.print_exc()
                         crash_count += 1
                         if crash_count > 10:
+                            _trace_log("CRASH", f"Too many crashes ({crash_count}) in update_playing -> forcing MENU! state={self.state}", with_stack=True, level="ERROR")
                             print("Too many crashes, returning to menu")
+                            old = self.state
                             self.state = 'menu'
                             self.menu_mode = 'main'
+                            _trace_state_change(old, 'menu', f"CRASH_GUARD update_playing {crash_count} crashes")
                             crash_count = 0
                 elif self.state == 'gameover' and not self.gameover_won:
                     # Countdown to menu if no coin inserted
@@ -1591,28 +1822,68 @@ class Game:
                             self.particles.update()
                         except:
                             pass
+                        if self.continue_timer % 60 == 0:
+                            _trace_log("GAMEOVER", f"Continue timer countdown {self.continue_timer//FPS}s remaining state={self.state}")
                     else:
                         # Time out -> go to menu
+                        _trace_log("GAMEOVER", f"Continue timer expired -> going MENU from gameover timer=0", with_stack=True, level="WARN")
+                        old = self.state
                         total = sum(p.score for p in self.players)
                         self.high_score = max(self.high_score, total)
                         self.state = 'menu'
                         self.menu_mode = 'main'
                         self.menu_selected = 0
+                        _trace_state_change(old, 'menu', "GAMEOVER timer expired")
                 try:
+                    draw_start = _time.time()
                     self.draw()
+                    _last_draw_ms = (_time.time() - draw_start) * 1000
                 except Exception as e:
+                    _trace_log("CRASH", f"draw failed: {e} crash_count={crash_count} state={self.state}", with_stack=True, level="ERROR")
+                    try:
+                        _log_crash("Game.draw", e, extra={"state": self.state, "crash_count": crash_count, "level": self.current_level})
+                    except:
+                        pass
                     print(f"[CRASH GUARD] draw failed: {e}")
                     traceback.print_exc()
                     crash_count += 1
                     if crash_count > 10:
+                        _trace_log("CRASH", f"Too many draw crashes ({crash_count}) -> forcing MENU", with_stack=True, level="ERROR")
+                        old = self.state
                         self.state = 'menu'
+                        _trace_state_change(old, 'menu', f"CRASH_GUARD draw {crash_count} crashes")
                         crash_count = 0
+
+                # Perf logging every ~0.5 sec
+                try:
+                    if HAS_DEBUG_LOGGER and _time.time() - last_perf_log > 0.5:
+                        fps = self.clock.get_fps()
+                        debug_logger.log_perf(fps=fps, dt_ms=dt, update_ms=_last_update_ms, draw_ms=_last_draw_ms,
+                                              enemies_count=len(self.enemies), bullets_count=len(self.bullets),
+                                              particles_count=len(self.particles.particles) + len(self.particles.explosions),
+                                              players_alive=len([p for p in self.players if p.alive]))
+                        last_perf_log = _time.time()
+                except:
+                    pass
+
             except SystemExit:
+                _trace_log("EXIT", "SystemExit raised, exiting", with_stack=True)
+                try:
+                    if HAS_DEBUG_LOGGER:
+                        debug_logger.end_session()
+                except:
+                    pass
                 raise
             except Exception as e:
+                _trace_log("CRASH", f"main loop failed: {e} crash_count={crash_count} state={self.state}", with_stack=True, level="ERROR")
+                try:
+                    _log_crash("Game.run main loop", e, extra={"state": self.state, "crash_count": crash_count})
+                except:
+                    pass
                 print(f"[CRASH GUARD] main loop failed: {e}")
                 traceback.print_exc()
                 crash_count += 1
                 if crash_count > 20:
+                    _trace_log("CRASH", f"Too many main loop crashes {crash_count} -> exit", level="ERROR")
                     print("Too many crashes in main loop, exiting")
                     break

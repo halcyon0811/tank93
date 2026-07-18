@@ -5,6 +5,15 @@ import os
 import pathlib
 from ..settings import *
 
+# Debug logging
+try:
+    from ..logger_integration import safe_log_gameplay, safe_log_event
+    HAS_DEBUG = True
+except:
+    HAS_DEBUG = False
+    def safe_log_gameplay(*a, **kw): pass
+    def safe_log_event(*a, **kw): pass
+
 # Item icon loader using your downloaded assets - size similar to tank
 ITEMS_DIR = pathlib.Path(__file__).parent.parent / "assets" / "items"
 
@@ -135,6 +144,11 @@ class PowerUp:
         self.lifetime = 10000
         self.rotation = 0
         self.bob_offset = random.uniform(0, 6.28)
+        if HAS_DEBUG:
+            try:
+                safe_log_gameplay("POWERUP_SPAWN", level_idx=-1, data={"type": self.type, "x": x, "y": y})
+            except:
+                pass
 
         self.colors = {
             'helmet': (80, 180, 255),

@@ -3,6 +3,16 @@ from .tank import Tank
 from .bullet import Bullet
 from ..settings import *
 import game.settings as settings_module  # for live calibration toggles
+
+# Debug logging
+try:
+    from ..logger_integration import safe_log_gameplay, safe_log_event
+    HAS_DEBUG = True
+except:
+    HAS_DEBUG = False
+    def safe_log_gameplay(*a, **kw): pass
+    def safe_log_event(*a, **kw): pass
+
 # New input manager for custom controller mapping (user says direction then hits it)
 try:
     from ..input_manager import get_direction_from_joystick, get_buttons_from_joystick, load_mapping

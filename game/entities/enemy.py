@@ -6,6 +6,15 @@ from .tank import Tank
 from .bullet import Bullet
 from ..settings import *
 
+# Debug logging
+try:
+    from ..logger_integration import safe_log_gameplay, safe_log_event
+    HAS_DEBUG = True
+except:
+    HAS_DEBUG = False
+    def safe_log_gameplay(*a, **kw): pass
+    def safe_log_event(*a, **kw): pass
+
 def a_star_big_tile(tilemap, start_bx, start_by, target_bx, target_by, ignore_brick_cost=False):
     """A* on 13x13 big tile grid for authentic but smart base rush."""
     def is_blocked_big(bx, by):
@@ -740,9 +749,23 @@ class EnemyTank(Tank):
             self.invulnerable_timer = 10
             return False
 
-    def draw(self, screen):
+    def draw(self, screen, tilemap=None):
         if not self.alive:
             return
+        # Forest hiding for normal enemies - completely hidden in forest
+        if tilemap and not getattr(self, 'is_boss', False):
+            try:
+                if hasattr(tilemap, 'is_in_forest') and tilemap.is_in_forest(self.x, self.y):
+                    return
+                else:
+                    # fallback check via tiles
+                    gx = int((self.x - PLAYFIELD_X) // TILE_SIZE)
+                    gy = int((self.y - PLAYFIELD_Y) // TILE_SIZE)
+                    if 0 <= gx < GRID_W and 0 <= gy < GRID_H:
+                        if tilemap.tiles[gy][gx] == TILE_GRASS:
+                            return
+            except Exception:
+                pass
         # Boss monster tank - special drawing
         if getattr(self, 'is_boss', False):
             cx, cy = self.rect.center

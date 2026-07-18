@@ -4,6 +4,14 @@ import json
 import random
 from .settings import *
 
+# Debug logging
+try:
+    from .logger_integration import safe_log_gameplay
+    HAS_DEBUG = True
+except:
+    HAS_DEBUG = False
+    def safe_log_gameplay(*a, **kw): pass
+
 class TileMap:
     def __init__(self, level_data=None, is_mega=None):
         if is_mega is None:
@@ -225,6 +233,11 @@ class TileMap:
         if current_hits >= max_needed:
             self.tiles[gy][gx] = TILE_EMPTY
             self.brick_health.pop(key, None)
+            if HAS_DEBUG:
+                try:
+                    safe_log_gameplay("BRICK_DESTROY", data={"x": gx, "y": gy, "hits": current_hits, "needed": max_needed, "type": bullet_type, "power": bullet_power})
+                except:
+                    pass
             return True
         else:
             self.brick_health[key] = current_hits

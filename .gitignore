@@ -20,3 +20,7 @@ game/assets/sounds/intro.wav
 game/assets/sounds/battle_city_intro.wav
 game/assets/sounds/battle_city_intro.ogg
 game/assets/sounds/battle_city_intro_classic.wav
+# Debug logs - keep DB but optional to ignore large ones? We WANT to keep debug.db for queries, but ignore wal/shm
+*.db-wal
+*.db-shm
+crash.log

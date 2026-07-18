@@ -4,6 +4,16 @@ import pathlib
 import math
 from ..settings import *
 
+# Debug logging
+try:
+    from ..debug_logger import debug_logger
+    from ..logger_integration import safe_log_gameplay, safe_log_event
+    HAS_DEBUG = True
+except ImportError:
+    HAS_DEBUG = False
+    def safe_log_gameplay(*a, **kw): pass
+    def safe_log_event(*a, **kw): pass
+
 # Try to load authentic NES sprite sheet
 try:
     from ..assets.sprites import get_tank_sprite_scaled
@@ -362,7 +372,16 @@ class Tank:
         return max(0, min(1, self.armor / self.max_armor))
 
     def die(self):
+        was_alive = self.alive
         self.alive = False
+        if HAS_DEBUG and was_alive:
+            try:
+                safe_log_gameplay("TANK_DIE", level_idx=-1, player_id=getattr(self, 'player_id', None),
+                                  data={"is_player": self.is_player, "x": getattr(self, 'x', 0), "y": getattr(self, 'y', 0),
+                                        "grid_x": getattr(self, 'grid_x', -1), "grid_y": getattr(self, 'grid_y', -1),
+                                        "armor": getattr(self, 'armor', 0)})
+            except:
+                pass
 
     def draw(self, screen, tilemap=None):
         if not self.alive:

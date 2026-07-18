@@ -4,6 +4,15 @@ import heapq
 from collections import deque
 from ..settings import *
 
+# Debug logging
+try:
+    from ..logger_integration import safe_log_gameplay, safe_log_event
+    HAS_DEBUG = True
+except:
+    HAS_DEBUG = False
+    def safe_log_gameplay(*a, **kw): pass
+    def safe_log_event(*a, **kw): pass
+
 # ------------------------------------------------------------
 # Helpers for smart homing
 # ------------------------------------------------------------
@@ -830,6 +839,12 @@ class Base:
         self.monster_released = True
         self.destroyed_timer = pygame.time.get_ticks()
         self.release_animation_timer = pygame.time.get_ticks()
+        if HAS_DEBUG:
+            try:
+                safe_log_gameplay("BASE_DAMAGE", level_idx=-1, data={"event": "base_destroyed", "x": self.x, "y": self.y, "monster_released": True})
+                safe_log_event("BASE", "Base destroyed - monster released", level="WARN", extra={"x": self.x, "y": self.y}, with_stack=True)
+            except:
+                pass
         return True  # indicates boss should be spawned
 
     def reset(self):
@@ -837,6 +852,11 @@ class Base:
         self.monster_released = False
         self.destroyed_timer = 0
         self.release_animation_timer = 0
+        if HAS_DEBUG:
+            try:
+                safe_log_gameplay("BASE_RESPAWN", level_idx=-1, data={"event": "base_respawned", "x": self.x, "y": self.y})
+            except:
+                pass
 
     def draw(self, screen):
         if self.alive:
