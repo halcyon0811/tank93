@@ -568,10 +568,25 @@ class PlayerTank(Tank):
             base_cd = 15 if self.star_level >= 1 else 20
             self.cooldown = max(3, base_cd // 3) if self.rapid_active else base_cd
 
-        # Classic Battle City shoot SFX
+        # Better shooting sounds - choose type based on active items
         try:
             from ..sound_manager import sound_manager
-            sound_manager.play_shoot()
+            # Determine best shoot sound type for satisfying feedback
+            if self.homing_active and self.spread_active:
+                shoot_type = 'homing'  # 8 homing missiles - missile sound
+            elif self.homing_active:
+                shoot_type = 'homing'
+            elif self.spread_active and self.rapid_active:
+                shoot_type = 'spread'  # rapid spread
+            elif self.spread_active:
+                shoot_type = 'spread'
+            elif self.rapid_active:
+                shoot_type = 'rapid'
+            elif self.bullet_power >= 2:
+                shoot_type = 'power'
+            else:
+                shoot_type = 'punchy'  # new better normal shoot
+            sound_manager.play_shoot(shoot_type)
         except:
             pass
 

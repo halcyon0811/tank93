@@ -154,8 +154,53 @@ class SoundManager:
             if bgm:
                 self.sounds['bgm_battle'] = bgm
 
+            # === NEW: Better shooting sounds - punchy, modern, satisfying ===
+            # Generate multiple shooting variants and replace the default 'shoot' with better one
+            print("[Sound] Generating better shooting sounds (punchy, modern, etc.)...")
+            better_shoot = self.generate_punchy_shoot(f0=1200, f1=180, duration=0.18, volume=0.85, punch_freq=90, punch_vol=0.9)
+            if better_shoot:
+                # Keep authentic as fallback as shoot_authentic
+                if 'shoot' in self.sounds:
+                    self.sounds['shoot_authentic'] = self.sounds['shoot']
+                self.sounds['shoot'] = better_shoot
+                self.sounds['shoot_punchy'] = better_shoot
+                print("[Sound] -> Upgraded 'shoot' to punchy version (1200->180Hz sweep + 90Hz punch)")
+
+            # Power shoot (for power level 2, can break steel)
+            power_shoot = self.generate_punchy_shoot(f0=900, f1=120, duration=0.22, volume=0.95, punch_freq=70, punch_vol=1.0, add_second_layer=True)
+            if power_shoot:
+                self.sounds['shoot_power'] = power_shoot
+                self.sounds['shoot_strong'] = power_shoot
+
+            # Rapid fire - very short, snappy
+            rapid_shoot = self.generate_punchy_shoot(f0=1500, f1=500, duration=0.08, volume=0.65, punch_freq=120, punch_vol=0.6, short=True)
+            if rapid_shoot:
+                self.sounds['shoot_rapid'] = rapid_shoot
+                self.sounds['shoot_rapid_3x'] = rapid_shoot
+
+            # Spread shot - chord-like, 8 directions
+            spread_shoot = self.generate_spread_shoot()
+            if spread_shoot:
+                self.sounds['shoot_spread'] = spread_shoot
+                self.sounds['shoot_8way'] = spread_shoot
+
+            # Homing missile - rising pitch with tail
+            homing_shoot = self.generate_homing_shoot()
+            if homing_shoot:
+                self.sounds['shoot_homing'] = homing_shoot
+                self.sounds['shoot_missile'] = homing_shoot
+                self.sounds['shoot_tracker'] = homing_shoot
+
+            # Laser / plasma for variety
+            plasma = self.generate_plasma_shoot()
+            if plasma:
+                self.sounds['shoot_plasma'] = plasma
+                self.sounds['shoot_laser'] = plasma
+
         except Exception as e:
             print(f"[Sound] Retro generation failed: {e}")
+            import traceback
+            traceback.print_exc()
 
     def generate_tone(self, frequency=440, duration=0.5, volume=0.5, waveform='sine', decay=False, noise=False):
         """Generate a simple tone as pygame Sound (8-bit style)."""
@@ -253,6 +298,208 @@ class SoundManager:
         except:
             return None
 
+    def generate_punchy_shoot(self, f0=1200, f1=180, duration=0.18, volume=0.85, punch_freq=90, punch_vol=0.9, add_second_layer=False, short=False):
+        """
+        Generate a punchy, satisfying shooting sound - much better than authentic NES beep.
+        Features:
+        - Frequency sweep from high to low (pew)
+        - Low-end punch at start (80-120Hz) for impact
+        - Initial click/white noise transient
+        - Square wave for retro but beefy feel
+        - Exponential decay envelope
+        """
+        try:
+            import numpy as np
+            sr = 22050
+            N = int(sr * duration)
+            t = np.linspace(0, duration, N, False)
+
+            # Exponential frequency sweep: f(t) = f0 * (f1/f0)^(t/duration)
+            # Avoid log(0) issues
+            if f1 <= 0:
+                f1 = 20
+            # Create sweep
+            freq = f0 * np.power(f1 / f0, t / duration)
+
+            # Phase integration for accurate sweep
+            phase = np.cumsum(2 * np.pi * freq / sr)
+            # Square wave (retro but punchy)
+            wave = np.sign(np.sin(phase))
+
+            # ADSR envelope: fast attack, quick decay, short sustain, quick release
+            attack = int(0.001 * sr)  # 1ms attack
+            decay = int(0.08 * sr)
+            # Envelope
+            env = np.ones(N)
+            # Attack: 0 to 1 in 1ms
+            if attack > 0:
+                env[:attack] = np.linspace(0, 1, attack)
+            # Decay: exponential
+            decay_env = np.exp(-5 * np.linspace(0, 1, N - attack))
+            env[attack:] = decay_env[:N-attack] if len(decay_env) >= N-attack else np.concatenate([decay_env, np.zeros(N-attack-len(decay_env))])
+
+            # Apply envelope to main wave
+            wave = wave * env
+
+            # Punch layer: low frequency sine with fast decay at start - gives thump
+            if punch_vol > 0 and punch_freq > 0:
+                punch_duration = min(duration, 0.08)  # punch only first 80ms
+                punch_N = int(sr * punch_duration)
+                punch_t = np.linspace(0, punch_duration, punch_N, False)
+                punch_phase = 2 * np.pi * punch_freq * punch_t
+                punch_wave = np.sin(punch_phase) * np.exp(-15 * punch_t)  # fast decay
+                # Add punch to main wave (first part)
+                wave[:punch_N] += punch_wave * punch_vol
+
+            # Click/transient at very start: short white noise burst 0-5ms for extra snap
+            click_duration = int(0.006 * sr)
+            if click_duration > 0 and N > click_duration:
+                click_noise = np.random.uniform(-1, 1, click_duration) * 0.6
+                # Fade out click
+                click_env = np.exp(-100 * np.linspace(0, 0.006, click_duration))
+                wave[:click_duration] += click_noise * click_env * 0.8
+
+            # Second layer for power shots: add an octave lower square for extra beef
+            if add_second_layer:
+                # Second layer: f0/2 to f1/2
+                freq2 = freq * 0.5
+                phase2 = np.cumsum(2 * np.pi * freq2 / sr)
+                wave2 = np.sign(np.sin(phase2)) * env * 0.5
+                wave += wave2
+
+            # For rapid fire short version, make it even snappier
+            if short:
+                wave = wave * 0.9  # slightly quieter for rapid
+
+            # Normalize to prevent clipping
+            max_val = np.max(np.abs(wave))
+            if max_val > 0:
+                wave = wave / max_val * 0.9
+
+            # Convert to 16-bit
+            audio = (wave * 32767 * volume).astype(np.int16)
+            stereo = np.column_stack([audio, audio])
+            return pygame.sndarray.make_sound(stereo)
+        except ImportError:
+            return None
+        except Exception as e:
+            print(f"[Sound] Punchy shoot gen failed: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+
+    def generate_spread_shoot(self):
+        """Generate spread shot - 8-way firing sound: chord-like, slightly bigger"""
+        try:
+            import numpy as np
+            sr = 22050
+            duration = 0.22
+            N = int(sr * duration)
+            t = np.linspace(0, duration, N, False)
+
+            # Chord: multiple frequencies at once for spread feel
+            freqs = [800, 1000, 1200]  # major chord-ish
+            wave = np.zeros(N)
+            for i, f in enumerate(freqs):
+                # Each voice sweeps down slightly
+                f0 = f
+                f1 = f * 0.3
+                freq = f0 * np.power(f1 / f0, t / duration)
+                phase = np.cumsum(2 * np.pi * freq / sr)
+                voice = np.sign(np.sin(phase)) * np.exp(-6*t) * (0.5 - i*0.1)
+                wave += voice
+
+            # Add noise burst for spread
+            noise = np.random.uniform(-1, 1, N) * np.exp(-20*t) * 0.3
+            wave += noise
+
+            # Normalize
+            max_val = np.max(np.abs(wave))
+            if max_val > 0:
+                wave = wave / max_val * 0.85
+
+            audio = (wave * 32767 * 0.8).astype(np.int16)
+            stereo = np.column_stack([audio, audio])
+            return pygame.sndarray.make_sound(stereo)
+        except Exception as e:
+            print(f"[Sound] Spread shoot gen failed: {e}")
+            return None
+
+    def generate_homing_shoot(self):
+        """Generate homing missile sound: rising pitch with long tail, futuristic"""
+        try:
+            import numpy as np
+            sr = 22050
+            duration = 0.35
+            N = int(sr * duration)
+            t = np.linspace(0, duration, N, False)
+
+            # Rising sweep for missile launch: 200Hz -> 1200Hz
+            f0 = 200
+            f1 = 1200
+            freq = f0 * np.power(f1 / f0, t / duration)
+            phase = np.cumsum(2 * np.pi * freq / sr)
+            # Saw wave for missile whine
+            wave = 2 * (phase / (2*np.pi) - np.floor(phase / (2*np.pi) + 0.5))
+            # Envelope: slow attack, sustain, long release
+            env = np.ones(N)
+            attack = int(0.05 * sr)
+            env[:attack] = np.linspace(0, 1, attack)
+            env = env * np.exp(-1.5 * t) + 0.2 * (1 - np.exp(-3*t))
+            wave = wave * env
+
+            # Add high frequency beep for tracking
+            beep_freq = 2000
+            beep = np.sin(2 * np.pi * beep_freq * t) * np.exp(-8*t) * 0.3
+            wave += beep
+
+            max_val = np.max(np.abs(wave))
+            if max_val > 0:
+                wave = wave / max_val * 0.8
+
+            audio = (wave * 32767 * 0.75).astype(np.int16)
+            stereo = np.column_stack([audio, audio])
+            return pygame.sndarray.make_sound(stereo)
+        except Exception as e:
+            print(f"[Sound] Homing shoot gen failed: {e}")
+            return None
+
+    def generate_plasma_shoot(self):
+        """Generate plasma/laser sound: high-energy, bright"""
+        try:
+            import numpy as np
+            sr = 22050
+            duration = 0.18
+            N = int(sr * duration)
+            t = np.linspace(0, duration, N, False)
+
+            # Fast sweep 1500 -> 300 with vibrato
+            f0 = 1500
+            f1 = 300
+            base_freq = f0 * np.power(f1 / f0, t / duration)
+            # Add vibrato
+            vibrato = 1 + 0.1 * np.sin(2 * np.pi * 30 * t)
+            freq = base_freq * vibrato
+            phase = np.cumsum(2 * np.pi * freq / sr)
+            wave = np.sin(phase)  # sine for plasma smooth
+
+            # Add square layer for edge
+            wave2 = np.sign(np.sin(phase)) * 0.3
+
+            env = np.exp(-6*t)
+            wave = (wave * 0.7 + wave2 * 0.3) * env
+
+            max_val = np.max(np.abs(wave))
+            if max_val > 0:
+                wave = wave / max_val * 0.85
+
+            audio = (wave * 32767 * 0.8).astype(np.int16)
+            stereo = np.column_stack([audio, audio])
+            return pygame.sndarray.make_sound(stereo)
+        except Exception as e:
+            print(f"[Sound] Plasma shoot gen failed: {e}")
+            return None
+
     # ---- Playback ----
 
     def play(self, name, volume=None, pitch_random=False):
@@ -285,7 +532,41 @@ class SoundManager:
         except Exception as e:
             print(f"[Sound] play {name} failed: {e}")
 
-    def play_shoot(self):
+    def play_shoot(self, shoot_type='normal'):
+        """
+        Play shooting sound - now with better variants
+        shoot_type: 'normal', 'power', 'rapid', 'spread', 'homing', 'plasma', 'punchy'
+        """
+        # Map shoot_type to sound name, with fallback chain
+        type_map = {
+            'normal': ['shoot', 'shoot_punchy', 'shoot_plasma'],
+            'power': ['shoot_power', 'shoot_strong', 'shoot_punchy', 'shoot'],
+            'rapid': ['shoot_rapid', 'shoot_rapid_3x', 'shoot'],
+            'spread': ['shoot_spread', 'shoot_8way', 'shoot'],
+            'homing': ['shoot_homing', 'shoot_missile', 'shoot_tracker', 'shoot'],
+            'missile': ['shoot_homing', 'shoot_missile', 'shoot'],
+            'plasma': ['shoot_plasma', 'shoot_laser', 'shoot'],
+            'punchy': ['shoot_punchy', 'shoot'],
+            'beefy': ['shoot_power', 'shoot_punchy', 'shoot'],
+        }
+
+        # Determine which list to try
+        candidates = type_map.get(shoot_type, type_map['normal'])
+
+        for snd_name in candidates:
+            if snd_name in self.sounds:
+                # Adjust volume based on type
+                vol = 0.7
+                if shoot_type in ('power', 'plasma'):
+                    vol = 0.85
+                elif shoot_type == 'rapid':
+                    vol = 0.6  # rapid is quieter but snappy
+                elif shoot_type in ('spread', 'homing'):
+                    vol = 0.8
+                self.play(snd_name, volume=vol)
+                return
+
+        # Fallback to normal shoot
         self.play('shoot', volume=0.7)
 
     def play_hit_brick(self):

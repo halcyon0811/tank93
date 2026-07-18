@@ -695,7 +695,15 @@ class Game:
         for event in events:
             if event.type == pygame.QUIT:
                 print(f"[Event] QUIT received - exiting")
-                pygame.quit()
+                try:
+                    pygame.quit()
+                except:
+                    pass
+                try:
+                    import os
+                    os._exit(0)
+                except:
+                    pass
                 sys.exit(0)
             # Joystick hotplug - important for Switch Joy-Con
             try:
