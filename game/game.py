@@ -978,14 +978,41 @@ class Game:
                         if hy == 0 and hx == 0:
                             pass
                         else:
-                            if hy == 1:
-                                self.menu_selected = (self.menu_selected - 1) % opts
-                                self.menu_hat_cooldown = 12
-                                print(f"Menu UP via hat -> {self.menu_selected}")
-                            elif hy == -1:
-                                self.menu_selected = (self.menu_selected + 1) % opts
-                                self.menu_hat_cooldown = 12
-                                print(f"Menu DOWN via hat -> {self.menu_selected}")
+                            # Main menu: horizontal cards for 1P/2P -> LEFT/RIGHT = toggle 0<->1
+                            if self.menu_mode == 'main':
+                                if self.menu_selected in (0, 1):
+                                    if hx == -1:
+                                        self.menu_selected = 1 if self.menu_selected == 0 else 0
+                                        self.menu_hat_cooldown = 10
+                                        print(f"Menu LEFT via hat -> {self.menu_selected} (1P<->2P)")
+                                    elif hx == 1:
+                                        self.menu_selected = 1 if self.menu_selected == 0 else 0
+                                        self.menu_hat_cooldown = 10
+                                        print(f"Menu RIGHT via hat -> {self.menu_selected} (1P<->2P)")
+                                # Vertical navigation for all main options
+                                if hy == 1:
+                                    if self.menu_selected in (0, 1):
+                                        self.menu_selected = 4
+                                    else:
+                                        self.menu_selected = (self.menu_selected - 1) % opts
+                                    self.menu_hat_cooldown = 12
+                                    print(f"Menu UP via hat -> {self.menu_selected}")
+                                elif hy == -1:
+                                    if self.menu_selected in (0, 1):
+                                        self.menu_selected = 2
+                                    else:
+                                        self.menu_selected = (self.menu_selected + 1) % opts
+                                    self.menu_hat_cooldown = 12
+                                    print(f"Menu DOWN via hat -> {self.menu_selected}")
+                            else:
+                                if hy == 1:
+                                    self.menu_selected = (self.menu_selected - 1) % opts
+                                    self.menu_hat_cooldown = 12
+                                    print(f"Menu UP via hat -> {self.menu_selected}")
+                                elif hy == -1:
+                                    self.menu_selected = (self.menu_selected + 1) % opts
+                                    self.menu_hat_cooldown = 12
+                                    print(f"Menu DOWN via hat -> {self.menu_selected}")
                             if self.menu_mode == 'level' and hx != 0:
                                 if hx == -1:
                                     self.menu_selected = (self.menu_selected - 1) % (len(LEVELS)+1)
@@ -1079,12 +1106,62 @@ class Game:
 
                 if self.state == 'menu':
                     if self.menu_mode == 'main':
+                        # New navigation: 1P/2P cards are horizontal, so LEFT/RIGHT controls them
+                        # Top row: [0:1P left, 1:2P right], then 2:LEVEL SELECT, 3:HOWTO, 4:QUIT below
                         if event.key == pygame.K_UP or event.key == pygame.K_w:
-                            self.menu_selected = (self.menu_selected - 1) % 5
+                            # If currently on 1P/2P top row, UP goes to QUIT (wrap) via 4, else normal up
+                            if self.menu_selected in (0, 1):
+                                # From top row, UP goes to QUIT (bottom)
+                                self.menu_selected = 4
+                            else:
+                                self.menu_selected = (self.menu_selected - 1) % 5
+                                # If we land on 1, keep it as is, but if up from LEVEL SELECT (2) should go to last top selected?
+                                # We'll keep simple modulo, but avoid jumping from 2 to 1 then immediately requiring LEFT/RIGHT
+                                # Actually 2-1=1 gives 2P, which is okay
                             print(f"Menu selected {self.menu_selected} via keyboard UP/W")
+                            _trace_log("INPUT", f"Menu UP -> {self.menu_selected}", level="INFO")
+                            try:
+                                _log_input("MENU_NAV", device="keyboard", code="UP", value=float(self.menu_selected), mapped_action=f"selected={self.menu_selected}")
+                            except:
+                                pass
                         elif event.key == pygame.K_DOWN or event.key == pygame.K_s:
-                            self.menu_selected = (self.menu_selected + 1) % 5
+                            if self.menu_selected in (0, 1):
+                                # From top row, DOWN goes to LEVEL SELECT
+                                self.menu_selected = 2
+                            else:
+                                self.menu_selected = (self.menu_selected + 1) % 5
                             print(f"Menu selected {self.menu_selected} via keyboard DOWN/S")
+                            _trace_log("INPUT", f"Menu DOWN -> {self.menu_selected}", level="INFO")
+                            try:
+                                _log_input("MENU_NAV", device="keyboard", code="DOWN", value=float(self.menu_selected), mapped_action=f"selected={self.menu_selected}")
+                            except:
+                                pass
+                        elif event.key == pygame.K_LEFT or event.key == pygame.K_a:
+                            if self.menu_selected in (0, 1):
+                                # Toggle between 1P and 2P horizontally
+                                self.menu_selected = 1 if self.menu_selected == 0 else 0
+                                print(f"Menu selected {self.menu_selected} via LEFT/A (horizontal 1P<->2P)")
+                            else:
+                                # For lower options, LEFT does nothing or could go to top row preserving col?
+                                # We'll allow LEFT to go to 1P if on lower menu for quick access
+                                pass
+                            _trace_log("INPUT", f"Menu LEFT -> {self.menu_selected}", level="INFO")
+                            try:
+                                _log_input("MENU_NAV", device="keyboard", code="LEFT", value=float(self.menu_selected), mapped_action=f"selected={self.menu_selected}")
+                            except:
+                                pass
+                        elif event.key == pygame.K_RIGHT or event.key == pygame.K_d:
+                            if self.menu_selected in (0, 1):
+                                self.menu_selected = 1 if self.menu_selected == 0 else 0
+                                print(f"Menu selected {self.menu_selected} via RIGHT/D (horizontal 1P<->2P)")
+                            else:
+                                # From lower options, RIGHT could jump to 1P/2P? Let's map RIGHT to 2P quick?
+                                pass
+                            _trace_log("INPUT", f"Menu RIGHT -> {self.menu_selected}", level="INFO")
+                            try:
+                                _log_input("MENU_NAV", device="keyboard", code="RIGHT", value=float(self.menu_selected), mapped_action=f"selected={self.menu_selected}")
+                            except:
+                                pass
                         elif event.key in (pygame.K_RETURN, pygame.K_SPACE, pygame.K_KP_ENTER):
                             print(f"Menu SELECT {self.menu_selected} ENTER/SPACE")
                             self.handle_menu_select()

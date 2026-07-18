@@ -446,7 +446,7 @@ class HUD:
             # Minimal footer - single line, no clutter
             footer_y = SCREEN_HEIGHT - 28
             footer_font = pygame.font.Font(None, 16)
-            footer_txt = footer_font.render("WASD + SPACE  •  ARROWS + ENTER  •  F11 Fullscreen  •  C Coin", True, (90,90,110))
+            footer_txt = footer_font.render("LEFT/RIGHT: 1P/2P  •  UP/DOWN: Menu  •  ENTER  •  F11 Fullscreen  •  C Coin", True, (90,90,110))
             screen.blit(footer_txt, footer_txt.get_rect(center=(SCREEN_WIDTH//2, footer_y)))
 
             # Coin hint - subtle blinking at very bottom, no box
