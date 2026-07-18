@@ -141,6 +141,18 @@ class NetworkHost:
         with self.lock:
             return self.client_connected and (time.time() - self.client_last_seen < 5)
 
+    def disconnect_client(self):
+        """Force disconnect remote P2 (Lida) - for host to allow 1P restart"""
+        with self.lock:
+            was_connected = self.client_connected
+            self.client_connected = False
+            self.client_last_seen = 0
+            self.remote_p2_input = {"dir": None, "shoot": False, "timestamp": 0}
+            self.last_client_addr = None
+        if was_connected:
+            print("[Network] Remote P2 (Lida) manually disconnected by host")
+        return was_connected
+
     def stop(self):
         self.running = False
         if self.sock:

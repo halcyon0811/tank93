@@ -62,16 +62,16 @@ class HUD:
             joy_txt = self.font_small.render("Joy: 0 (Press J to rescan)", True, (200,100,100))
         screen.blit(joy_txt, (xpos, ypos))
         ypos += 14
-        # LAN Multiplayer status
+        # LAN Multiplayer status - Chad & Lida remote
         try:
             if hasattr(game, 'network_host_ip') and game.network_host_ip:
                 ip_txt = self.font_small.render(f"LAN Host: {game.network_host_ip}:9999", True, (100,200,255))
                 screen.blit(ip_txt, (xpos, ypos))
                 ypos += 14
                 if hasattr(game, 'network_host') and game.network_host and game.network_host.is_client_connected():
-                    conn_txt = self.font_small.render("Remote P2: CONNECTED via WiFi", True, (100,255,100))
+                    conn_txt = self.font_small.render(f"Lida (P2) CONNECTED - N/Ctrl+K kick for Chad solo", True, (100,255,100))
                 else:
-                    conn_txt = self.font_small.render("Remote P2: python3 remote_client.py --host "+str(game.network_host_ip), True, (150,150,150))
+                    conn_txt = self.font_small.render(f"Lida join: remote_client.py --host {game.network_host_ip}  [CHAD 1P OK even if Lida connected]", True, (150,150,150))
                 screen.blit(conn_txt, (xpos, ypos))
                 ypos += 14
             # Projector status - for projecting to projector via local network browser

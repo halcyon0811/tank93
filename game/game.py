@@ -243,16 +243,24 @@ class Game:
             self.is_mega = False
 
         # LAN Multiplayer - Remote P2 join via same local network - disabled in web (no UDP in browser)
+        # Also allow --solo flag to disable for Chad solo restart even if Lida client still running
+        import sys as _sys
+        _no_network_flag = "--solo" in _sys.argv or "--no-network" in _sys.argv or "--no-remote" in _sys.argv
         self.network_host = None
         self.network_host_ip = None
-        if not getattr(self, 'is_web', False):
+        self.network_enabled = not _no_network_flag
+        if _no_network_flag:
+            print(f"[Game] Network disabled via --solo flag - Chad solo mode, Lida remote disabled")
+            _trace_log("NETWORK", "Network disabled via --solo flag - solo mode", level="INFO")
+        elif not getattr(self, 'is_web', False):
             try:
                 from .network import NetworkHost, get_local_ip
                 self.network_host = NetworkHost()
                 self.network_host_ip = self.network_host.start()
                 if self.network_host_ip:
-                    print(f"[Game] LAN Host ready - P2 can join remotely via same WiFi")
+                    print(f"[Game] LAN Host ready - Lida (P2) can join remotely via same WiFi")
                     print(f"[Game] Remote: python3 remote_client.py --host {self.network_host_ip}")
+                    print(f"[Game] To allow Chad solo even if Lida connected: select CHAD card (LEFT/RIGHT), or press N/Ctrl+K to kick Lida, or run with --solo")
             except Exception as e:
                 print(f"[Game] Network host failed to start: {e}")
                 self.network_host = None
@@ -1159,8 +1167,8 @@ class Game:
                     if event.key == pygame.K_5:
                         print(f"Coin inserted! Total: {self.coins+1} (+{COIN_LIVES} lives)")
                     self.insert_coin()
-                # Life sharing: L key for Chad/Lida (2P mode, richer gives to poorer)
-                if event.key == pygame.K_l:
+                # Life sharing: L key for Chad/Lida (2P mode, richer gives to poorer) - only when not Ctrl (Ctrl+L is kick)
+                if event.key == pygame.K_l and not (mods & pygame.KMOD_CTRL):
                     if self.state in ('playing', 'paused'):
                         success = self.share_life()
                         if not success:
@@ -1171,34 +1179,76 @@ class Game:
                         except:
                             pass
 
+                # --- Debug / calibration / network keys ---
                 if event.key == pygame.K_j:
                     print("Rescanning joysticks (J pressed)...")
                     self.rescan_joysticks()
-                if event.key == pygame.K_i:
+
+                # Network: kick Lida (P2) to allow 1P Chad solo restart even if Lida client still running
+                # Ctrl+K or Ctrl+L or K (when not in menu calibration conflict) or N to kick/disconnect
+                is_ctrl = bool(mods & pygame.KMOD_CTRL)
+                if event.key == pygame.K_k and not is_ctrl:
+                    # Cycle D-pad mapping for Joy-Con L if directions wrong (K = calibration)
                     import game.settings as settings_module
-                    # Only toggle RIGHT for now since LEFT is correct per user
-                    settings_module.JOYCON_R_INVERT_Y = not getattr(settings_module, 'JOYCON_R_INVERT_Y', True)
-                    print(f"RIGHT Joy-Con Invert Y toggled: R {settings_module.JOYCON_R_INVERT_Y} (UP/DOWN) - LEFT stays correct")
-                if event.key == pygame.K_u:
-                    import game.settings as settings_module
-                    settings_module.JOYCON_R_INVERT_X = not getattr(settings_module, 'JOYCON_R_INVERT_X', True)
-                    print(f"RIGHT Joy-Con Invert X toggled: R {settings_module.JOYCON_R_INVERT_X} (LEFT/RIGHT)")
-                if event.key == pygame.K_o:
-                    import game.settings as settings_module
-                    settings_module.JOYCON_R_SWAP = not getattr(settings_module, 'JOYCON_R_SWAP', True)
-                    print(f"RIGHT Joy-Con Swap toggled: R {settings_module.JOYCON_R_SWAP} (UP/DOWN <-> LEFT/RIGHT)")
-                if event.key == pygame.K_k:
-                    # Cycle D-pad mapping for Joy-Con L if directions wrong
-                    import game.settings as settings_module
-                    # Rotate mapping 90 degrees: UP->RIGHT->DOWN->LEFT->UP
                     old_map = settings_module.JOYCON_L_DPAD_MAP.copy()
-                    # Simple rotation: each dir moves to next
                     rotation = {'UP':'RIGHT','RIGHT':'DOWN','DOWN':'LEFT','LEFT':'UP'}
                     new_map = {}
                     for btn, dir in old_map.items():
                         new_map[btn] = rotation.get(dir, dir)
                     settings_module.JOYCON_L_DPAD_MAP = new_map
                     print(f"Joy-Con L D-pad map rotated: {new_map} - test UP/DOWN/LEFT/RIGHT again")
+                elif event.key == pygame.K_k and is_ctrl:
+                    # Ctrl+K to kick Lida
+                    if self.network_host:
+                        was = self.network_host.disconnect_client()
+                        if was:
+                            print("[Network] Kicked Lida (P2) via Ctrl+K - now you can start 1P Chad solo")
+                            _trace_log("NETWORK", "Host kicked Lida via Ctrl+K", level="WARN")
+                            try:
+                                _log_gameplay("REMOTE_KICK", data={"by": "Ctrl+K"})
+                            except:
+                                pass
+                        else:
+                            print("[Network] No remote Lida to kick")
+
+                if event.key == pygame.K_l and is_ctrl:
+                    # Ctrl+L to kick Lida (alternative to Ctrl+K)
+                    if self.network_host:
+                        was = self.network_host.disconnect_client()
+                        if was:
+                            print("[Network] Kicked Lida (P2) via Ctrl+L - now you can start 1P Chad solo")
+                            _trace_log("NETWORK", "Host kicked Lida via Ctrl+L", level="WARN")
+                        else:
+                            print("[Network] No remote Lida to kick via Ctrl+L")
+
+                if event.key == pygame.K_n:
+                    # N to toggle / disconnect remote P2 for solo play - allows 1P restart even if Lida client still running
+                    if self.network_host:
+                        if self.network_host.is_client_connected():
+                            was = self.network_host.disconnect_client()
+                            print(f"[Network] Kicked Lida (P2) via N - solo mode enabled. Host still at {self.network_host_ip}:9999 - You can now restart 1P Chad solo")
+                            _trace_log("NETWORK", "Host kicked Lida via N key", level="WARN")
+                            try:
+                                _log_gameplay("REMOTE_KICK", data={"by": "N"})
+                            except:
+                                pass
+                        else:
+                            print(f"[Network] Remote Lida not connected. Host IP {self.network_host_ip}:9999 - Use L to share life, Ctrl+K/N to kick, 1/2 to join")
+                    _trace_log("NETWORK", f"N pressed, connected={self.network_host.is_client_connected() if self.network_host else False}")
+
+                if event.key == pygame.K_i:
+                    import game.settings as settings_module
+                    settings_module.JOYCON_R_INVERT_Y = not getattr(settings_module, 'JOYCON_R_INVERT_Y', True)
+                    print(f"RIGHT Joy-Con Invert Y toggled: R {settings_module.JOYCON_R_INVERT_Y}")
+                if event.key == pygame.K_u:
+                    import game.settings as settings_module
+                    settings_module.JOYCON_R_INVERT_X = not getattr(settings_module, 'JOYCON_R_INVERT_X', True)
+                    print(f"RIGHT Joy-Con Invert X toggled: R {settings_module.JOYCON_R_INVERT_X}")
+                if event.key == pygame.K_o:
+                    import game.settings as settings_module
+                    settings_module.JOYCON_R_SWAP = not getattr(settings_module, 'JOYCON_R_SWAP', True)
+                    print(f"RIGHT Joy-Con Swap toggled: R {settings_module.JOYCON_R_SWAP}")
+
                 if event.key == pygame.K_1:
                     # P1 start/join
                     if self.state in ('gameover', 'stage_clear') and not self.gameover_won:
@@ -2139,18 +2189,25 @@ class Game:
                     pass
                 self.handle_events()
 
-                # LAN Remote P2 auto-join from menu - if remote client connected while in menu, auto-start 2P
+                # LAN Remote P2 auto-join from menu - FIXED: don't force 2P when host wants 1P (Chad solo)
+                # Previously auto-started 2P even if Lida was connected and host wanted 1P, causing "cannot restart 1P"
+                # Now: only auto-start 2P if menu_selected == 1 (CHAD & LIDA card) and client connected
+                # If host selected CHAD solo (0), don't auto-start - allow 1P restart even with Lida connected
+                # Also add manual kick via K key and toggle via N key (see handle_events)
                 if self.state == 'menu' and self.network_host and self.network_host.is_client_connected():
-                    # If menu is in main mode and 1P is selected or no game yet, auto-start 2P with original maps
-                    if self.menu_mode == 'main':
-                        _trace_log("NETWORK", f"Remote P2 detected in menu -> auto-starting 2P! state={self.state} mode={self.menu_mode}", with_stack=True)
-                        print("[Network] Remote P2 detected in menu - auto-starting 2P with original NES maps!")
+                    if self.menu_mode == 'main' and self.menu_selected == 1:
+                        # Host has selected 2P card and Lida is connected -> auto-start 2P
+                        _trace_log("NETWORK", f"Remote Lida detected + 2P selected -> auto-starting 2P! state={self.state} mode={self.menu_mode} selected={self.menu_selected}", with_stack=True)
+                        print("[Network] Remote Lida detected + CHAD & LIDA selected -> auto-starting 2P!")
                         self.num_players = 2
                         self.current_level = 0
                         self.init_level(self.current_level, 2)
-                        # Reset boss flags for new game
                         self.boss_released = False
                         self.boss_enemy = None
+                    elif self.menu_mode == 'main' and self.menu_selected == 0:
+                        # Host selected CHAD solo but Lida connected - show hint but DON'T auto-start
+                        # This allows 1P restart even with Lida connected
+                        pass
 
                 if self.state == 'playing':
                     try:
