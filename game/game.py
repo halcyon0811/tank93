@@ -802,9 +802,20 @@ class Game:
         players_list = self.players
         for e in self.enemies:
             if self.freeze_timer > 0:
-                # frozen, don't move but still update timers
-                e.invulnerable_timer = max(e.invulnerable_timer, 1)
-                e.cooldown = max(e.cooldown, 1)
+                # frozen: don't move/shoot, but remain attackable (fix bug where freeze made enemies invincible)
+                # Previously set invulnerable_timer=1 which made them unattackable during freeze - removed
+                # Update timers manually (since we skip update_ai which would call super().update)
+                if e.cooldown > 0:
+                    e.cooldown -= 1
+                if e.invulnerable_timer > 0:
+                    e.invulnerable_timer -= 1
+                if e.spawn_protection > 0:
+                    e.spawn_protection -= 1
+                e.cooldown = max(e.cooldown, 1)  # prevent shooting while frozen
+                e.flash_timer += 1
+                # Clean own bullets list
+                e.bullets = [b for b in e.bullets if b.alive]
+                # Still vulnerable - do NOT set invulnerable_timer
                 continue
             e.update_ai(self.tilemap, players_list, self.enemies, self.bullets, self.base)
 
