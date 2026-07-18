@@ -665,16 +665,9 @@ class PlayerTank(Tank):
         else:
             if self.rapid_timer != -1:
                 self.rapid_active = False
-        # Shrink - 15s temp
-        if self.shrink_timer > 0:
-            self.shrink_timer -= 1
-            if self.shrink_timer <= 0:
-                self.shrink_timer = 0
-        # Giant - 15s
-        if self.giant_timer > 0:
-            self.giant_timer -= 1
-            if self.giant_timer <= 0:
-                self.giant_timer = 0
+        # Shrink/Giant timers are handled by parent Tank.update_size_state() - do NOT duplicate here
+        # Previously this duplicated decrement caused double-speed timer and left is_giant=True with timer=0 -> cannot crush walls
+        # Parent handles shrink_timer and giant_timer correctly with scale and is_giant flag
 
         # clean bullets
         self.bullets = [b for b in self.bullets if b.alive]
@@ -773,6 +766,11 @@ class PlayerTank(Tank):
             self.shrink_timer = POWERUP_DURATION.get('shrink', 15*FPS)
             self.giant_timer = 0
             self.is_giant = False
+            # Instant activation for shrink - fix delay bug
+            self.is_shrunk = True
+            self.current_scale = SHRINK_SCALE
+            self.speed = self.base_speed * SHRINK_SPEED_MULT
+            self._update_rect_size()
             self.score += 150
             self.add_armor(10)
             self.update_bullet_power()
@@ -780,9 +778,21 @@ class PlayerTank(Tank):
             self.giant_timer = GIANT_DURATION
             self.shrink_timer = 0
             self.is_shrunk = False
+            # Instant activation for giant - fix 1-frame delay bug where cannot crush walls immediately
+            # Previously is_giant flag was only set on next update() via update_size_state, so first move after pickup failed to crush
+            self.is_giant = True
+            self.current_scale = GIANT_SCALE
+            self.speed = self.base_speed * 2.0
+            self._update_rect_size()
             self.score += 300
             self.add_armor(40)
             self.update_bullet_power()
+            # Log giant activation
+            try:
+                from ..logger_integration import safe_log_gameplay
+                safe_log_gameplay("POWERUP_GIANT_ACTIVATE", data={"player_id": self.player_id, "timer": self.giant_timer, "x": getattr(self, 'x', 0), "y": getattr(self, 'y', 0)})
+            except:
+                pass
         # grenade, clock handled by game
         elif type_name == 'armor':
             # New armor powerup if added
