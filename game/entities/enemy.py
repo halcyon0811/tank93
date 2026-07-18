@@ -123,9 +123,9 @@ class EnemyTank(Tank):
             self.score_value = 400
             self.shoot_chance = 0.020
         elif enemy_type in ('boss', 'monster_boss', 'monster'):
-            # Monster boss - enforced: 1.5x player tank speed, venom shooting
-            self.speed = TANK_SPEED['player'] * MONSTER_SPEED_MULT  # 1.5x player = 3.3
-            self.health = 18  # tougher boss now
+            # Monster boss - slowed to normal enemy speed per user request (was 1.5x player = 3.3, now 1.2 same as basic)
+            self.speed = TANK_SPEED['enemy']  # same as normal enemy (1.2) - slowed down
+            self.health = 18  # tougher boss still
             self.bullet_power = 2
             self.score_value = 3500
             self.shoot_chance = 0.12  # shoots more, mix of normal + venom
@@ -150,6 +150,10 @@ class EnemyTank(Tank):
             self.spawn_protection = 60
             self.invulnerable_timer = 60
         self.powerup_carrier = random.random() < 0.25
+        # Item abilities that can be randomly assigned when boss is released
+        self.homing_active = False
+        self.spread_active = False
+        self.rapid_active = False
 
         self.state = 'wander'
         self.target_dir_timer = 0
@@ -311,7 +315,10 @@ class EnemyTank(Tank):
                 if random.random() < 0.7 and self.can_shoot():
                     new_b = self.shoot()
                     if new_b:
-                        bullets_list.append(new_b)
+                        if isinstance(new_b, list):
+                            bullets_list.extend(new_b)
+                        else:
+                            bullets_list.append(new_b)
                         self.base_attack_cooldown = 20
             perp = {'UP': ['LEFT','RIGHT'], 'DOWN': ['LEFT','RIGHT'], 'LEFT': ['UP','DOWN'], 'RIGHT': ['UP','DOWN']}
             for pd in perp.get(self.direction, []):
@@ -328,7 +335,10 @@ class EnemyTank(Tank):
                     if self.can_shoot():
                         nb = self.shoot()
                         if nb:
-                            bullets_list.append(nb)
+                            if isinstance(nb, list):
+                                bullets_list.extend(nb)
+                            else:
+                                bullets_list.append(nb)
 
         new_bullet = None
         aligned_target = None
@@ -369,16 +379,25 @@ class EnemyTank(Tank):
             if getattr(self, 'is_boss', False) and random.random() < 0.5:
                 vb = self.shoot_venom(players)
                 if vb:
-                    bullets_list.append(vb)
+                    if isinstance(vb, list):
+                        bullets_list.extend(vb)
+                    else:
+                        bullets_list.append(vb)
                     new_bullet = vb
                 else:
                     new_bullet = self.shoot()
                     if new_bullet:
-                        bullets_list.append(new_bullet)
+                        if isinstance(new_bullet, list):
+                            bullets_list.extend(new_bullet)
+                        else:
+                            bullets_list.append(new_bullet)
             else:
                 new_bullet = self.shoot()
                 if new_bullet:
-                    bullets_list.append(new_bullet)
+                    if isinstance(new_bullet, list):
+                        bullets_list.extend(new_bullet)
+                    else:
+                        bullets_list.append(new_bullet)
             if is_base:
                 self.base_attack_cooldown = 30
         else:
@@ -387,7 +406,10 @@ class EnemyTank(Tank):
                 if random.random() < getattr(self, 'venom_shoot_chance', 0.04):
                     vb = self.shoot_venom(players)
                     if vb:
-                        bullets_list.append(vb)
+                        if isinstance(vb, list):
+                            bullets_list.extend(vb)
+                        else:
+                            bullets_list.append(vb)
                         new_bullet = vb
 
         super().update(tilemap, other_tanks + players)
@@ -548,6 +570,45 @@ class EnemyTank(Tank):
     def shoot(self, venom=False):
         if not self.can_shoot() and not venom:
             return None
+
+        # Handle spread - fire 8 directions at once (if item assigned)
+        if getattr(self, 'spread_active', False):
+            bullets = []
+            # Use EIGHT_DIRS if available, else cardinal + diagonal
+            try:
+                from ..settings import EIGHT_DIRS
+            except:
+                EIGHT_DIRS = ['UP','UP_RIGHT','RIGHT','DOWN_RIGHT','DOWN','DOWN_LEFT','LEFT','UP_LEFT']
+            for d in EIGHT_DIRS:
+                sx, sy = self.get_bullet_spawn_for(d) if hasattr(self, 'get_bullet_spawn_for') else self.get_bullet_spawn()
+                # For spread, use that direction's spawn
+                if hasattr(self, 'get_bullet_spawn_for'):
+                    sx, sy = self.get_bullet_spawn_for(d)
+                # Homing spread?
+                is_homing = getattr(self, 'homing_active', False)
+                b = Bullet(sx, sy, d, 'enemy', power=self.bullet_power, color=(255, 100, 100), homing=is_homing)
+                # Rapid: slightly faster bullet
+                if getattr(self, 'rapid_active', False):
+                    b.speed *= 1.2
+                self.bullets.append(b)
+                bullets.append(b)
+            # Cooldown for spread - longer, but rapid reduces
+            base_cd = 40
+            if getattr(self, 'rapid_active', False):
+                base_cd = max(10, base_cd // 2)
+            if self.enemy_type == 'fast':
+                self.cooldown = random.randint(30, 60)
+            elif getattr(self, 'is_boss', False):
+                self.cooldown = random.randint(35, 70)
+            else:
+                self.cooldown = random.randint(base_cd, base_cd+30)
+            try:
+                from ..sound_manager import sound_manager
+                sound_manager.play_shoot()
+            except:
+                pass
+            return bullets  # return list for spread
+
         sx, sy = self.get_bullet_spawn()
         if venom or (getattr(self, 'is_boss', False) and random.random() < 0.45):
             # venom shot from boss
@@ -563,19 +624,42 @@ class EnemyTank(Tank):
             except:
                 pass
             return b
-        b = Bullet(sx, sy, self.direction, 'enemy', power=self.bullet_power, color=(255, 100, 100))
+
+        # Normal / homing / rapid single shot
+        is_homing = getattr(self, 'homing_active', False)
+        b = Bullet(sx, sy, self.direction, 'enemy', power=self.bullet_power, color=(255, 100, 100), homing=is_homing)
+        if getattr(self, 'rapid_active', False):
+            b.speed *= 1.2
         self.bullets.append(b)
-        if self.enemy_type == 'fast':
-            self.cooldown = random.randint(30, 70)
-        elif self.enemy_type == 'power':
-            self.cooldown = random.randint(25, 60)
-        elif getattr(self, 'is_boss', False):
-            self.cooldown = random.randint(30, 60)
+
+        # Cooldown handling - rapid reduces cooldown for 3x attack feel
+        if getattr(self, 'rapid_active', False):
+            # Rapid: much faster shooting
+            if self.enemy_type == 'fast':
+                self.cooldown = random.randint(12, 28)
+            elif getattr(self, 'is_boss', False):
+                self.cooldown = random.randint(15, 35)
+            else:
+                self.cooldown = random.randint(15, 40)
         else:
-            self.cooldown = random.randint(40, 95)
+            if self.enemy_type == 'fast':
+                self.cooldown = random.randint(30, 70)
+            elif self.enemy_type == 'power':
+                self.cooldown = random.randint(25, 60)
+            elif getattr(self, 'is_boss', False):
+                self.cooldown = random.randint(30, 60)
+            else:
+                self.cooldown = random.randint(40, 95)
+
         try:
             from ..sound_manager import sound_manager
-            sound_manager.play_shoot()
+            # Use appropriate sound type
+            if is_homing:
+                sound_manager.play_shoot('homing')
+            elif getattr(self, 'rapid_active', False):
+                sound_manager.play_shoot('rapid')
+            else:
+                sound_manager.play_shoot()
         except:
             pass
         return b

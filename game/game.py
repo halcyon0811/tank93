@@ -603,6 +603,44 @@ class Game:
         # Also break base walls to show release
         self.tilemap.clear_area(bx-1, by-1, 4, 4)
 
+        # === NEW: After boss gets out, randomly assign items to current enemies ====
+        # User request: "after boss gets out, randomly assign items to current enemy"
+        # We assign random powerup carrier status and/or combat abilities (homing, spread, rapid)
+        # to existing enemies on field to make fight more chaotic and rewarding
+        try:
+            import random
+            # Count current enemies excluding boss
+            other_enemies = [e for e in self.enemies if e is not boss and e.alive]
+            if other_enemies:
+                print(f"[BOSS] Assigning random items to {len(other_enemies)} current enemies!")
+                item_pool_ability = ['homing', 'spread', 'rapid']
+                for en in other_enemies:
+                    if random.random() < 0.6:  # 60% chance to get an item
+                        # 50% become powerup carrier (will drop random powerup when killed)
+                        if random.random() < 0.5:
+                            en.powerup_carrier = True
+                            print(f"  -> Enemy at {en.grid_x},{en.grid_y} now carrier (will drop item)")
+                        # 40% gain combat ability
+                        if random.random() < 0.4:
+                            chosen = random.choice(item_pool_ability)
+                            if chosen == 'homing':
+                                en.homing_active = True
+                                print(f"  -> Enemy at {en.grid_x},{en.grid_y} got HOMING ability!")
+                            elif chosen == 'spread':
+                                en.spread_active = True
+                                print(f"  -> Enemy at {en.grid_x},{en.grid_y} got SPREAD (8-way) ability!")
+                            elif chosen == 'rapid':
+                                en.rapid_active = True
+                                en.shoot_chance *= 2.5
+                                en.cooldown = max(0, en.cooldown - 20)
+                                print(f"  -> Enemy at {en.grid_x},{en.grid_y} got RAPID x3 ability!")
+                        # Visual feedback - small explosion for item assign
+                        self.particles.add_explosion(en.rect.centerx, en.rect.centery, (100, 200, 255), 10)
+        except Exception as e:
+            print(f"[BOSS] Item assign failed: {e}")
+            import traceback
+            traceback.print_exc()
+
     def rescan_joysticks(self):
         """Rescan for Joy-Cons, call when user presses J or connects controller
            Fixed for 2P sync bug: sort so Joy-Con (L) = P1, (R) = P2 consistently"""

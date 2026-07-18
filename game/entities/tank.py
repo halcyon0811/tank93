@@ -106,6 +106,18 @@ class Tank:
         dx, dy = DIRS.get(self.direction, (0, -1))
         return cx + dx * offset, cy + dy * offset
 
+    def get_bullet_spawn_for(self, dir_name):
+        """Get spawn position for arbitrary direction (for 8-way firing)"""
+        cx, cy = self.rect.center
+        scale = getattr(self, 'current_scale', 1.0)
+        offset = int((TANK_SIZE//2 + 4) * scale)
+        dx, dy = DIRS.get(dir_name, (0, -1))
+        # Normalize diagonal
+        if dx != 0 and dy != 0:
+            dx *= 0.7071
+            dy *= 0.7071
+        return cx + dx * offset, cy + dy * offset
+
     def can_shoot(self):
         if self.cooldown > 0:
             return False
