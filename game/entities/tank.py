@@ -78,8 +78,45 @@ class Tank:
         self.track_offset = 0
 
     def update_size_state(self):
-        # Handle shrink/giant timers
-        if self.shrink_timer > 0:
+        # Handle shrink/giant timers with synergy: small+giant = normal size, fast speed, crush bricks
+        # This implements user request: small + giant can have normal size tank but run over bricks and speed like small one
+        if self.shrink_timer > 0 and self.giant_timer > 0:
+            # Synergy: both active
+            self.shrink_timer -= 1
+            self.giant_timer -= 1
+            self.is_shrunk = True
+            self.is_giant = True
+            self.current_scale = 1.0  # normal size
+            self.speed = self.base_speed * SHRINK_SPEED_MULT  # fast like small
+            # Handle expiry
+            if self.shrink_timer == 0:
+                self.is_shrunk = False
+                # If giant still active, go to giant only
+                if self.giant_timer > 0:
+                    self.current_scale = GIANT_SCALE
+                    self.speed = self.base_speed  # giant solo speed base
+                else:
+                    self.current_scale = 1.0
+                    self.speed = self.base_speed
+                self._update_rect_size()
+            if self.giant_timer == 0:
+                self.is_giant = False
+                # If shrink still active, go to shrink only
+                if self.shrink_timer > 0:
+                    self.current_scale = SHRINK_SCALE
+                    self.speed = self.base_speed * SHRINK_SPEED_MULT
+                else:
+                    self.current_scale = 1.0
+                    self.speed = self.base_speed
+                self._update_rect_size()
+            # Log synergy
+            try:
+                if self.shrink_timer % 60 == 0 or self.giant_timer % 60 == 0:
+                    from .logger_integration import safe_log_gameplay
+                    safe_log_gameplay("SYNERGY_SMALL_GIANT", data={"shrink": self.shrink_timer, "giant": self.giant_timer, "scale": self.current_scale, "speed": self.speed})
+            except:
+                pass
+        elif self.shrink_timer > 0:
             self.shrink_timer -= 1
             self.is_shrunk = True
             self.current_scale = SHRINK_SCALE
@@ -89,7 +126,7 @@ class Tank:
                 self.current_scale = 1.0 if not self.is_giant else GIANT_SCALE
                 self.speed = self.base_speed * (2.0 if self.is_giant else 1.0)
                 self._update_rect_size()
-        if self.giant_timer > 0:
+        elif self.giant_timer > 0:
             self.giant_timer -= 1
             self.is_giant = True
             self.current_scale = GIANT_SCALE
@@ -342,7 +379,10 @@ class Tank:
             # Armor absorbs bullet, with flash feedback
             damage_to_armor = power * 25  # each bullet does 25 armor damage base
             # Different bullet types do different armor damage
-            if bullet_type == 'power' or power >= 2:
+            # Synergy bullets (power_homing etc) do much more damage
+            if bullet_type in ('power_homing', 'power_homing_spread', 'power_spread', 'power_rapid', 'power_spread_rapid'):
+                damage_to_armor *= 2.5  # powerful missile synergy = much more armor damage
+            elif bullet_type == 'power' or power >= 2:
                 damage_to_armor *= 1.5
             elif bullet_type == 'homing':
                 damage_to_armor *= 0.8  # homing weaker vs armor (3-4 hits for bricks, less armor damage)

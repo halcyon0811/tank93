@@ -338,14 +338,58 @@ class HUD:
         top_surf = self.font_small.render(top_text, True, (180,180,200))
         screen.blit(top_surf, (PLAYFIELD_X, PLAYFIELD_Y-28))
 
-    def draw_pause(self, screen):
+    def draw_pause(self, screen, game=None):
         overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
-        overlay.fill((0,0,0,120))
+        overlay.fill((0,0,0,160))
         screen.blit(overlay, (0,0))
-        txt = self.font_huge.render("PAUSED", True, COLOR_WHITE)
-        screen.blit(txt, txt.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//2 - 20)))
-        sub = self.font_mid.render("Press P to resume", True, (180,180,200))
-        screen.blit(sub, sub.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//2 + 30)))
+        # Title
+        txt = self.font_huge.render("PAUSED", True, COLOR_YELLOW)
+        screen.blit(txt, txt.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//2 - 100)))
+        # Subtitle robust instructions
+        sub = self.font_mid.render("Press P / ESC / ENTER / SPACE / Joy A/B/Plus to resume", True, (200,200,220))
+        screen.blit(sub, sub.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//2 - 60)))
+        
+        # If game provided, show Chad/Lida stats
+        y = SCREEN_HEIGHT//2 - 20
+        if game and hasattr(game, 'players'):
+            for idx, p in enumerate(game.players):
+                try:
+                    from ..settings import PLAYER_NAMES, get_player_display_name
+                    dname = get_player_display_name(p.player_id) if hasattr(p, 'player_id') else PLAYER_NAMES[idx]
+                except:
+                    dname = ["Chad", "Lida"][idx] if idx < 2 else f"P{idx+1}"
+                color = PLAYER_COLORS[idx] if idx < len(PLAYER_COLORS) else COLOR_WHITE
+                info = f"{dname}: Lives x{p.lives} | Score {p.score} | Armor {int(getattr(p, 'armor', 0))} | Power {'★'*p.star_level}"
+                surf = self.font_mid.render(info, True, color)
+                screen.blit(surf, surf.get_rect(center=(SCREEN_WIDTH//2, y)))
+                y += 28
+                # Show active items
+                active = []
+                if getattr(p, 'homing_active', False):
+                    active.append("HOMING")
+                if getattr(p, 'spread_active', False):
+                    active.append("SPREAD")
+                if getattr(p, 'rapid_active', False):
+                    active.append("RAPIDx3")
+                if getattr(p, 'is_giant', False):
+                    active.append("GIANT")
+                if getattr(p, 'is_shrunk', False):
+                    active.append("MINI")
+                if getattr(p, 'venom_timer', 0) > 0:
+                    active.append(f"VENOM {p.venom_timer//FPS}s")
+                if active:
+                    act_surf = self.font_small.render(f"  Items: {', '.join(active)}", True, (180,220,255))
+                    screen.blit(act_surf, act_surf.get_rect(center=(SCREEN_WIDTH//2, y)))
+                    y += 20
+                y += 8
+        
+        # Life sharing hint for 2P
+        y += 10
+        hint = self.font_mid.render("Chad & Lida - 2P Life Sharing: Press L to give life (if you have more)", True, (100,255,150))
+        screen.blit(hint, hint.get_rect(center=(SCREEN_WIDTH//2, y)))
+        y += 30
+        hint2 = self.font_small.render(f"Stage {game.current_level+1 if game else '?'} | Enemies {game.enemies_total - game.enemies_killed if game else '?'} left | Coins {game.coins if game else '?'}", True, (150,150,180))
+        screen.blit(hint2, hint2.get_rect(center=(SCREEN_WIDTH//2, y)))
 
     def draw_menu(self, screen, selected, mode='main'):
         try:

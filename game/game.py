@@ -609,6 +609,80 @@ class Game:
         # If player doesn't exist, create him (costs a coin = 10 lives)
         return self.insert_coin(player_id)
 
+    def share_life(self, from_player_id=None):
+        """Chad/Lida life sharing: one player gives 1 life to other if has more lives left.
+           If from_player_id specified, that player gives. Else richer gives to poorer.
+           Returns True if shared, False otherwise.
+        """
+        if len(self.players) < 2:
+            _trace_log("LIFE_SHARE", "Cannot share - only 1 player", level="WARN")
+            return False
+        
+        # Find Chad (1) and Lida (2)
+        chad = next((p for p in self.players if p.player_id == 1), None)
+        lida = next((p for p in self.players if p.player_id == 2), None)
+        if not chad or not lida:
+            return False
+
+        giver = None
+        receiver = None
+
+        if from_player_id == 1:
+            giver = chad
+            receiver = lida
+        elif from_player_id == 2:
+            giver = lida
+            receiver = chad
+        else:
+            # Auto: richer gives to poorer if difference >=2 or receiver dead
+            if chad.lives > lida.lives and chad.lives >= 2:
+                # Chad richer, or Lida dead needs life
+                if lida.lives < 0 or chad.lives > lida.lives + 1:
+                    giver = chad
+                    receiver = lida
+            elif lida.lives > chad.lives and lida.lives >= 2:
+                if chad.lives < 0 or lida.lives > chad.lives + 1:
+                    giver = lida
+                    receiver = chad
+
+        if not giver or not receiver:
+            _trace_log("LIFE_SHARE", f"No sharing possible Chad lives={chad.lives} Lida lives={lida.lives}", level="INFO")
+            return False
+
+        if giver.lives <= 1 and giver.alive:
+            # Don't give away last life if alive (would kill self)
+            _trace_log("LIFE_SHARE", f"{getattr(giver, 'player_id', '?')} has only {giver.lives} lives, cannot give", level="WARN")
+            return False
+
+        # Transfer 1 life
+        giver.lives -= 1
+        # If receiver was dead with lives<0, bring to 0 then add?
+        if receiver.lives < 0:
+            receiver.lives = 0
+        else:
+            receiver.lives += 1
+
+        # If receiver dead, try respawn
+        if not receiver.alive and receiver.lives >= 0:
+            gx, gy = PLAYER_SPAWN[receiver.player_id-1]
+            if self.tilemap:
+                self.tilemap.clear_area(gx-1, gy-1, 4, 4)
+            receiver.respawn(gx, gy)
+            self.particles.add_spawn(receiver.rect.centerx, receiver.rect.centery)
+            self.particles.add_explosion(receiver.rect.centerx, receiver.rect.centery, (100,255,100), 20)
+
+        # Visual feedback
+        self.particles.add_explosion(giver.rect.centerx, giver.rect.centery, (100,255,100), 10)
+        self.particles.add_explosion(receiver.rect.centerx, receiver.rect.centery, (100,255,100), 15)
+
+        _trace_log("LIFE_SHARE", f"Life shared: {getattr(giver, 'player_id', '?')} -> {getattr(receiver, 'player_id', '?')} | Chad {chad.lives} Lida {lida.lives}", level="INFO")
+        try:
+            _log_gameplay("LIFE_SHARE", level_idx=self.current_level, data={"from": giver.player_id, "to": receiver.player_id, "chad_lives": chad.lives, "lida_lives": lida.lives})
+        except:
+            pass
+        print(f"[Life Share] {['Chad','Lida'][giver.player_id-1]} gave 1 life to {['Chad','Lida'][receiver.player_id-1]}! Chad={chad.lives} Lida={lida.lives}")
+        return True
+
     def spawn_enemy(self):
         if self.enemies_spawned >= self.enemies_total:
             return
@@ -955,11 +1029,20 @@ class Game:
                             if joy_player_id and (len(self.players) < joy_player_id or not any(p.player_id==joy_player_id for p in self.players)):
                                 _trace_log("JOY_BTN", f"Playing btn 7 -> P2 join {joy_player_id}")
                                 self.player_join(joy_player_id)
-                    elif self.state == 'paused' and event.button in (0, 9):
-                        _trace_log("JOY_BTN", f"Paused btn {event.button} -> playing")
+                        elif event.button in (2, 3): # X/Y for life sharing Chad/Lida
+                            _trace_log("JOY_BTN", f"Playing btn {event.button} -> life share attempt from player {joy_player_id}")
+                            if len(self.players) >= 2:
+                                self.share_life(from_player_id=joy_player_id)
+                    elif self.state == 'paused' and event.button in (0, 1, 6, 7, 8, 9):
+                        # Robust pause resume: A,B,Plus,Minus,Start,Select all resume (Chad/Lida friendly)
+                        _trace_log("JOY_BTN", f"Paused btn {event.button} -> playing (robust)")
                         old = self.state
                         self.state = 'playing'
-                        _trace_state_change(old, 'playing', f"JOY resume btn {event.button}")
+                        _trace_state_change(old, 'playing', f"JOY resume btn {event.button} robust")
+                        try:
+                            _log_gameplay("PAUSE", level_idx=self.current_level, data={"action": "resume", "by": f"joy btn {event.button}"})
+                        except:
+                            pass
                 except Exception as e:
                     # Don't crash on joystick quirks
                     pass
@@ -972,6 +1055,12 @@ class Game:
                         self.handle_menu_select()
                     else:
                         print(f"Ignoring early mouse click at frame {self.menu_stuck_timer}")
+                elif self.state == 'paused' and event.type == pygame.MOUSEBUTTONDOWN:
+                    # Robust pause: mouse click also resumes
+                    _trace_log("INPUT", f"Mouse click in PAUSED -> resume", level="INFO")
+                    old = self.state
+                    self.state = 'playing'
+                    _trace_state_change(old, 'playing', "MOUSE resume from pause")
 
             if event.type == pygame.JOYHATMOTION:
                 try:
@@ -1070,6 +1159,18 @@ class Game:
                     if event.key == pygame.K_5:
                         print(f"Coin inserted! Total: {self.coins+1} (+{COIN_LIVES} lives)")
                     self.insert_coin()
+                # Life sharing: L key for Chad/Lida (2P mode, richer gives to poorer)
+                if event.key == pygame.K_l:
+                    if self.state in ('playing', 'paused'):
+                        success = self.share_life()
+                        if not success:
+                            print(f"[Life Share] No sharing possible - Chad lives={[p.lives for p in self.players if p.player_id==1][0] if len([p for p in self.players if p.player_id==1])>0 else 'N/A'} Lida lives={[p.lives for p in self.players if p.player_id==2][0] if len([p for p in self.players if p.player_id==2])>0 else 'N/A'}")
+                        _trace_log("INPUT", f"L pressed -> life share attempt success={success}", level="INFO")
+                        try:
+                            _log_input("LIFE_SHARE_ATTEMPT", device="keyboard", code="L", value=1, mapped_action=f"success={success}")
+                        except:
+                            pass
+
                 if event.key == pygame.K_j:
                     print("Rescanning joysticks (J pressed)...")
                     self.rescan_joysticks()
@@ -1214,6 +1315,10 @@ class Game:
                         old = self.state
                         self.state = 'paused'
                         _trace_state_change(old, 'paused', 'KEY P pressed')
+                        try:
+                            _log_gameplay("PAUSE", level_idx=self.current_level, data={"action": "pause", "by": "keyboard P"})
+                        except:
+                            pass
                         if snd_mgr:
                             snd_mgr.play('pause')
                     elif event.key == pygame.K_m:
@@ -1233,13 +1338,28 @@ class Game:
                         if snd_mgr:
                             snd_mgr.stop_bgm()
                 elif self.state == 'paused':
-                    if event.key == pygame.K_p or event.key == pygame.K_ESCAPE:
-                        _trace_log("KEY", f"ESC/P in PAUSED -> playing key={event.key} mods={mods}")
+                    # Robust pause: P, ESC, SPACE, ENTER, RETURN all resume (except fullscreen ESC handled earlier)
+                    if event.key in (pygame.K_p, pygame.K_ESCAPE, pygame.K_SPACE, pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_c):
+                        # C also resumes? No, C is coin, but allow resume via any action key
+                        # Actually allow P, ESC, SPACE, ENTER to resume - more robust for Chad/Lida
+                        _trace_log("KEY", f"ESC/P/SPACE/ENTER in PAUSED -> playing key={event.key} mods={mods}")
                         old = self.state
                         self.state = 'playing'
-                        _trace_state_change(old, 'playing', f"KEY {event.key} in paused")
+                        _trace_state_change(old, 'playing', f"KEY {event.key} in paused -> resume")
+                        try:
+                            _log_gameplay("PAUSE", level_idx=self.current_level, data={"action": "resume", "by": f"key {event.key}"})
+                        except:
+                            pass
                         if snd_mgr:
                             snd_mgr.play('pause')
+                    elif event.key in (pygame.K_1, pygame.K_2):
+                        # Allow life sharing while paused via 1/2 keys (Chad/Lida)
+                        # This will be handled in life sharing logic below, but also resume? No, just handle sharing
+                        try:
+                            # Life sharing attempted while paused - handled globally
+                            pass
+                        except:
+                            pass
                 elif self.state in ('gameover', 'stage_clear'):
                     if event.key == pygame.K_RETURN:
                         if self.gameover_won:
@@ -1547,11 +1667,107 @@ class Game:
             if not pu.alive:
                 self.powerups.remove(pu)
 
-        # venom particles for affected players
+        # venom particles for affected players + spillover damage to nearby tanks
         for p in self.players:
             if p.alive and getattr(p, 'venom_timer', 0) > 0:
                 if random.random() < 0.4 + getattr(p, 'venom_level', 0)*0.6:
                     self.particles.add_venom(p.rect.centerx + random.randint(-10,10), p.rect.centery + random.randint(-10,10))
+
+                # Venom spillover: infected Chad/Lida damages nearby tanks (enemies and any tanks)
+                if VENOM_SPILLOVER_ENABLED and (p.venom_timer % VENOM_SPILLOVER_INTERVAL == 0):
+                    # Find nearby tanks within radius
+                    spillover_radius = VENOM_SPILLOVER_RADIUS
+                    infected_x, infected_y = p.rect.centerx, p.rect.centery
+                    
+                    # Damage nearby enemy tanks (including boss)
+                    for e in self.enemies[:]:
+                        if not e.alive or e is p:
+                            continue
+                        dist = math.hypot(e.x - infected_x, e.y - infected_y)
+                        if dist <= spillover_radius:
+                            # Check if enemy has protection?
+                            if getattr(e, 'invulnerable_timer', 0) > 0 or getattr(e, 'spawn_protection', 0) > 0:
+                                continue
+                            # Determine damage factor based on enemy type
+                            is_boss = getattr(e, 'is_boss', False)
+                            factor = VENOM_SPILLOVER_BOSS_DAMAGE_FACTOR if is_boss else VENOM_SPILLOVER_ENEMY_DAMAGE_FACTOR
+                            dmg_power = max(1, int(VENOM_SPILLOVER_DAMAGE * factor))
+                            # Apply damage via take_damage
+                            try:
+                                killed = e.take_damage(power=dmg_power, bullet_type='venom')
+                                if killed:
+                                    # Already handled in enemy death later, but add particles
+                                    self.particles.add_venom(e.rect.centerx, e.rect.centery)
+                                    self.particles.add_explosion(e.rect.centerx, e.rect.centery, (80, 200, 80), 12)
+                                    try:
+                                        _log_gameplay("VENOM_SPILL_KILL", level_idx=self.current_level, player_id=p.player_id, data={"victim_type": getattr(e, 'enemy_type', 'unknown'), "dist": dist, "x": e.x, "y": e.y, "infected_by": p.player_id})
+                                    except:
+                                        pass
+                                else:
+                                    # Just armor hit
+                                    self.particles.add_venom(e.rect.centerx + random.randint(-5,5), e.rect.centery + random.randint(-5,5))
+                                    try:
+                                        _log_gameplay("VENOM_SPILL_HIT", level_idx=self.current_level, player_id=p.player_id, data={"victim_type": getattr(e, 'enemy_type', 'unknown'), "dist": dist, "armor_left": getattr(e, 'armor', 0)})
+                                    except:
+                                        pass
+                            except Exception as ex:
+                                try:
+                                    _log_event("VENOM_SPILL", f"Error spilling venom to enemy {e}: {ex}", level="WARN")
+                                except:
+                                    pass
+                            # Visual venom connection line (optional particle)
+                            if random.random() < 0.5:
+                                mid_x = (infected_x + e.rect.centerx)//2
+                                mid_y = (infected_y + e.rect.centery)//2
+                                self.particles.add_venom(mid_x + random.randint(-3,3), mid_y + random.randint(-3,3))
+
+                    # Damage nearby other players (Chad infects Lida and vice versa) - spillover risk
+                    for other_p in self.players:
+                        if other_p is p or not other_p.alive:
+                            continue
+                        # Skip if other player has helmet protection
+                        if getattr(other_p, 'helmet_timer', 0) > 0 or getattr(other_p, 'invulnerable_timer', 0) > 0 or getattr(other_p, 'spawn_protection', 0) > 0:
+                            continue
+                        dist = math.hypot(other_p.x - infected_x, other_p.y - infected_y)
+                        if dist <= spillover_radius:
+                            # Apply reduced venom damage to other player (friendly fire spillover but dangerous)
+                            factor = VENOM_SPILLOVER_PLAYER_DAMAGE_FACTOR
+                            dmg_power = max(1, int(VENOM_SPILLOVER_DAMAGE * factor))
+                            try:
+                                # For players, venom timer is separate - if hit by spillover, apply venom infection?
+                                # User says "cause damage in proximity" - we can apply small armor damage + chance to infect
+                                # Apply armor damage via take_damage, and 20% chance to also infect with venom
+                                before_armor = getattr(other_p, 'armor', 0)
+                                # Use take_damage to reduce armor
+                                died = other_p.take_damage(power=dmg_power, bullet_type='venom')
+                                # 20% chance to also spread venom infection to other player
+                                if random.random() < 0.20 and getattr(other_p, 'venom_timer', 0) == 0:
+                                    other_p.venom_timer = VENOM_DISSOLVE_TIME // 2  # half duration for secondary infection
+                                    other_p.venom_level = 0.0
+                                    self.particles.add_venom(other_p.rect.centerx, other_p.rect.centery)
+                                    try:
+                                        _log_gameplay("VENOM_SPREAD_PLAYER", level_idx=self.current_level, player_id=other_p.player_id, data={"from": p.player_id, "dist": dist, "new_venom_timer": other_p.venom_timer})
+                                    except:
+                                        pass
+                                if died:
+                                    try:
+                                        _log_gameplay("VENOM_SPILL_KILL_PLAYER", level_idx=self.current_level, player_id=other_p.player_id, data={"from": p.player_id, "dist": dist})
+                                    except:
+                                        pass
+                                else:
+                                    try:
+                                        _log_gameplay("VENOM_SPILL_HIT_PLAYER", level_idx=self.current_level, player_id=other_p.player_id, data={"from": p.player_id, "dist": dist, "armor_before": before_armor, "armor_after": getattr(other_p, 'armor', 0)})
+                                    except:
+                                        pass
+                            except Exception as ex:
+                                try:
+                                    _log_event("VENOM_SPILL", f"Error spilling venom to player {other_p.player_id}: {ex}", level="WARN")
+                                except:
+                                    pass
+                            if random.random() < 0.7:
+                                mid_x = (infected_x + other_p.rect.centerx)//2
+                                mid_y = (infected_y + other_p.rect.centery)//2
+                                self.particles.add_venom(mid_x, mid_y)
 
         # particles
         self.particles.update()
@@ -1872,7 +2088,7 @@ class Game:
             self.hud.draw(canvas, self)
 
             if self.state == 'paused':
-                self.hud.draw_pause(canvas)
+                self.hud.draw_pause(canvas, self)
             elif self.state in ('gameover', 'stage_clear'):
                 total_score = sum(p.score for p in self.players)
                 self.hud.draw_game_over(canvas, self.gameover_won, total_score, self)

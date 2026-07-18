@@ -543,78 +543,158 @@ class PlayerTank(Tank):
             # Mix base color with rapid pink
             base_color = (min(255, base_color[0]+30), base_color[1], min(255, base_color[2]+30)) if isinstance(base_color, tuple) else base_color
 
-        # Determine bullet type for brick durability system
+        # Determine bullet type with synergy support
+        # Synergy: weapon enforcement (bullet_power>=2 / star_level>=3 / gun) + homing = powerful missile
+        # Small + giant already handled in update_size_state above
+        has_power = self.bullet_power >= 2 or self.star_level >= 3
+        has_homing = self.homing_active
+        has_spread = self.spread_active
+        has_rapid = self.rapid_active
+
         def get_bullet_type_for_player():
-            if self.homing_active and self.spread_active:
+            # Synergy takes precedence
+            if has_homing and has_power and has_spread:
+                return 'power_homing_spread'  # ultimate: 8 powerful homing missiles
+            elif has_homing and has_power:
+                return 'power_homing'  # powerful tracking missile
+            elif has_homing and has_spread:
+                return 'homing'  # 8 homing (not necessarily power)
+            elif has_homing:
                 return 'homing'
-            elif self.homing_active:
-                return 'homing'
-            elif self.spread_active and self.rapid_active:
+            elif has_spread and has_power and has_rapid:
+                return 'power_spread_rapid'
+            elif has_spread and has_power:
+                return 'power_spread'
+            elif has_spread and has_rapid:
                 return 'spread'
-            elif self.spread_active:
+            elif has_spread:
                 return 'spread'
-            elif self.rapid_active:
+            elif has_rapid and has_power:
+                return 'power_rapid'
+            elif has_rapid:
                 return 'rapid'
-            elif self.bullet_power >= 2:
+            elif has_power:
                 return 'power'
             else:
                 return 'normal'
 
+        # Power synergy bonuses
+        power_synergy = has_power and has_homing
+        if power_synergy:
+            # Log synergy activation occasionally (not every shot to avoid spam)
+            try:
+                if not hasattr(self, '_synergy_log_timer'):
+                    self._synergy_log_timer = 0
+                self._synergy_log_timer += 1
+                if self._synergy_log_timer % 60 == 0:
+                    from ..logger_integration import safe_log_gameplay
+                    safe_log_gameplay("SYNERGY_POWER_HOMING", data={"player_id": self.player_id, "bullet_power": self.bullet_power, "star_level": self.star_level, "homing": has_homing})
+            except:
+                pass
+
         if self.spread_active:
-            # Fire 8 directions at once
+            # Fire 8 directions at once - with synergy for power missiles
             for d in EIGHT_DIRS:
                 sx, sy = self.get_bullet_spawn_for(d)
                 is_homing = self.homing_active
-                col = (255, 140, 0) if is_homing else base_color
-                if self.rapid_active and not is_homing:
-                    col = (255, 100, 150) if col == self.color else col
+                # Color synergy: power+homing = bright yellow-white powerful missile
+                if power_synergy and is_homing:
+                    col = (255, 240, 100)  # power homing = bright gold
+                elif is_homing:
+                    col = (255, 140, 0)  # normal homing orange
+                else:
+                    if self.rapid_active and not is_homing:
+                        col = (255, 100, 150) if col == self.color else (255, 100, 150)
+                    else:
+                        col = base_color
+                        if has_power:
+                            col = (255, 224, 64)  # power = yellow
+
                 b_type = get_bullet_type_for_player()
-                # spread overrides
-                if is_homing:
-                    b_type = 'homing'
-                elif self.rapid_active:
-                    b_type = 'rapid'
-                bullet = Bullet(sx, sy, d, f"player{self.player_id}", power=self.bullet_power, color=col, homing=is_homing, bullet_type=b_type)
+                # Adjust power for synergy
+                bullet_power = self.bullet_power
+                if power_synergy:
+                    bullet_power = 2  # power homing is always power 2
+                    # Even more: if star level 3 + homing + spread, power 2 still but extra effects via type
+                if is_homing and has_power:
+                    b_type = 'power_homing' if 'power_homing' not in b_type else b_type
+
+                bullet = Bullet(sx, sy, d, f"player{self.player_id}", power=bullet_power, color=col, homing=is_homing, bullet_type=b_type)
                 if is_homing:
                     import random as _rnd
                     bullet.replan_timer = _rnd.randint(0, 25)
+                    if power_synergy:
+                        bullet.speed *= 1.3  # powerful missile faster
+                        bullet.turn_speed = getattr(bullet, 'turn_speed', 0.068) * 1.2  # more agile
+                if self.rapid_active and not is_homing:
+                    bullet.speed *= 1.2
+                elif self.rapid_active and is_homing and power_synergy:
+                    bullet.speed *= 1.35  # rapid + power homing super fast
                 self.bullets.append(bullet)
                 bullets_created.append(bullet)
             base_cd = 25
+            # Power synergy reduces cooldown slightly (more powerful but balanced)
+            if power_synergy:
+                base_cd = max(5, base_cd - 3)
             self.cooldown = max(3, base_cd // 3) if self.rapid_active else base_cd
         else:
             sx, sy = self.get_bullet_spawn()
             is_homing = self.homing_active
-            col = (255, 140, 0) if is_homing else base_color
-            if self.rapid_active and not is_homing:
-                col = (255, 50, 150)
+            if power_synergy and is_homing:
+                col = (255, 240, 100)  # power homing gold
+            elif is_homing:
+                col = (255, 140, 0)
+            else:
+                if self.rapid_active and not is_homing:
+                    col = (255, 50, 150)
+                else:
+                    col = base_color
+                    if has_power:
+                        col = (255, 224, 64)
+
             b_type = get_bullet_type_for_player()
-            bullet = Bullet(sx, sy, self.direction, f"player{self.player_id}", power=self.bullet_power, color=col, homing=is_homing, bullet_type=b_type)
+            bullet_power = self.bullet_power
+            if power_synergy:
+                bullet_power = 2
+
+            bullet = Bullet(sx, sy, self.direction, f"player{self.player_id}", power=bullet_power, color=col, homing=is_homing, bullet_type=b_type)
+            if is_homing and power_synergy:
+                bullet.speed *= 1.3
+                # Make turn more agile for power homing
+                if hasattr(bullet, 'turn_speed'):
+                    bullet.turn_speed *= 1.2
             if self.rapid_active and not is_homing:
                 bullet.speed *= 1.2
+            elif self.rapid_active and is_homing and has_power:
+                bullet.speed *= 1.35
             self.bullets.append(bullet)
             bullets_created.append(bullet)
             base_cd = 15 if self.star_level >= 1 else 20
+            if power_synergy:
+                base_cd = max(4, base_cd - 2)
             self.cooldown = max(3, base_cd // 3) if self.rapid_active else base_cd
 
-        # Better shooting sounds - choose type based on active items
+        # Better shooting sounds - choose type based on synergy
         try:
             from ..sound_manager import sound_manager
-            # Determine best shoot sound type for satisfying feedback
-            if self.homing_active and self.spread_active:
-                shoot_type = 'homing'  # 8 homing missiles - missile sound
-            elif self.homing_active:
+            if has_homing and has_power and has_spread:
+                shoot_type = 'power'  # ultimate - power sound
+            elif has_homing and has_power:
+                shoot_type = 'power'  # powerful missile uses power sound for impact
+            elif has_homing and has_spread:
                 shoot_type = 'homing'
-            elif self.spread_active and self.rapid_active:
-                shoot_type = 'spread'  # rapid spread
-            elif self.spread_active:
+            elif has_homing:
+                shoot_type = 'homing'
+            elif has_spread and has_rapid:
                 shoot_type = 'spread'
-            elif self.rapid_active:
+            elif has_spread:
+                shoot_type = 'spread'
+            elif has_rapid:
                 shoot_type = 'rapid'
-            elif self.bullet_power >= 2:
+            elif has_power:
                 shoot_type = 'power'
             else:
-                shoot_type = 'punchy'  # new better normal shoot
+                shoot_type = 'punchy'
             sound_manager.play_shoot(shoot_type)
         except:
             pass
@@ -763,26 +843,51 @@ class PlayerTank(Tank):
             self.score += 200
             self.add_armor(15)
         elif type_name == 'shrink':
+            # Synergy: allow coexistence with giant (small+giant = normal size, fast, crush)
+            # Previously cleared giant, now keeps it for synergy
             self.shrink_timer = POWERUP_DURATION.get('shrink', 15*FPS)
-            self.giant_timer = 0
-            self.is_giant = False
-            # Instant activation for shrink - fix delay bug
-            self.is_shrunk = True
-            self.current_scale = SHRINK_SCALE
-            self.speed = self.base_speed * SHRINK_SPEED_MULT
+            # Check if giant already active - synergy!
+            if self.giant_timer > 0:
+                # Both active: synergy to normal size, fast, crush
+                self.is_shrunk = True
+                self.is_giant = True
+                self.current_scale = 1.0  # synergy normal size
+                self.speed = self.base_speed * SHRINK_SPEED_MULT
+                print(f"[SYNERGY] Shrink + Giant active! Normal size, fast speed, crush bricks")
+                try:
+                    from ..logger_integration import safe_log_gameplay
+                    safe_log_gameplay("SYNERGY_ACTIVATE", data={"type": "small+giant", "player_id": self.player_id, "shrink": self.shrink_timer, "giant": self.giant_timer})
+                except:
+                    pass
+            else:
+                # Instant activation for shrink solo
+                self.is_shrunk = True
+                self.current_scale = SHRINK_SCALE
+                self.speed = self.base_speed * SHRINK_SPEED_MULT
             self._update_rect_size()
             self.score += 150
             self.add_armor(10)
             self.update_bullet_power()
         elif type_name == 'giant':
+            # Synergy: allow coexistence with shrink
             self.giant_timer = GIANT_DURATION
-            self.shrink_timer = 0
-            self.is_shrunk = False
-            # Instant activation for giant - fix 1-frame delay bug where cannot crush walls immediately
-            # Previously is_giant flag was only set on next update() via update_size_state, so first move after pickup failed to crush
-            self.is_giant = True
-            self.current_scale = GIANT_SCALE
-            self.speed = self.base_speed * 2.0
+            if self.shrink_timer > 0:
+                # Both active: synergy
+                self.is_shrunk = True
+                self.is_giant = True
+                self.current_scale = 1.0  # normal size
+                self.speed = self.base_speed * SHRINK_SPEED_MULT
+                print(f"[SYNERGY] Giant + Shrink active! Normal size, fast speed, crush bricks")
+                try:
+                    from ..logger_integration import safe_log_gameplay
+                    safe_log_gameplay("SYNERGY_ACTIVATE", data={"type": "small+giant", "player_id": self.player_id, "shrink": self.shrink_timer, "giant": self.giant_timer})
+                except:
+                    pass
+            else:
+                # Instant activation for giant solo - fix 1-frame delay
+                self.is_giant = True
+                self.current_scale = GIANT_SCALE
+                self.speed = self.base_speed * 2.0
             self._update_rect_size()
             self.score += 300
             self.add_armor(40)

@@ -92,6 +92,7 @@ ARMOR_SHIELD_REDUCTION = 0.3  # armor absorbs 70% damage, 30% passes to health w
 ARMOR_REGEN_RATE = 0  # no auto regen
 
 # Brick durability - hits needed to destroy
+# Synergy bullets (power+homing etc) also defined here
 BRICK_HITS_NEEDED = {
     'normal': 2,      # normal bullet 2 hits
     'power': 1,       # power/gun 1 hit
@@ -99,6 +100,11 @@ BRICK_HITS_NEEDED = {
     'homing': 4,      # tracking missile 4 hits (balanced because it avoids walls)
     'spread': 2,      # spread 2 hits
     'venom': 2,       # venom 2 hits
+    'power_homing': 1,          # powerful tracking missile - 1 hit (synergy weapon enforcement + homing)
+    'power_homing_spread': 1,   # 8 powerful homing missiles - 1 hit each
+    'power_spread': 1,          # spread power bullets
+    'power_rapid': 1,           # rapid power
+    'power_spread_rapid': 1,    # ultimate spread rapid power
 }
 
 # Sidebar HUD
@@ -236,6 +242,15 @@ MONSTER_SPEED_MULT = 1.0  # slowed to normal enemy speed per user request (was 1
 VENOM_DISSOLVE_TIME = 18 * FPS  # slowed down venom: was 10s, now 18s for more time to counter (user request)
 VENOM_SPEED = BULLET_SPEED * 0.45  # slowed down venom: was 0.7x bullet speed, now 0.45x (slower)
 BULLET_COUNTER_ENABLED = True
+
+# Venom spillover: infected player damages nearby tanks (proximity)
+VENOM_SPILLOVER_ENABLED = True
+VENOM_SPILLOVER_RADIUS = 72  # 3 tiles = 72px, proximity damage radius
+VENOM_SPILLOVER_INTERVAL = 20  # every 20 frames (~0.33s) check and damage
+VENOM_SPILLOVER_DAMAGE = 1  # power for nearby damage (armor damage 25 base)
+VENOM_SPILLOVER_ENEMY_DAMAGE_FACTOR = 1.0  # full damage to enemies
+VENOM_SPILLOVER_PLAYER_DAMAGE_FACTOR = 0.5  # half damage to other player (Chad/Lida friendly fire spillover)
+VENOM_SPILLOVER_BOSS_DAMAGE_FACTOR = 0.7  # boss takes less from spillover
 
 # Enemy count per level
 ENEMIES_PER_LEVEL = 20
