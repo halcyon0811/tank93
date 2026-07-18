@@ -3,6 +3,18 @@ from .tank import Tank
 from .bullet import Bullet
 from ..settings import *
 import game.settings as settings_module  # for live calibration toggles
+# New input manager for custom controller mapping (user says direction then hits it)
+try:
+    from ..input_manager import get_direction_from_joystick, get_buttons_from_joystick, load_mapping
+    HAS_CUSTOM_MAPPING = True
+except ImportError:
+    HAS_CUSTOM_MAPPING = False
+    def get_direction_from_joystick(js):
+        return None
+    def get_buttons_from_joystick(js):
+        return {}
+    def load_mapping():
+        return {"maps":{}}
 
 class PlayerTank(Tank):
     def __init__(self, player_id, grid_x, grid_y, lives=None):
@@ -150,9 +162,31 @@ class PlayerTank(Tank):
             else:
                 shoot = keys[pygame.K_RETURN] or keys[pygame.K_RCTRL] or keys[pygame.K_m]
 
-        # joystick handling - supports Joy-Con, Pro Controller, Xbox, PS - FIXED for 2P sync and cross-rumble
+        # joystick handling - NEW: custom mapping first (from interactive_mapper.py)
+        # User says direction then hits it, we save to controller_mapping.json and use here
         joy_btn_dir_idx = None
         joy_btn_dir = None
+        custom_dir_used = False
+        if joystick and HAS_CUSTOM_MAPPING:
+            try:
+                # Try custom mapping from game/assets/controller_mapping.json
+                # Handles combined Joy-Con (L/R) split: P1 uses right stick (2,3), P2 left (0,1)
+                c_dir = get_direction_from_joystick(joystick, player_id=self.player_id, num_players=num_players)
+                if c_dir:
+                    dir_pressed = c_dir
+                    custom_dir_used = True
+                c_btns = get_buttons_from_joystick(joystick, player_id=self.player_id, num_players=num_players)
+                if c_btns.get("SHOOT") or c_btns.get("ATTACK"):
+                    shoot = True
+                # Debug: if mapping file exists, show it once
+                # print(f"[CustomMap] P{self.player_id} dir={c_dir} btns={c_btns}")
+            except Exception as e:
+                # Fallback to old logic if custom fails
+                # print(f"Custom mapping error: {e}")
+                pass
+
+        # joystick handling - supports Joy-Con, Pro Controller, Xbox, PS - FIXED for 2P sync and cross-rumble
+        # Only run old hardcoded logic if custom mapping didn't already provide direction
         if joystick:
             try:
                 name = joystick.get_name().lower()
@@ -331,21 +365,22 @@ class PlayerTank(Tank):
                     except Exception:
                         pass
 
-                # deadzone and direction from axes
-                if abs(ax) < 0.32:
-                    ax = 0
-                if abs(ay) < 0.32:
-                    ay = 0
-                if ay < -0.5:
-                    dir_pressed = 'UP'
-                elif ay > 0.5:
-                    dir_pressed = 'DOWN'
-                elif ax < -0.5:
-                    dir_pressed = 'LEFT'
-                elif ax > 0.5:
-                    dir_pressed = 'RIGHT'
-                elif joy_btn_dir:
-                    dir_pressed = joy_btn_dir
+                # deadzone and direction from axes - only if custom mapping didn't already set direction
+                if not custom_dir_used:
+                    if abs(ax) < 0.32:
+                        ax = 0
+                    if abs(ay) < 0.32:
+                        ay = 0
+                    if ay < -0.5:
+                        dir_pressed = 'UP'
+                    elif ay > 0.5:
+                        dir_pressed = 'DOWN'
+                    elif ax < -0.5:
+                        dir_pressed = 'LEFT'
+                    elif ax > 0.5:
+                        dir_pressed = 'RIGHT'
+                    elif joy_btn_dir:
+                        dir_pressed = joy_btn_dir
 
             except Exception as e:
                 # Don't crash, just ignore joystick error for this frame

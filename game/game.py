@@ -115,6 +115,21 @@ class Game:
         self.continue_timer = 0  # countdown when gameover
         self.credits = {1: 0, 2: 0}  # per player credits, each coin gives COIN_LIVES
 
+        # LAN Multiplayer - Remote P2 join via same local network
+        self.network_host = None
+        self.network_host_ip = None
+        try:
+            from .network import NetworkHost, get_local_ip
+            self.network_host = NetworkHost()
+            self.network_host_ip = self.network_host.start()
+            if self.network_host_ip:
+                print(f"[Game] LAN Host ready - P2 can join remotely via same WiFi")
+                print(f"[Game] Remote: python3 remote_client.py --host {self.network_host_ip}")
+        except Exception as e:
+            print(f"[Game] Network host failed to start: {e}")
+            self.network_host = None
+            self.network_host_ip = None
+
     def _get_enemy_queue_for_level(self, level_idx):
         """Return authentic enemy queue if available, else generate fallback."""
         lvl = level_idx % len(LEVELS)
@@ -819,9 +834,53 @@ class Game:
             except:
                 pass
 
+        # Check for remote P2 input via LAN
+        remote_p2 = None
+        if self.network_host:
+            try:
+                # Auto-join remote P2 if client connected and we have only 1 player
+                if self.network_host.is_client_connected() and len(self.players) == 1:
+                    # Check if P2 doesn't already exist
+                    if not any(p.player_id == 2 for p in self.players):
+                        print("[Network] Remote P2 joining via LAN!")
+                        # Spawn P2 at its spawn point
+                        gx, gy = PLAYER_SPAWN[1]
+                        p2 = PlayerTank(2, gx, gy, lives=3)
+                        p2.score = 0
+                        self.players.append(p2)
+                        self.num_players = 2
+                        self.particles.add_spawn(p2.rect.centerx, p2.rect.centery)
+                        # Ensure P2 has lives
+                        if p2.lives < 0:
+                            p2.lives = 3
+                if len(self.players) >= 2:
+                    remote_p2 = self.network_host.get_remote_p2_input()
+            except Exception as e:
+                # print(f"Network check error: {e}")
+                remote_p2 = None
+
         for i, p in enumerate(self.players):
             if not p.alive:
                 continue
+            # If this is P2 and remote input is active, use remote input instead of local joystick
+            if p.player_id == 2 and remote_p2 and (remote_p2.get("dir") or remote_p2.get("shoot")):
+                # Remote P2 input from LAN
+                other_tanks = self.enemies + [op for j, op in enumerate(self.players) if j != i]
+                r_dir = remote_p2.get("dir")
+                r_shoot = remote_p2.get("shoot", False)
+                if r_dir:
+                    p.direction = r_dir
+                    p.try_move(r_dir, self.tilemap, other_tanks)
+                if r_shoot:
+                    b = p.shoot()
+                    if b:
+                        if isinstance(b, list):
+                            self.bullets.extend(b)
+                        else:
+                            self.bullets.append(b)
+                p.update(self.tilemap, other_tanks)
+                continue
+
             # get joystick for this player - with combined Joy-Con split support
             js = None
             if combined_joycon and len(self.players) == 2:
@@ -1099,6 +1158,19 @@ class Game:
             try:
                 dt = self.clock.tick(FPS)
                 self.handle_events()
+
+                # LAN Remote P2 auto-join from menu - if remote client connected while in menu, auto-start 2P
+                if self.state == 'menu' and self.network_host and self.network_host.is_client_connected():
+                    # If menu is in main mode and 1P is selected or no game yet, auto-start 2P with original maps
+                    if self.menu_mode == 'main':
+                        print("[Network] Remote P2 detected in menu - auto-starting 2P with original NES maps!")
+                        self.num_players = 2
+                        self.current_level = 0
+                        self.init_level(self.current_level, 2)
+                        # Reset boss flags for new game
+                        self.boss_released = False
+                        self.boss_enemy = None
+
                 if self.state == 'playing':
                     try:
                         self.update_playing(dt)

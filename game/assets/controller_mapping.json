@@ -1,0 +1,41 @@
+{
+  "maps": {
+    "RIGHT": {
+      "type": "axis",
+      "index": 0,
+      "value": 1,
+      "raw": "axis 0=0.94"
+    },
+    "LEFT": {
+      "type": "axis",
+      "index": 0,
+      "value": -1,
+      "raw": "axis 0=-1.00"
+    },
+    "UP": {
+      "type": "axis",
+      "index": 1,
+      "value": -1,
+      "raw": "axis 1=-1.00"
+    },
+    "DOWN": {
+      "type": "axis",
+      "index": 1,
+      "value": 1,
+      "raw": "axis 1=1.00"
+    },
+    "SHOOT": {
+      "type": "button",
+      "index": 4,
+      "value": 1,
+      "raw": "button 4 - attack fix, not D-pad"
+    },
+    "ATTACK": {
+      "type": "button",
+      "index": 4,
+      "value": 1,
+      "raw": "button 4 - attack fix, not D-pad"
+    }
+  },
+  "name": "Nintendo Switch Joy-Con (L/R)"
+}

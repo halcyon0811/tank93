@@ -50,6 +50,20 @@ class HUD:
             joy_txt = self.font_small.render("Joy: 0 (Press J to rescan)", True, (200,100,100))
         screen.blit(joy_txt, (xpos, ypos))
         ypos += 14
+        # LAN Multiplayer status - show host IP for remote P2 join
+        try:
+            if hasattr(game, 'network_host_ip') and game.network_host_ip:
+                ip_txt = self.font_small.render(f"LAN Host: {game.network_host_ip}:9999", True, (100,200,255))
+                screen.blit(ip_txt, (xpos, ypos))
+                ypos += 14
+                if hasattr(game, 'network_host') and game.network_host and game.network_host.is_client_connected():
+                    conn_txt = self.font_small.render("Remote P2: CONNECTED via WiFi", True, (100,255,100))
+                else:
+                    conn_txt = self.font_small.render("Remote P2: python3 remote_client.py --host "+str(game.network_host_ip), True, (150,150,150))
+                screen.blit(conn_txt, (xpos, ypos))
+                ypos += 14
+        except:
+            pass
         # Calibration status for Joy-Con fix - per side
         try:
             import game.settings as settings_mod
@@ -456,26 +470,44 @@ class HUD:
                     screen.blit(arrow, (SCREEN_WIDTH//2 - 220, y))
                 screen.blit(txt, txt.get_rect(center=(SCREEN_WIDTH//2, y)))
 
-            # === Footer - Publishing Info with Original NES Maps ===
-            footer_y = SCREEN_HEIGHT - 70
+            # === Footer - Publishing Info with Original NES Maps + LAN ===
+            footer_y = SCREEN_HEIGHT - 90
             # Original NES maps banner
-            banner_rect = pygame.Rect(20, footer_y-8, SCREEN_WIDTH-40, 60)
+            banner_rect = pygame.Rect(20, footer_y-8, SCREEN_WIDTH-40, 80)
             pygame.draw.rect(screen, (0,0,0), banner_rect, border_radius=6)
             pygame.draw.rect(screen, (50,50,70), banner_rect, 1, border_radius=6)
+            # Try to get local IP for LAN display
+            try:
+                from ..network import get_local_ip
+                local_ip = get_local_ip()
+            except:
+                local_ip = "127.0.0.1"
             footer_lines = [
                 f"35 ORIGINAL NES MAPS - STAGE 1: 18*basic 2*fast ... STAGE 35: 4*power 6*fast 10*armor (700 ENEMIES)",
                 "TILES: BRICK RED, STEEL WHITE, WATER BLUE, FOREST GREEN, ICE GRAY - PIXEL PERFECT NES RIPS",
-                "CONTROLS: P1 WASD+SPACE / P2 ARROWS+ENTER / JOY-CON L/R or PRO / C=COIN 1/2=JOIN",
+                f"CONTROLS: P1 WASD+SPACE / P2 LOCAL ARROWS+ENTER / JOY-CON L/R / REMOTE LAN: {local_ip}:9999",
+                f"REMOTE P2 JOIN: SAME WIFI - python3 remote_client.py --host {local_ip}",
             ]
             for j, line in enumerate(footer_lines):
-                f = pygame.font.Font(None, 16)
-                c = (200,200,100) if j==0 else (140,140,160) if j==1 else (160,160,180)
+                f = pygame.font.Font(None, 15)
+                if j == 0:
+                    c = (200,200,100)
+                elif j == 1:
+                    c = (140,140,160)
+                elif j == 2:
+                    c = (100,200,255)
+                else:
+                    c = (100,255,100)
                 txt = f.render(line, True, c)
                 screen.blit(txt, txt.get_rect(center=(SCREEN_WIDTH//2, footer_y + j*18)))
 
             # Default hint
             default_hint = self.font_small.render("DEFAULT: 1 PLAYER - 35 ORIGINAL NES MAPS - PRESS ENTER TO START", True, (100,255,100))
             screen.blit(default_hint, default_hint.get_rect(center=(SCREEN_WIDTH//2, 360)))
+            # LAN hint flashing
+            if (t // 600) % 2 == 0:
+                lan_hint = self.font_small.render(f"LAN: P2 CAN JOIN REMOTELY VIA {local_ip}:9999 - SAME WIFI", True, (100,200,255))
+                screen.blit(lan_hint, lan_hint.get_rect(center=(SCREEN_WIDTH//2, 380)))
 
             # Insert coin flashing (publishable arcade feel)
             if (t // 400) % 2 == 0:
