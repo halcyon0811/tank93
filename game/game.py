@@ -87,7 +87,11 @@ from .entities.particles import ParticleSystem
 from .ui.hud import HUD
 
 class Game:
-    def __init__(self):
+    def __init__(self, is_web=False):
+        self.is_web = is_web
+        if is_web:
+            print("[Game] Running in WEB mode - disabling LAN host and projector server (not supported in browser)")
+            print("[Game] Web controls: WASD+SPACE for P1, Arrows+Enter for P2, or Gamepad")
         import os
         os.environ.setdefault('SDL_IME_SHOWUI', '0')
         os.environ.setdefault('PYGAME_HIDE_SUPPORT_PROMPT', '1')
@@ -238,33 +242,39 @@ class Game:
             self.mega_count = 0
             self.is_mega = False
 
-        # LAN Multiplayer - Remote P2 join via same local network
+        # LAN Multiplayer - Remote P2 join via same local network - disabled in web (no UDP in browser)
         self.network_host = None
         self.network_host_ip = None
-        try:
-            from .network import NetworkHost, get_local_ip
-            self.network_host = NetworkHost()
-            self.network_host_ip = self.network_host.start()
-            if self.network_host_ip:
-                print(f"[Game] LAN Host ready - P2 can join remotely via same WiFi")
-                print(f"[Game] Remote: python3 remote_client.py --host {self.network_host_ip}")
-        except Exception as e:
-            print(f"[Game] Network host failed to start: {e}")
-            self.network_host = None
-            self.network_host_ip = None
+        if not getattr(self, 'is_web', False):
+            try:
+                from .network import NetworkHost, get_local_ip
+                self.network_host = NetworkHost()
+                self.network_host_ip = self.network_host.start()
+                if self.network_host_ip:
+                    print(f"[Game] LAN Host ready - P2 can join remotely via same WiFi")
+                    print(f"[Game] Remote: python3 remote_client.py --host {self.network_host_ip}")
+            except Exception as e:
+                print(f"[Game] Network host failed to start: {e}")
+                self.network_host = None
+                self.network_host_ip = None
+        else:
+            print("[Game] Web mode: LAN host disabled (no UDP in browser)")
 
-        # Projector Mode
+        # Projector Mode - disabled in web (web already is projector via browser)
         self.projector_ip = None
         self.projector_port = 8080
-        try:
-            from .projector import start_server
-            self.projector_ip = start_server(port=self.projector_port)
-            if self.projector_ip:
-                print(f"[Game] Projector server ready - Open on same WiFi:")
-                print(f"[Game] Projector: http://{self.projector_ip}:{self.projector_port} - for projector or any browser")
-        except Exception as e:
-            print(f"[Game] Projector server failed to start: {e}")
-            self.projector_ip = None
+        if not getattr(self, 'is_web', False):
+            try:
+                from .projector import start_server
+                self.projector_ip = start_server(port=self.projector_port)
+                if self.projector_ip:
+                    print(f"[Game] Projector server ready - Open on same WiFi:")
+                    print(f"[Game] Projector: http://{self.projector_ip}:{self.projector_port} - for projector or any browser")
+            except Exception as e:
+                print(f"[Game] Projector server failed to start: {e}")
+                self.projector_ip = None
+        else:
+            print("[Game] Web mode: Projector server disabled (web already is projector)")
 
     def toggle_fullscreen(self):
         """Toggle fullscreen mode - for projector or immersive play, with content zoomed"""
@@ -1964,3 +1974,73 @@ class Game:
                     _trace_log("CRASH", f"Too many main loop crashes {crash_count} -> exit", level="ERROR")
                     print("Too many crashes in main loop, exiting")
                     break
+
+    async def run_async(self):
+        """Async version for web (Pygbag) - same as run() but with await asyncio.sleep(0) to yield to browser"""
+        import asyncio
+        import traceback
+        import time as _time
+        crash_count = 0
+        last_perf_log = _time.time()
+        print("[Game] Starting async web loop (is_web=True) - controls: WASD+SPACE, Arrows+Enter, Gamepad")
+        while True:
+            try:
+                frame_start = _time.time()
+                dt = self.clock.tick(FPS)
+                try:
+                    if HAS_DEBUG_LOGGER:
+                        debug_logger.increment_frame()
+                except:
+                    pass
+                self.handle_events()
+
+                if self.state == 'playing':
+                    try:
+                        self.update_playing(dt)
+                    except Exception as e:
+                        print(f"[CRASH GUARD] update_playing failed (async): {e}")
+                        traceback.print_exc()
+                        crash_count += 1
+                        if crash_count > 10:
+                            print("Too many crashes, returning to menu")
+                            self.state = 'menu'
+                            self.menu_mode = 'main'
+                            crash_count = 0
+
+                elif self.state == 'gameover' and not self.gameover_won:
+                    if self.continue_timer > 0:
+                        self.continue_timer -= 1
+                        try:
+                            self.particles.update()
+                        except:
+                            pass
+                    else:
+                        total = sum(p.score for p in self.players)
+                        self.high_score = max(self.high_score, total)
+                        self.state = 'menu'
+                        self.menu_mode = 'main'
+                        self.menu_selected = 0
+
+                try:
+                    self.draw()
+                except Exception as e:
+                    print(f"[CRASH GUARD] draw failed (async): {e}")
+                    traceback.print_exc()
+                    crash_count += 1
+                    if crash_count > 10:
+                        self.state = 'menu'
+                        crash_count = 0
+
+                # Yield to browser event loop - crucial for web
+                await asyncio.sleep(0)
+
+            except SystemExit:
+                raise
+            except Exception as e:
+                print(f"[CRASH GUARD] async main loop failed: {e}")
+                traceback.print_exc()
+                crash_count += 1
+                if crash_count > 20:
+                    print("Too many crashes in async loop, exiting")
+                    break
+                await asyncio.sleep(0.1)
