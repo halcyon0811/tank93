@@ -324,13 +324,56 @@ class EnemyTank(Tank):
                 self.rect.center = (self.x, self.y)
 
         if self.target_dir_timer <= 0 or self.stuck_timer > 25:
-            self.choose_new_direction(players, tilemap, base)
+            # For boss, pass other_tanks so it can target enemies too
+            if getattr(self, 'is_boss', False):
+                self.choose_new_direction(players, tilemap, base, other_tanks)
+            else:
+                self.choose_new_direction(players, tilemap, base)
             self.target_dir_timer = random.randint(25, 90)
             if self.stuck_timer > 25:
                 self.target_dir_timer = random.randint(10, 30)
             self.stuck_timer = 0
 
-        moved = self.try_move(self.direction, tilemap, other_tanks + players)
+        # Boss can run over enemy tanks like giant (crush them)
+        if getattr(self, 'is_boss', False):
+            # Boss tries to move ignoring enemy tanks for crushing, but still blocked by players? No, boss should crush enemies but be blocked by players? Actually boss should be threat to both, but crushing enemies is okay
+            # Check if we can move into enemy and crush
+            # First try normal move, if blocked by enemy, try to crush
+            # We handle crushing in try_move override below
+            moved = self.try_move(self.direction, tilemap, other_tanks + players)
+            # If blocked by enemy tank, try to crush it
+            if not moved:
+                # Check if blocked by enemy tank (not player)
+                for ot in other_tanks:
+                    if ot is self or not ot.alive:
+                        continue
+                    if getattr(ot, 'is_player', False):
+                        continue
+                    if getattr(ot, 'is_boss', False):
+                        continue
+                    # Check if this enemy is blocking us
+                    test_x = self.x
+                    dx, dy = DIRS.get(self.direction, (0,0))
+                    test_x = self.x + dx * self.speed
+                    test_y = self.y + dy * self.speed
+                    test_rect = self.rect.copy()
+                    test_rect.center = (test_x, test_y)
+                    if test_rect.colliderect(ot.rect):
+                        # Crush enemy tank
+                        try:
+                            ot.die()
+                            from ..logger_integration import safe_log_gameplay
+                            safe_log_gameplay("BOSS_CRUSH_ENEMY", data={"boss_x": self.x, "boss_y": self.y, "enemy_type": getattr(ot, 'enemy_type', 'unknown')})
+                            # Give score to nearest player
+                            # (handled in game.py via killer detection, but we log)
+                            # Try to move again after crushing
+                            moved = self.try_move(self.direction, tilemap, [])
+                            if moved:
+                                break
+                        except:
+                            ot.alive = False
+        else:
+            moved = self.try_move(self.direction, tilemap, other_tanks + players)
         if not moved:
             block_type = self.get_blocking_tile_type(self.direction, tilemap)
             if block_type == TILE_BRICK:
@@ -376,30 +419,66 @@ class EnemyTank(Tank):
                     self.state = 'attack_base'
 
         if aligned_target is None:
-            for p in players:
-                if not p.alive:
-                    continue
-                los, _ = self.has_line_of_sight(p.rect.centerx, p.rect.centery, tilemap)
-                if los:
-                    if abs(p.x - self.x) < 16 and ((self.direction == 'DOWN' and p.y > self.y) or (self.direction == 'UP' and p.y < self.y)):
-                        aligned_target = (p.rect.centerx, p.rect.centery)
-                        break
-                    if abs(p.y - self.y) < 16 and ((self.direction == 'RIGHT' and p.x > self.x) or (self.direction == 'LEFT' and p.x < self.x)):
-                        aligned_target = (p.rect.centerx, p.rect.centery)
-                        break
+            # For boss, check both players and enemy tanks (free-for-all)
+            if getattr(self, 'is_boss', False):
+                # Check players first (higher priority)
+                for p in players:
+                    if not p.alive:
+                        continue
+                    los, _ = self.has_line_of_sight(p.rect.centerx, p.rect.centery, tilemap)
+                    if los:
+                        if abs(p.x - self.x) < 16 and ((self.direction == 'DOWN' and p.y > self.y) or (self.direction == 'UP' and p.y < self.y)):
+                            aligned_target = (p.rect.centerx, p.rect.centery)
+                            break
+                        if abs(p.y - self.y) < 16 and ((self.direction == 'RIGHT' and p.x > self.x) or (self.direction == 'LEFT' and p.x < self.x)):
+                            aligned_target = (p.rect.centerx, p.rect.centery)
+                            break
+                # If no player aligned, check enemy tanks (boss attacks enemies too)
+                if aligned_target is None:
+                    for et in other_tanks:
+                        if et is self or not et.alive:
+                            continue
+                        if getattr(et, 'is_player', False) or getattr(et, 'is_boss', False):
+                            continue
+                        los, _ = self.has_line_of_sight(et.rect.centerx, et.rect.centery, tilemap)
+                        if los:
+                            if abs(et.x - self.x) < 16 and ((self.direction == 'DOWN' and et.y > self.y) or (self.direction == 'UP' and et.y < self.y)):
+                                aligned_target = (et.rect.centerx, et.rect.centery)
+                                break
+                            if abs(et.y - self.y) < 16 and ((self.direction == 'RIGHT' and et.x > self.x) or (self.direction == 'LEFT' and et.x < self.x)):
+                                aligned_target = (et.rect.centerx, et.rect.centery)
+                                break
+            else:
+                for p in players:
+                    if not p.alive:
+                        continue
+                    los, _ = self.has_line_of_sight(p.rect.centerx, p.rect.centery, tilemap)
+                    if los:
+                        if abs(p.x - self.x) < 16 and ((self.direction == 'DOWN' and p.y > self.y) or (self.direction == 'UP' and p.y < self.y)):
+                            aligned_target = (p.rect.centerx, p.rect.centery)
+                            break
+                        if abs(p.y - self.y) < 16 and ((self.direction == 'RIGHT' and p.x > self.x) or (self.direction == 'LEFT' and p.x < self.x)):
+                            aligned_target = (p.rect.centerx, p.rect.centery)
+                            break
 
         shoot_chance = self.shoot_chance
         if aligned_target:
             shoot_chance *= 4.5
             if is_base:
                 shoot_chance *= 1.5
-        if base and self.state == 'attack_base':
+        if base and self.state == 'attack_base' and not getattr(self, 'is_boss', False):
             shoot_chance *= 1.8
+        # Boss gets bonus shoot chance when chasing players (Chad/Lida preference) but slightly less for enemies
+        if getattr(self, 'is_boss', False):
+            if self.state == 'chase_player':
+                shoot_chance *= 1.6  # prefer shooting Chad/Lida
+            elif self.state == 'chase_enemy':
+                shoot_chance *= 1.2  # lower chance for enemies
 
         if random.random() < shoot_chance and self.base_attack_cooldown == 0:
-            # boss has chance to shoot venom instead
+            # boss has chance to shoot venom instead - now can target enemies too
             if getattr(self, 'is_boss', False) and random.random() < 0.5:
-                vb = self.shoot_venom(players)
+                vb = self.shoot_venom(players, other_tanks)
                 if vb:
                     if isinstance(vb, list):
                         bullets_list.extend(vb)
@@ -423,10 +502,10 @@ class EnemyTank(Tank):
             if is_base:
                 self.base_attack_cooldown = 30
         else:
-            # boss independent venom timer even when not aligned
+            # boss independent venom timer even when not aligned - also attacks enemies
             if getattr(self, 'is_boss', False):
                 if random.random() < getattr(self, 'venom_shoot_chance', 0.04):
-                    vb = self.shoot_venom(players)
+                    vb = self.shoot_venom(players, other_tanks)
                     if vb:
                         if isinstance(vb, list):
                             bullets_list.extend(vb)
@@ -440,7 +519,10 @@ class EnemyTank(Tank):
             self.venom_cooldown -= 1
         return new_bullet
 
-    def choose_new_direction(self, players, tilemap, base=None):
+    def choose_new_direction(self, players, tilemap, base=None, other_tanks=None):
+        # Boss monster special: can target both players and enemy tanks, preferring players (75% vs 25%)
+        # This makes monster a free-for-all threat when released
+        is_boss = getattr(self, 'is_boss', False)
         possible = ['UP', 'DOWN', 'LEFT', 'RIGHT']
         opposite = {'UP':'DOWN','DOWN':'UP','LEFT':'RIGHT','RIGHT':'LEFT'}
 
@@ -452,9 +534,25 @@ class EnemyTank(Tank):
         target_x, target_y = None, None
         target_bx, target_by = None, None
         alive_players = [p for p in players if p.alive] if players else []
+        # For boss, also consider enemy tanks as potential targets
+        alive_enemies = []
+        if is_boss and other_tanks:
+            for ot in other_tanks:
+                if ot is self:
+                    continue
+                if not getattr(ot, 'alive', False):
+                    continue
+                # Don't target other bosses (only one boss typically)
+                if getattr(ot, 'is_boss', False):
+                    continue
+                # Only target enemy tanks (not players, already in alive_players)
+                if getattr(ot, 'is_player', False):
+                    continue
+                alive_enemies.append(ot)
 
         use_base = True
-        if base and base.alive:
+        if base and base.alive and not is_boss:
+            # Boss does NOT chase base after release (base already destroyed)
             base_cx, base_cy = base.rect.centerx, base.rect.centery
             dist_to_base = math.hypot(base_cx - self.x, base_cy - self.y)
             if alive_players:
@@ -481,6 +579,64 @@ class EnemyTank(Tank):
             self.state = 'chase_base'
             if dist_to_base < 5 * TILE_SIZE:
                 self.state = 'attack_base'
+        elif is_boss and (alive_players or alive_enemies):
+            # Boss chooses target: 75% players (Chad/Lida), 25% enemies
+            # Prefer closer targets but with bias to players
+            candidates = []
+            for p in alive_players:
+                dist = math.hypot(p.x - self.x, p.y - self.y)
+                # Weight players higher: effective distance * 0.6 (so they appear closer)
+                candidates.append(('player', p, dist * 0.6))
+            for e in alive_enemies:
+                dist = math.hypot(e.x - self.x, e.y - self.y)
+                candidates.append(('enemy', e, dist))
+            
+            if candidates:
+                # Sort by weighted distance
+                candidates.sort(key=lambda x: x[2])
+                # 75% choose player if available, else closest
+                if alive_players and random.random() < 0.75:
+                    # Pick closest player
+                    player_candidates = [c for c in candidates if c[0]=='player']
+                    if player_candidates:
+                        chosen_type, chosen_tank, _ = player_candidates[0]
+                    else:
+                        chosen_type, chosen_tank, _ = candidates[0]
+                else:
+                    # Pick from all, but still weighted
+                    if random.random() < 0.5 and alive_enemies:
+                        # Sometimes pick enemy for variety
+                        enemy_candidates = [c for c in candidates if c[0]=='enemy']
+                        if enemy_candidates:
+                            chosen_type, chosen_tank, _ = enemy_candidates[0]
+                        else:
+                            chosen_type, chosen_tank, _ = candidates[0]
+                    else:
+                        chosen_type, chosen_tank, _ = candidates[0]
+                
+                target_x, target_y = chosen_tank.rect.centerx, chosen_tank.rect.centery
+                target_bx = int((target_x - PLAYFIELD_X) // TILE_SIZE) // 2
+                target_by = int((target_y - PLAYFIELD_Y) // TILE_SIZE) // 2
+                if chosen_type == 'player':
+                    self.target_player_id = chosen_tank.player_id
+                    self.state = 'chase_player'
+                    # Log boss targeting player (Chad/Lida)
+                    try:
+                        from ..logger_integration import safe_log_gameplay
+                        safe_log_gameplay("BOSS_TARGET_PLAYER", data={"target": getattr(chosen_tank, 'player_id', 0), "dist": math.hypot(chosen_tank.x - self.x, chosen_tank.y - self.y)})
+                    except:
+                        pass
+                else:
+                    self.state = 'chase_enemy'
+                    try:
+                        from ..logger_integration import safe_log_gameplay
+                        safe_log_gameplay("BOSS_TARGET_ENEMY", data={"enemy_type": getattr(chosen_tank, 'enemy_type', 'unknown'), "dist": math.hypot(chosen_tank.x - self.x, chosen_tank.y - self.y)})
+                    except:
+                        pass
+            else:
+                self.state = 'wander'
+                self.direction = random.choice(possible)
+                return
         elif alive_players:
             closest = min(alive_players, key=lambda p: math.hypot(p.x - self.x, p.y - self.y))
             target_x, target_y = closest.rect.centerx, closest.rect.centery
@@ -630,10 +786,13 @@ class EnemyTank(Tank):
             return bullets  # return list for spread
 
         sx, sy = self.get_bullet_spawn()
+        # Determine owner: boss uses 'boss' for all bullets (so it can hit both players and enemies)
+        owner_type = 'boss' if getattr(self, 'is_boss', False) else 'enemy'
         if venom or (getattr(self, 'is_boss', False) and random.random() < 0.45):
             # venom shot from boss - slowed down per user request
-            b = Bullet(sx, sy, self.direction, 'enemy', power=1, venom=True, bullet_type='venom')
-            b.owner = 'boss'
+            b = Bullet(sx, sy, self.direction, owner_type, power=1, venom=True, bullet_type='venom')
+            b.owner = 'boss'  # ensure boss owner
+            b._shooter_ref = self  # prevent self-hit
             self.bullets.append(b)
             if getattr(self, 'is_boss', False):
                 self.cooldown = random.randint(70, 130)  # slowed: was 35-80, now 70-130
@@ -650,7 +809,9 @@ class EnemyTank(Tank):
         b_type = 'homing' if is_homing else 'rapid' if is_rapid else 'normal'
         if self.bullet_power >= 2:
             b_type = 'power'
-        b = Bullet(sx, sy, self.direction, 'enemy', power=self.bullet_power, color=(255, 100, 100), homing=is_homing, bullet_type=b_type)
+        b = Bullet(sx, sy, self.direction, owner_type, power=self.bullet_power, color=(255, 100, 100), homing=is_homing, bullet_type=b_type)
+        b._shooter_ref = self
+        b.owner = owner_type
         if getattr(self, 'rapid_active', False):
             b.speed *= 1.2
         self.bullets.append(b)
@@ -688,21 +849,46 @@ class EnemyTank(Tank):
             pass
         return b
 
-    def shoot_venom(self, players):
+    def shoot_venom(self, players, other_tanks=None):
         if not getattr(self, 'is_boss', False):
             return None
         if getattr(self, 'venom_cooldown', 0) > 0:
             self.venom_cooldown -= 1
             return None
-        # find closest player
-        alive = [p for p in players if p.alive]
-        if not alive:
+        # Boss venom now can target both players (Chad/Lida) and enemy tanks, preferring players 75% vs 25%
+        # This makes monster a free-for-all threat
+        alive_players = [p for p in players if p.alive] if players else []
+        alive_enemies = []
+        if other_tanks:
+            for ot in other_tanks:
+                if ot is self or not ot.alive:
+                    continue
+                if getattr(ot, 'is_player', False) or getattr(ot, 'is_boss', False):
+                    continue
+                alive_enemies.append(ot)
+
+        if not alive_players and not alive_enemies:
             return None
-        closest = min(alive, key=lambda p: math.hypot(p.x - self.x, p.y - self.y))
-        # aim at player
-        dx = closest.x - self.x
-        dy = closest.y - self.y
-        # choose direction closest to player
+
+        # Choose target: 75% player, 25% enemy if both available
+        target = None
+        if alive_players and alive_enemies:
+            if random.random() < 0.75:
+                target = min(alive_players, key=lambda p: math.hypot(p.x - self.x, p.y - self.y))
+            else:
+                target = min(alive_enemies, key=lambda e: math.hypot(e.x - self.x, e.y - self.y))
+        elif alive_players:
+            target = min(alive_players, key=lambda p: math.hypot(p.x - self.x, p.y - self.y))
+        else:
+            target = min(alive_enemies, key=lambda e: math.hypot(e.x - self.x, e.y - self.y))
+
+        if not target:
+            return None
+
+        # aim at chosen target
+        dx = target.x - self.x
+        dy = target.y - self.y
+        # choose direction closest to target
         best_dir = None
         best_dot = -2
         for dname, (ddx, ddy) in DIRS.items():

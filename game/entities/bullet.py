@@ -729,16 +729,39 @@ class Bullet:
                     return 'hit_base'
 
         # tank collision + explosion SFX
+        # NEW: Boss (released monster) attacks both players and enemy tanks, preferring players
+        # Owner types:
+        # - playerX: hits enemies + boss, not players (except self)
+        # - enemy: normal enemies hit players + boss (boss can be hit by enemies), not other enemies
+        # - boss: released monster hits BOTH players and enemies
         for tank in tanks:
             if not tank.alive or tank.invulnerable_timer > 0:
                 continue
+            is_tank_boss = getattr(tank, 'is_boss', False)
+            is_self = (tank is getattr(self, '_shooter_ref', None))  # optional self check
+            # Prevent self-hit if shooter reference available
+            if hasattr(self, '_shooter_ref') and tank is self._shooter_ref:
+                continue
+
             if self.owner.startswith('player') and tank.is_player:
                 if getattr(tank, 'player_id', None) and self.owner == f"player{tank.player_id}":
                     continue
                 if tank.is_player:
                     continue
-            if self.owner == 'enemy' and not tank.is_player:
-                continue
+                # player can hit boss (boss is not player, so allowed)
+            elif self.owner == 'enemy':
+                # Normal enemy: can hit players and boss, but not other normal enemies
+                if not tank.is_player and not is_tank_boss:
+                    continue
+                # Also don't hit self (handled via shooter ref, but also check same object in other_tanks list includes self? we skip via other_tanks)
+            elif self.owner == 'boss':
+                # Boss monster: hits both players and enemy tanks (free-for-all), but not itself
+                # is_tank_boss False for normal enemies, True for other bosses (should not hit other boss? but there is only one)
+                # Allow hitting both players and enemies
+                if is_tank_boss and tank is getattr(self, '_shooter_ref', None):
+                    continue
+                # Otherwise allow hit (players and enemies)
+                pass
 
             if tank.rect.collidepoint(self.x, self.y):
                 # venom handling

@@ -206,13 +206,15 @@ class Tank:
         # tile collision - FIXED overlap bug: previous rect was 28 and check was 20 (inflate -4-4) causing 6px visual overlap with brick
         # Now use full TANK_SIZE (32) for collision and 0 shrink for strict no-overlap, draw is 30 for visual gap
         is_giant = getattr(self, 'is_giant', False) and getattr(self, 'giant_timer', 0) > 0
-        # Strict collision - no shrink, so no visual overlap at all. Giant also uses full rect but crushes bricks.
+        is_boss = getattr(self, 'is_boss', False)  # boss monster can also crush bricks (free-for-all threat)
+        can_crush_brick = is_giant or is_boss
+        # Strict collision - no shrink, so no visual overlap at all. Giant/boss also uses full rect but crushes bricks.
         check_rect = new_rect.copy()
         tiles = tilemap.get_tiles_in_rect(check_rect)
         crushed_bricks = []
         for ttype, gx, gy, trect in tiles:
             if check_rect.colliderect(trect):
-                if ttype == TILE_BRICK and is_giant:
+                if ttype == TILE_BRICK and can_crush_brick:
                     crushed_bricks.append((gx, gy))
                     continue
                 if is_turn and (abs(snap_x - self.x) > 0.1 or abs(snap_y - self.y) > 0.1):
@@ -225,7 +227,7 @@ class Tank:
                     for t2, gx2, gy2, tr2b in tiles2:
                         if not check_rect2.colliderect(tr2b):
                             continue
-                        if t2 == TILE_BRICK and is_giant:
+                        if t2 == TILE_BRICK and can_crush_brick:
                             continue
                         blocked2 = True
                         break
@@ -238,7 +240,7 @@ class Tank:
                         tiles = tiles2
                         # collect crushed bricks for new_rect2
                         for t2, gx2, gy2, _ in tiles2:
-                            if t2 == TILE_BRICK and is_giant and check_rect2.colliderect(_):
+                            if t2 == TILE_BRICK and can_crush_brick and check_rect2.colliderect(_):
                                 if (gx2, gy2) not in crushed_bricks:
                                     crushed_bricks.append((gx2, gy2))
                     else:
@@ -254,8 +256,14 @@ class Tank:
                     tilemap.destroy_tile(gx, gy, 2)
                 except:
                     pass
+            # Log brick crush by giant/boss
+            try:
+                from .logger_integration import safe_log_gameplay
+                safe_log_gameplay("BRICK_CRUSH", data={"x": gx, "y": gy, "by": "giant" if is_giant else "boss" if is_boss else "unknown", "dir": dir_name})
+            except:
+                pass
 
-        # tank-tank collision - strict full rects to prevent any visual overlap, giant can run over enemies
+        # tank-tank collision - strict full rects to prevent any visual overlap, giant/boss can run over enemies
         for other in other_tanks:
             if other is self or not other.alive:
                 continue
@@ -271,6 +279,16 @@ class Tank:
                     except:
                         other.alive = False
                     continue  # don't block, ran over
+                # Boss monster can crush enemy tanks too (free-for-all)
+                if is_boss and not getattr(other, 'is_player', False) and not getattr(other, 'is_boss', False):
+                    # Boss crushes normal enemy tanks
+                    try:
+                        other.die()
+                        from .logger_integration import safe_log_gameplay
+                        safe_log_gameplay("BOSS_CRUSH_ENEMY", data={"boss_x": self.x, "boss_y": self.y, "enemy_type": getattr(other, 'enemy_type', 'unknown')})
+                    except:
+                        other.alive = False
+                    continue
                 # Shrink can go through smaller gaps? No, still block
                 return False
 
