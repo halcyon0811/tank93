@@ -316,168 +316,119 @@ class HUD:
                 LVLS_13_PREVIEW = []
 
         if mode == 'main':
-            screen.fill(COLOR_BG)
-            pygame.draw.rect(screen, (40,40,60), (0,0,SCREEN_WIDTH, SCREEN_HEIGHT), 4)
-            inner_rect = pygame.Rect(20, 20, SCREEN_WIDTH-40, 120)
-            pygame.draw.rect(screen, (0,0,0), inner_rect, border_radius=8)
-            pygame.draw.rect(screen, (70,70,90), inner_rect, 2, border_radius=8)
-
+            # Clean minimal landing page - no clutter
+            screen.fill((14, 14, 20))
             t = pygame.time.get_ticks()
-            for i in range(6):
-                x = (t//20 + i*160) % (SCREEN_WIDTH+100) - 50
-                y = 24 + (i%2)*80
-                pygame.draw.rect(screen, (30,30,40), (x, y, 18, 12), border_radius=2)
 
-            big_font = pygame.font.Font(None, 84)
+            # Subtle background haze
+            bg = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+            for i in range(20):
+                a = 10 + i
+                pygame.draw.circle(bg, (60, 60, 90, a), (SCREEN_WIDTH//2 + int(200*math.sin(i*0.3 + t*0.0005)), 120 + i*30), 2)
+            screen.blit(bg, (0,0))
+
+            # Title
+            big_font = pygame.font.Font(None, 96)
             title = big_font.render("TANK 93", True, COLOR_YELLOW)
             shadow = big_font.render("TANK 93", True, (0,0,0))
-            screen.blit(shadow, shadow.get_rect(center=(SCREEN_WIDTH//2+4, 84)))
-            screen.blit(title, title.get_rect(center=(SCREEN_WIDTH//2, 80)))
-            small = pygame.font.Font(None, 24)
-            sub = small.render(f"ENHANCED EDITION - {TOTAL_STAGES} ORIGINAL NES MAPS - AUTHENTIC TRIBUTE", True, (200,200,220))
-            screen.blit(sub, sub.get_rect(center=(SCREEN_WIDTH//2, 114)))
-            sub2 = self.font_small.render("NEW: HOMING MISSILE + 8-WAY + RAPID + MINI + GIANT + VENOM BOSS + LAN P2", True, (255,140,0))
-            screen.blit(sub2, sub2.get_rect(center=(SCREEN_WIDTH//2, 134)))
+            screen.blit(shadow, shadow.get_rect(center=(SCREEN_WIDTH//2+3, 86)))
+            screen.blit(title, title.get_rect(center=(SCREEN_WIDTH//2, 84)))
+            
+            # Simple subtitle - minimal
+            small = pygame.font.Font(None, 22)
+            sub = small.render("Battle City Tribute  •  35 Stages", True, (160,160,180))
+            screen.blit(sub, sub.get_rect(center=(SCREEN_WIDTH//2, 118)))
 
-            card_w, card_h = 280, 180
-            gap = 40
+            # Cards - minimal info, larger gap for breathing room
+            card_w, card_h = 260, 150
+            gap = 50
             total_w = card_w*2 + gap
             start_x = SCREEN_WIDTH//2 - total_w//2
-            start_y = 160
+            start_y = 150
 
             cards = [
-                {"title": "1 PLAYER", "sub": f"{TOTAL_STAGES} STAGES", "detail": "ORIGINAL NES MAPS", "color": PLAYER_COLORS[0], "icon": "P1", "enemies": "20 TANKS/STAGE", "maps": "700 ENEMIES TOTAL"},
-                {"title": "2 PLAYERS", "sub": f"{TOTAL_STAGES} STAGES CO-OP", "detail": "ORIGINAL NES MAPS", "color": PLAYER_COLORS[1], "icon": "P1+P2", "enemies": "20 TANKS/STAGE", "maps": "2P CO-OP - FRIENDLY FIRE OFF"},
+                {"title": "1 PLAYER", "color": PLAYER_COLORS[0]},
+                {"title": "2 PLAYERS", "color": PLAYER_COLORS[1]},
             ]
 
             for idx, card in enumerate(cards):
                 x = start_x + idx*(card_w+gap)
                 y = start_y
                 is_selected = (selected == idx)
-                bg_col = (60,60,90) if not is_selected else (80,80,120)
-                border_col = COLOR_YELLOW if is_selected else (100,100,130)
-                border_w = 4 if is_selected else 2
-                pulse = 0
-                if is_selected:
-                    pulse = int(3 * abs((t % 1000) / 1000 - 0.5))
+                bg_col = (44, 44, 64) if not is_selected else (68, 68, 96)
+                border_col = COLOR_YELLOW if is_selected else (70, 70, 90)
+                border_w = 3 if is_selected else 1
                 rect = pygame.Rect(x, y, card_w, card_h)
-                pygame.draw.rect(screen, bg_col, rect, border_radius=12)
-                pygame.draw.rect(screen, border_col, rect.inflate(pulse*2, pulse*2), border_w, border_radius=12)
+                # soft shadow
+                shadow_rect = rect.move(3,3)
+                pygame.draw.rect(screen, (0,0,0, 60), shadow_rect, border_radius=14)
+                pygame.draw.rect(screen, bg_col, rect, border_radius=14)
+                pygame.draw.rect(screen, border_col, rect, border_w, border_radius=14)
 
                 tank_cx = x + card_w//2
-                tank_cy = y + 50
+                tank_cy = y + 52
                 if idx == 0:
-                    pygame.draw.rect(screen, card["color"], (tank_cx-30, tank_cy-12, 60, 32), border_radius=6)
-                    pygame.draw.rect(screen, (40,40,40), (tank_cx-36, tank_cy-12, 8, 32), border_radius=2)
-                    pygame.draw.rect(screen, (40,40,40), (tank_cx+28, tank_cy-12, 8, 32), border_radius=2)
-                    pygame.draw.rect(screen, (30,30,30), (tank_cx-3, tank_cy-28, 6, 22))
-                    pygame.draw.circle(screen, (20,20,20), (tank_cx, tank_cy+4), 8)
+                    # minimal single tank icon
+                    pygame.draw.rect(screen, card["color"], (tank_cx-24, tank_cy-10, 48, 24), border_radius=5)
+                    pygame.draw.rect(screen, (40,40,40), (tank_cx-30, tank_cy-10, 6, 24), border_radius=2)
+                    pygame.draw.rect(screen, (40,40,40), (tank_cx+24, tank_cy-10, 6, 24), border_radius=2)
+                    pygame.draw.rect(screen, (30,30,30), (tank_cx-2, tank_cy-24, 4, 18))
+                    pygame.draw.circle(screen, (20,20,20), (tank_cx, tank_cy+2), 6)
                 else:
-                    pygame.draw.rect(screen, PLAYER_COLORS[0], (tank_cx-50, tank_cy-10, 40, 24), border_radius=4)
-                    pygame.draw.rect(screen, (30,30,30), (tank_cx-35, tank_cy-20, 4, 14))
-                    pygame.draw.rect(screen, PLAYER_COLORS[1], (tank_cx+10, tank_cy-10, 40, 24), border_radius=4)
-                    pygame.draw.rect(screen, (30,30,30), (tank_cx+25, tank_cy-20, 4, 14))
+                    pygame.draw.rect(screen, PLAYER_COLORS[0], (tank_cx-34, tank_cy-8, 28, 18), border_radius=4)
+                    pygame.draw.rect(screen, PLAYER_COLORS[1], (tank_cx+6, tank_cy-8, 28, 18), border_radius=4)
 
-                f_title = pygame.font.Font(None, 36)
-                txt = f_title.render(card["title"], True, COLOR_YELLOW if is_selected else COLOR_WHITE)
-                screen.blit(txt, txt.get_rect(center=(tank_cx, y+90)))
+                f_title = pygame.font.Font(None, 32)
+                txt = f_title.render(card["title"], True, COLOR_WHITE if not is_selected else COLOR_YELLOW)
+                screen.blit(txt, txt.get_rect(center=(tank_cx, y+100)))
 
-                f_sub = pygame.font.Font(None, 22)
-                sub_txt = f_sub.render(card["sub"], True, (200,200,200))
-                screen.blit(sub_txt, sub_txt.get_rect(center=(tank_cx, y+112)))
-
-                f_det = self.font_small
-                det = f_det.render(card["detail"], True, (160,220,160))
-                screen.blit(det, det.get_rect(center=(tank_cx, y+130)))
-
-                en = f_det.render(card["enemies"], True, (180,180,180))
-                screen.blit(en, en.get_rect(center=(tank_cx, y+148)))
-
-                mp = f_det.render(card["maps"], True, (200,180,100))
-                screen.blit(mp, mp.get_rect(center=(tank_cx, y+164)))
+                f_sub = pygame.font.Font(None, 18)
+                sub_txt = f_sub.render("CO-OP" if idx==1 else f"{TOTAL_STAGES} STAGES", True, (140,140,160))
+                screen.blit(sub_txt, sub_txt.get_rect(center=(tank_cx, y+122)))
 
                 if is_selected:
-                    arrow = pygame.font.Font(None, 32).render("▶", True, COLOR_YELLOW)
-                    screen.blit(arrow, (x-28, y+card_h//2-10))
+                    # subtle glow + arrow
+                    glow = pygame.Surface((card_w+12, card_h+12), pygame.SRCALPHA)
+                    pygame.draw.rect(glow, (COLOR_YELLOW[0], COLOR_YELLOW[1], COLOR_YELLOW[2], 22), (0,0,card_w+12,card_h+12), border_radius=16)
+                    screen.blit(glow, (x-6, y-6))
+                    arrow = pygame.font.Font(None, 28).render("▶", True, COLOR_YELLOW)
+                    screen.blit(arrow, (x-22, y+card_h//2-9))
 
+            # Single clean hint, no overlap
+            hint_y = start_y + card_h + 32
             if selected in (0,1):
-                card_hint = self.font_small.render("PRESS ENTER / A / START TO BEGIN", True, COLOR_YELLOW)
-                screen.blit(card_hint, card_hint.get_rect(center=(SCREEN_WIDTH//2, start_y + card_h + 18)))
+                hint = pygame.font.Font(None, 22).render("PRESS ENTER TO START", True, (220, 200, 80))
+                screen.blit(hint, hint.get_rect(center=(SCREEN_WIDTH//2, hint_y)))
 
-            if LVLS_13_PREVIEW and len(LVLS_13_PREVIEW) > 0:
-                preview = LVLS_13_PREVIEW[0]
-                p_tile = 6
-                p_w = 13 * p_tile
-                p_h = 13 * p_tile
-                p_x = SCREEN_WIDTH - p_w - 20
-                p_y = 160
-                pygame.draw.rect(screen, (0,0,0), (p_x-4, p_y-16, p_w+8, p_h+20), border_radius=4)
-                pygame.draw.rect(screen, (70,70,90), (p_x-4, p_y-16, p_w+8, p_h+20), 1, border_radius=4)
-                lab = self.font_small.render("MAP 1 PREVIEW", True, (180,180,100))
-                screen.blit(lab, (p_x, p_y-14))
-                for ry in range(13):
-                    for rx in range(13):
-                        tt = preview[ry][rx]
-                        if tt == 0:
-                            continue
-                        tx = p_x + rx * p_tile
-                        ty = p_y + ry * p_tile
-                        col = COLOR_BRICK if tt==1 else COLOR_STEEL if tt==2 else COLOR_WATER if tt==3 else COLOR_GRASS if tt==4 else COLOR_ICE
-                        pygame.draw.rect(screen, col, (tx, ty, p_tile, p_tile))
-
-            options_main = [
-                "LEVEL SELECT - 35 ORIGINAL NES MAPS",
-                "HOW TO PLAY",
-                "QUIT",
-            ]
-            sec_start_y = start_y + card_h + 42
+            # Menu options - clean list, no boxes, good spacing
+            options_main = ["LEVEL SELECT", "HOW TO PLAY", "QUIT"]
+            sec_start_y = hint_y + 36
             for i, opt in enumerate(options_main):
                 main_idx = i + 2
                 is_sel = (selected == main_idx)
-                color = COLOR_YELLOW if is_sel else (170,170,180)
-                font = pygame.font.Font(None, 26) if is_sel else pygame.font.Font(None, 20)
+                color = COLOR_YELLOW if is_sel else (130,130,150)
+                font = pygame.font.Font(None, 24) if is_sel else pygame.font.Font(None, 20)
                 txt = font.render(opt, True, color)
-                y = sec_start_y + i*26
-                if i == 0:
-                    box_rect = pygame.Rect(SCREEN_WIDTH//2-190, y-3, 380, 22)
-                    box_col = (50,50,80) if not is_sel else (70,70,100)
-                    pygame.draw.rect(screen, box_col, box_rect, border_radius=6)
-                    pygame.draw.rect(screen, color, box_rect, 2 if is_sel else 1, border_radius=6)
+                y = sec_start_y + i*30
                 if is_sel:
-                    arrow = pygame.font.Font(None, 20).render(">", True, COLOR_YELLOW)
-                    screen.blit(arrow, (SCREEN_WIDTH//2 - 210, y-1))
-                screen.blit(txt, txt.get_rect(center=(SCREEN_WIDTH//2, y)))
-
-            footer_y = SCREEN_HEIGHT - 88
-            banner_rect = pygame.Rect(20, footer_y-8, SCREEN_WIDTH-40, 78)
-            pygame.draw.rect(screen, (0,0,0), banner_rect, border_radius=6)
-            pygame.draw.rect(screen, (50,50,70), banner_rect, 1, border_radius=6)
-            try:
-                from ..network import get_local_ip
-                local_ip = get_local_ip()
-            except:
-                local_ip = "127.0.0.1"
-            footer_lines = [
-                f"{TOTAL_STAGES} ORIGINAL NES MAPS - 700 ENEMIES - AUTHENTIC TILES | P1 WASD+SPACE P2 ARROWS+ENTER",
-                f"LAN: {local_ip}:9999 | P2 REMOTE: python3 remote_client.py --host {local_ip}",
-                f"PROJECTOR: http://{local_ip}:8080 on same WiFi - open on projector/browser -> F11 fullscreen",
-                f"NEW: HOMING + 8-WAY + RAPID + BOSS + FREEZE FIX + GRADUAL ENEMIES",
-            ]
-            for j, line in enumerate(footer_lines):
-                f = pygame.font.Font(None, 14)
-                if j == 0:
-                    c = (200,200,100)
-                elif j == 1:
-                    c = (100,200,255)
-                elif j == 2:
-                    c = (255,200,100)
+                    # underline marker
+                    pygame.draw.rect(screen, (60,60,80), (SCREEN_WIDTH//2-90, y-2, 180, 22), border_radius=6)
+                    screen.blit(txt, txt.get_rect(center=(SCREEN_WIDTH//2, y)))
+                    arr = pygame.font.Font(None, 18).render(">", True, COLOR_YELLOW)
+                    screen.blit(arr, (SCREEN_WIDTH//2 - 78, y-4))
                 else:
-                    c = (255,140,0)
-                txt = f.render(line, True, c)
-                screen.blit(txt, txt.get_rect(center=(SCREEN_WIDTH//2, footer_y + 2 + j*15)))
+                    screen.blit(txt, txt.get_rect(center=(SCREEN_WIDTH//2, y)))
 
-            if (t // 500) % 2 == 0:
-                coin_txt = pygame.font.Font(None, 18).render("INSERT COIN C/5 FOR 10 LIVES - PRESS ENTER TO START", True, (255,220,80))
+            # Minimal footer - single line, no clutter
+            footer_y = SCREEN_HEIGHT - 28
+            footer_font = pygame.font.Font(None, 16)
+            footer_txt = footer_font.render("WASD + SPACE  •  ARROWS + ENTER  •  F11 Fullscreen  •  C Coin", True, (90,90,110))
+            screen.blit(footer_txt, footer_txt.get_rect(center=(SCREEN_WIDTH//2, footer_y)))
+
+            # Coin hint - subtle blinking at very bottom, no box
+            if (t // 600) % 2 == 0:
+                coin_font = pygame.font.Font(None, 16)
+                coin_txt = coin_font.render("INSERT COIN C / 5  •  1 / 2 TO JOIN", True, (100, 100, 120))
                 screen.blit(coin_txt, coin_txt.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT-10)))
         elif mode == 'level':
             header_font = pygame.font.Font(None, 30)
