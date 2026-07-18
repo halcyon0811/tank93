@@ -224,6 +224,21 @@ class HUD:
             f_txt = self.font_mid.render(f"FREEZE {secs}s", True, (150,200,255))
             screen.blit(f_txt, (xpos, PLAYFIELD_Y+PLAYFIELD_H-50))
 
+        # Monster boss indicator
+        if getattr(game, 'boss_released', False) and getattr(game, 'boss_enemy', None) and game.boss_enemy.alive:
+            boss = game.boss_enemy
+            b_txt = self.font_mid.render(f"BOSS HP {boss.health}/12", True, (255,50,50))
+            screen.blit(b_txt, (xpos, PLAYFIELD_Y+PLAYFIELD_H-90))
+            # Boss bar
+            bar_w = 80
+            bar_h = 10
+            bx = xpos
+            by = PLAYFIELD_Y+PLAYFIELD_H-70
+            pygame.draw.rect(screen, (0,0,0), (bx-1, by-1, bar_w+2, bar_h+2))
+            pygame.draw.rect(screen, (60,0,0), (bx, by, bar_w, bar_h))
+            frac = boss.health / 12.0
+            pygame.draw.rect(screen, (0,255,0) if frac>0.5 else (255,255,0) if frac>0.25 else (255,0,0), (bx, by, int(bar_w*frac), bar_h))
+
         # coin hint when dead waiting
         if any(not p.alive and p.lives < 0 for p in game.players):
             urgent = self.font_mid.render("INSERT COIN!", True, COLOR_RED)

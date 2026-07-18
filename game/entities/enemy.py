@@ -97,6 +97,7 @@ class EnemyTank(Tank):
         self.direction = 'DOWN'
         self.is_player = False
 
+        self.is_boss = False
         if enemy_type == 'basic':
             self.speed = TANK_SPEED['enemy']
             self.health = 1
@@ -121,9 +122,31 @@ class EnemyTank(Tank):
             self.bullet_power = 1
             self.score_value = 400
             self.shoot_chance = 0.020
+        elif enemy_type in ('boss', 'monster_boss', 'monster'):
+            # Monster boss - released when monster base is hit
+            self.speed = TANK_SPEED['enemy'] * 1.1
+            self.health = 12  # boss has high health
+            self.bullet_power = 2  # can break steel
+            self.score_value = 2000
+            self.shoot_chance = 0.08  # shoots a lot
+            self.is_boss = True
+            # Make boss bigger
+            self.rect = pygame.Rect(0,0, int((TANK_SIZE-4)*1.6), int((TANK_SIZE-4)*1.6))
+            self.rect.center = (self.x, self.y)
+        else:
+            self.speed = TANK_SPEED['enemy']
+            self.health = 1
+            self.bullet_power = 1
+            self.score_value = 100
+            self.shoot_chance = 0.018
 
-        self.spawn_protection = 60
-        self.invulnerable_timer = 60
+        # Boss has less spawn protection but more flashy
+        if enemy_type in ('boss', 'monster_boss', 'monster'):
+            self.spawn_protection = 30
+            self.invulnerable_timer = 30
+        else:
+            self.spawn_protection = 60
+            self.invulnerable_timer = 60
         self.powerup_carrier = random.random() < 0.25
 
         self.state = 'wander'
@@ -532,6 +555,71 @@ class EnemyTank(Tank):
     def draw(self, screen):
         if not self.alive:
             return
+        # Boss monster tank - special drawing
+        if getattr(self, 'is_boss', False):
+            cx, cy = self.rect.center
+            size = self.rect.width
+            # Shadow
+            pygame.draw.ellipse(screen, (0,0,0, 100), (cx - size//2 +4, cy - size//2 +12, size-8, size//3))
+            # Boss body - monster tank hybrid
+            # Main body - green monster with tank tracks
+            body_color = (80, 200, 80)
+            # Body base
+            body_rect = pygame.Rect(0,0,size-6, size-6)
+            body_rect.center = (cx, cy)
+            pygame.draw.rect(screen, body_color, body_rect, border_radius=8)
+            pygame.draw.rect(screen, (40,100,30), body_rect, 3, border_radius=8)
+            # Tracks - dark
+            pygame.draw.rect(screen, (30,30,30), (cx - size//2 +2, cy - size//2 +4, 8, size-8), border_radius=3)
+            pygame.draw.rect(screen, (30,30,30), (cx + size//2 -10, cy - size//2 +4, 8, size-8), border_radius=3)
+            # Turret / cannon direction
+            # Use direction to draw cannon
+            import math
+            from ..settings import DIR_ANGLE, DIRS
+            ang = DIR_ANGLE.get(self.direction, 0)
+            vx = math.sin(math.radians(ang))
+            vy = -math.cos(math.radians(ang))
+            x2 = cx + vx * (size//2 + 8)
+            y2 = cy + vy * (size//2 + 8)
+            pygame.draw.line(screen, (20,20,20), (cx, cy), (x2, y2), 6)
+            # Monster face on top of tank
+            # Eyes
+            t = getattr(self, 'flash_timer', 0)
+            bob = (t//10)%4 -2
+            eye_y = cy - 6 + bob
+            # White eyes big
+            pygame.draw.circle(screen, (255,255,255), (cx-8, eye_y), 7)
+            pygame.draw.circle(screen, (255,255,255), (cx+8, eye_y), 7)
+            # Red pupils angry
+            pygame.draw.circle(screen, (255,0,0), (cx-8, eye_y), 3)
+            pygame.draw.circle(screen, (255,0,0), (cx+8, eye_y), 3)
+            # Horns
+            pygame.draw.polygon(screen, (200,30,30), [(cx-14, cy-12), (cx-12, cy-22), (cx-6, cy-12)])
+            pygame.draw.polygon(screen, (200,30,30), [(cx+6, cy-12), (cx+12, cy-22), (cx+14, cy-12)])
+            # Mouth
+            pygame.draw.arc(screen, (0,0,0), (cx-10, eye_y+4, 20, 12), 0, 3.14, 3)
+            # Teeth
+            pygame.draw.rect(screen, (255,255,200), (cx-6, eye_y+8, 3, 5))
+            pygame.draw.rect(screen, (255,255,200), (cx+3, eye_y+8, 3, 5))
+            # Boss label and health bar - big
+            bar_w = 40
+            bar_h = 6
+            bar_x = cx - bar_w//2
+            bar_y = cy - size//2 - 12
+            pygame.draw.rect(screen, (0,0,0), (bar_x-1, bar_y-1, bar_w+2, bar_h+2))
+            pygame.draw.rect(screen, (60,60,60), (bar_x, bar_y, bar_w, bar_h))
+            frac = max(0, self.health / 12.0)
+            col = (int(255*(1-frac)), int(255*frac), 0)
+            pygame.draw.rect(screen, col, (bar_x, bar_y, int(bar_w*frac), bar_h))
+            # BOSS text
+            font = pygame.font.Font(None, 18)
+            txt = font.render("BOSS", True, (255,50,50))
+            screen.blit(txt, (cx-14, bar_y-14))
+            # Flash when powerup carrier or invulnerable
+            if self.powerup_carrier and (self.flash_timer // 8) % 2 == 0:
+                pygame.draw.rect(screen, (255,50,50), body_rect, 3, border_radius=8)
+            return
+
         if self.powerup_carrier:
             if (self.flash_timer // 8) % 2 == 0:
                 orig = self.color
@@ -540,11 +628,21 @@ class EnemyTank(Tank):
                 self.color = orig
                 return
         super().draw(screen)
-        if self.enemy_type == 'armor' and self.health > 1:
-            bar_w = 20
-            bar_h = 3
+        # Health bar for armor and boss
+        if self.health > 1:
+            bar_w = 20 if not getattr(self, 'is_boss', False) else 40
+            bar_h = 3 if not getattr(self, 'is_boss', False) else 6
             cx, cy = self.rect.centerx, self.rect.top - 6
+            if getattr(self, 'is_boss', False):
+                cy = self.rect.top - 12
             pygame.draw.rect(screen, (60,60,60), (cx-bar_w//2, cy, bar_w, bar_h))
             health_colors = [(0,255,0), (255,255,0), (255,140,0), (180,180,180)]
-            col = health_colors[self.health-1] if self.health <= len(health_colors) else (0,255,0)
-            pygame.draw.rect(screen, col, (cx-bar_w//2, cy, int(bar_w*(self.health/4)), bar_h))
+            if self.health <= len(health_colors):
+                col = health_colors[self.health-1]
+            else:
+                # boss gradient green->red
+                frac = self.health / 12.0
+                col = (int(255*(1-frac)), int(255*frac), 0)
+            # For armor, health is out of 4; for boss out of 12
+            max_h = 4 if self.enemy_type == 'armor' else 12
+            pygame.draw.rect(screen, col, (cx-bar_w//2, cy, int(bar_w*(self.health/max_h)), bar_h))

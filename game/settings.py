@@ -75,6 +75,9 @@ ENEMY_COLORS = {
     'fast': (80, 180, 255),
     'power': (255, 80, 80),
     'armor': (140, 140, 200),
+    'boss': (100, 200, 80),  # monster boss green
+    'monster_boss': (100, 200, 80),
+    'monster': (120, 220, 100),
 }
 
 # Gameplay

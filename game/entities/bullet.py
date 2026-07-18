@@ -257,7 +257,7 @@ class Bullet:
             if self.power >= 2:
                 pygame.draw.circle(screen, COLOR_YELLOW, (int(self.x), int(self.y)), BULLET_SIZE//2 -1)
 
-# Base/Eagle class also here for convenience
+# Base/Monster class - now a monster to protect, when hit releases boss
 class Base:
     def __init__(self):
         bx, by = BASE_POS
@@ -268,36 +268,106 @@ class Base:
         self.alive = True
         self.rect = pygame.Rect(self.x, self.y, TILE_SIZE*2, TILE_SIZE*2)
         self.destroyed_timer = 0
+        # Monster specific
+        self.is_monster = True
+        self.monster_released = False
+        self.release_animation_timer = 0
+        self.monster_type = 'cage_monster'  # cute monster in cage
 
     def take_damage(self):
+        if not self.alive:
+            return False
         self.alive = False
+        self.monster_released = True
         self.destroyed_timer = pygame.time.get_ticks()
+        self.release_animation_timer = pygame.time.get_ticks()
+        return True  # indicates boss should be spawned
 
     def reset(self):
         self.alive = True
+        self.monster_released = False
         self.destroyed_timer = 0
+        self.release_animation_timer = 0
 
     def draw(self, screen):
         if self.alive:
-            pygame.draw.rect(screen, (230, 230, 230), self.rect)
-            pygame.draw.rect(screen, (180, 180, 180), self.rect, 3)
+            # Draw monster in cage - to protect
+            # Cage background - dark with bars
+            pygame.draw.rect(screen, (30, 20, 10), self.rect)  # cage dark brown
+            pygame.draw.rect(screen, (80, 60, 30), self.rect, 4)  # cage border
+            # Bars - vertical
+            for i in range(3):
+                bx = self.rect.left + 8 + i*14
+                pygame.draw.rect(screen, (120, 90, 40), (bx, self.rect.top+2, 4, self.rect.height-4))
+            # Horizontal bars
+            pygame.draw.rect(screen, (120, 90, 40), (self.rect.left, self.rect.top+14, self.rect.width, 3))
+            pygame.draw.rect(screen, (120, 90, 40), (self.rect.left, self.rect.bottom-16, self.rect.width, 3))
+
+            # Monster inside - cute blob
+            cx = self.rect.centerx
+            cy = self.rect.centery + 2
+            t = pygame.time.get_ticks()
+            bob = int(2 * pygame.math.Vector2(0,1).rotate(t//200).y) if False else (t//200)%4 -2  # small bob
+            # Monster body - round, color changing slightly
+            monster_color = (100, 200, 80)  # green monster
+            # Body shadow
+            pygame.draw.ellipse(screen, (60, 120, 40), (cx-16, cy-8+bob, 32, 26))
+            # Main body
+            pygame.draw.ellipse(screen, monster_color, (cx-14, cy-10+bob, 28, 22))
+            # Eyes - big cute
+            eye_y = cy - 4 + bob
+            # White eyes
+            pygame.draw.circle(screen, (255,255,255), (cx-6, eye_y), 5)
+            pygame.draw.circle(screen, (255,255,255), (cx+6, eye_y), 5)
+            # Pupils - look around slightly
+            px_offset = int(2 * (t % 2000) / 2000) -1
+            # Simple tracking - pupils follow time
+            pupil_x = int((t//300) % 3) -1
+            pygame.draw.circle(screen, (0,0,0), (cx-6+pupil_x, eye_y), 2)
+            pygame.draw.circle(screen, (0,0,0), (cx+6+pupil_x, eye_y), 2)
+            # Mouth - small
+            pygame.draw.arc(screen, (0,0,0), (cx-6, eye_y+2, 12, 8), 0, 3.14, 2)
+            # Small horns
+            pygame.draw.polygon(screen, (200, 50, 50), [(cx-12, cy-10+bob), (cx-10, cy-18+bob), (cx-6, cy-10+bob)])
+            pygame.draw.polygon(screen, (200, 50, 50), [(cx+6, cy-10+bob), (cx+10, cy-18+bob), (cx+12, cy-10+bob)])
+            # Label "PROTECT ME!"
+            font = pygame.font.Font(None, 14)
+            txt = font.render("PROTECT", True, (255,255,100))
+            screen.blit(txt, (cx-18, self.rect.top-16))
+        else:
+            # Monster released - broken cage, maybe particle hint
+            # Broken cage background
+            pygame.draw.rect(screen, (40, 20, 10), self.rect)
+            # Broken bars - diagonal
+            t = pygame.time.get_ticks()
+            # Flicker to show release
+            if (t // 100) % 2 == 0:
+                pygame.draw.rect(screen, (80, 40, 20), self.rect, 2)
+            # Draw broken bars scattered
+            for i in range(3):
+                bx = self.rect.left + 6 + i*16
+                # broken - tilted
+                pygame.draw.line(screen, (120, 90, 40), (bx, self.rect.top+2), (bx+4, self.rect.bottom-2), 3)
+            # Release effect - "!" and smoke
             cx = self.rect.centerx
             cy = self.rect.centery
-            pygame.draw.polygon(screen, (50, 50, 50), [
-                (cx-12, cy-4), (cx-4, cy-8), (cx-2, cy), (cx-8, cy+6)
-            ])
-            pygame.draw.polygon(screen, (50, 50, 50), [
-                (cx+12, cy-4), (cx+4, cy-8), (cx+2, cy), (cx+8, cy+6)
-            ])
-            pygame.draw.circle(screen, (255, 220, 0), (cx, cy-2), 6)
-            pygame.draw.circle(screen, COLOR_BLACK, (cx+2, cy-4), 2)
-            pygame.draw.rect(screen, (200, 50, 50), (cx-10, cy+8, 20, 4))
-        else:
-            pygame.draw.rect(screen, (60, 20, 20), self.rect)
-            t = pygame.time.get_ticks()
-            flame_h = 10 + (t % 500) // 100 * 2
-            pygame.draw.polygon(screen, (255, 100, 0), [
-                (self.rect.centerx, self.rect.top - flame_h),
-                (self.rect.left+5, self.rect.top+5),
-                (self.rect.right-5, self.rect.top+5),
-            ])
+            # Smoke puff where monster was
+            elapsed = t - self.release_animation_timer
+            if elapsed < 1000:
+                # Expanding smoke
+                radius = int(elapsed / 50)
+                alpha = max(0, 200 - elapsed//5)
+                # Simulate smoke with circles
+                for j in range(3):
+                    sx = cx + (j-1)*8
+                    sy = cy - radius//2
+                    pygame.draw.circle(screen, (100,100,100), (sx, sy), max(2, radius//3))
+                # Text "RELEASED!"
+                font = pygame.font.Font(None, 20)
+                txt = font.render("RELEASED!", True, (255,50,50))
+                screen.blit(txt, (cx-30, self.rect.top-20 - radius//2))
+            else:
+                # Empty cage with broken sign
+                font = pygame.font.Font(None, 16)
+                txt = font.render("EMPTY", True, (150,150,150))
+                screen.blit(txt, (cx-16, cy-4))

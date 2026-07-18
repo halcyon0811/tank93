@@ -159,6 +159,11 @@ class Game:
         self.enemies_spawned = 0
         self.spawn_timer = 0
         self.freeze_timer = 0
+        # Monster boss system
+        self.boss_enemy = None
+        self.boss_released = False
+        self.boss_fight_timer = 0
+        self.monster_boss_defeated = False
         self.state = 'playing'
         # SFX: For first stage (new game), play authentic NES intro "Battle City Tank 1990 NES Intro Live 8bit by deegee (5.59 sec)"
         # For subsequent stages, play stage_start jingle. Battlefield has NO BGM (authentic NES) - removed silly loop.
@@ -193,6 +198,11 @@ class Game:
         self.enemies_spawned = 0
         self.spawn_timer = 0
         self.freeze_timer = 0
+        # Monster boss system - reset per level
+        self.boss_enemy = None
+        self.boss_released = False
+        self.boss_fight_timer = 0
+        self.monster_boss_defeated = False
         # respawn players at start with protections - preserve items across stages
         new_players = []
         for i, old_p in enumerate(prev_players):
@@ -425,6 +435,38 @@ class Game:
                 self.particles.add_spawn(enemy.rect.centerx, enemy.rect.centery)
                 break
             tries+=1
+
+    def release_monster_boss(self):
+        """Called when monster base is hit - releases monster as enemy boss tank"""
+        if self.boss_released:
+            return  # already released
+        print("[BOSS] Monster released! Spawning boss tank!")
+        self.boss_released = True
+        self.boss_fight_timer = 15 * FPS  # 15 seconds to kill boss before game over? Or just track
+        # Spawn boss at base position
+        bx, by = BASE_POS
+        # Clear area around base for boss spawn
+        self.tilemap.clear_area(bx-1, by-1, 4, 4)
+        from .entities.enemy import EnemyTank
+        boss = EnemyTank(bx, by, 'monster_boss')
+        # Make boss extra strong and at base center
+        boss.set_position(bx, by)
+        # Give it some initial protection but less
+        boss.spawn_protection = 30
+        boss.invulnerable_timer = 30
+        self.enemies.append(boss)
+        self.boss_enemy = boss
+        self.particles.add_spawn(boss.rect.centerx, boss.rect.centery)
+        self.particles.add_explosion(boss.rect.centerx, boss.rect.centery, (100,255,100), 30)
+        # Sound
+        try:
+            from .sound_manager import sound_manager
+            sound_manager.play_explosion(big=True)
+            sound_manager.play_powerup_appear()
+        except:
+            pass
+        # Also break base walls to show release
+        self.tilemap.clear_area(bx-1, by-1, 4, 4)
 
     def rescan_joysticks(self):
         """Rescan for Joy-Cons, call when user presses J or connects controller
@@ -902,17 +944,60 @@ class Game:
                             p.respawn(gx, gy)
                             all_dead = False
 
-        # base destroyed? Authentic game over sound ( explosion + statistics BGM )
+        # base/monster hit? New logic: monster base hit releases boss instead of immediate game over
         if not self.base.alive:
-            if self.state != 'gameover':
-                self.continue_timer = CONTINUE_TIME
-                if snd_mgr:
-                    snd_mgr.play_explosion(big=True)
-                    snd_mgr.play_game_over()
-                self._on_game_over()
-            self.state = 'gameover'
-            self.gameover_won = False
-            return
+            # If monster was just hit and boss not yet released, release boss
+            if getattr(self.base, 'monster_released', False) and not self.boss_released:
+                self.release_monster_boss()
+                # Don't game over yet - boss fight begins
+                # Clear base area already done in release
+            elif self.boss_released:
+                # Boss fight ongoing or finished
+                if self.boss_enemy and self.boss_enemy.alive:
+                    # Boss still alive - continue fight, don't game over
+                    # Decrement boss fight timer
+                    if self.boss_fight_timer > 0:
+                        self.boss_fight_timer -= 1
+                    # If timer expires and boss still alive, game over (monster escaped)
+                    # For now, allow unlimited time, just continue
+                    pass
+                else:
+                    # Boss was released and now dead - player defeated boss!
+                    # Allow multiple boss releases: each time boss is defeated, respawn base with bonus and reset for next release
+                    print("[BOSS] Monster boss defeated! Respawning base with bonus!")
+                    # Bonus for defeating boss
+                    for p in self.players:
+                        if p.alive:
+                            p.score += 3000
+                    # Respawn base with steel walls as reward
+                    self.base.reset()
+                    self.tilemap.build_base_walls(TILE_STEEL)
+                    # Give base temporary shield
+                    try:
+                        self.base.shield_timer = 10 * FPS
+                    except:
+                        pass
+                    self.boss_enemy = None
+                    self.boss_fight_timer = 0
+                    self.boss_released = False  # allow next boss release on next base hit
+                    self.monster_boss_defeated = True  # track at least one defeat
+                    # Continue game
+                    self.particles.add_explosion(self.base.rect.centerx, self.base.rect.centery, (100,255,100), 40)
+                    if snd_mgr:
+                        snd_mgr.play_powerup_appear()
+                        snd_mgr.play_stage_clear()
+                    # Don't game over, continue
+            else:
+                # Original game over logic for non-monster base (fallback)
+                if self.state != 'gameover':
+                    self.continue_timer = CONTINUE_TIME
+                    if snd_mgr:
+                        snd_mgr.play_explosion(big=True)
+                        snd_mgr.play_game_over()
+                    self._on_game_over()
+                self.state = 'gameover'
+                self.gameover_won = False
+                return
 
         # check if all players out of lives and dead
         if all_dead and all(p.lives < 0 for p in self.players):
