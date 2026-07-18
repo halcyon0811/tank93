@@ -1,4 +1,5 @@
 import pygame
+import math
 from ..settings import *
 
 class HUD:
