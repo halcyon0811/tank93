@@ -502,22 +502,31 @@ class PlayerTank(Tank):
             if self.helmet_timer <= 0:
                 self.invulnerable_timer = 0
 
-        # update new item timers
-        if self.homing_timer > 0:
+        # update new item timers - permanent until death (timer -1 = infinite)
+        # Homing
+        if self.homing_timer == -1:
+            self.homing_active = True
+        elif self.homing_timer > 0:
             self.homing_timer -= 1
             self.homing_active = True
             if self.homing_timer <= 0:
                 self.homing_active = False
         else:
-            self.homing_active = False
+            # Only set inactive if not permanent
+            if self.homing_timer != -1:
+                self.homing_active = False
 
-        if self.spread_timer > 0:
+        # Spread
+        if self.spread_timer == -1:
+            self.spread_active = True
+        elif self.spread_timer > 0:
             self.spread_timer -= 1
             self.spread_active = True
             if self.spread_timer <= 0:
                 self.spread_active = False
         else:
-            self.spread_active = False
+            if self.spread_timer != -1:
+                self.spread_active = False
 
         # clean bullets
         self.bullets = [b for b in self.bullets if b.alive]
@@ -569,13 +578,14 @@ class PlayerTank(Tank):
                 game.tilemap.activate_shovel()
         elif type_name == 'homing':
             # Tracking missile item: tank can fire tracking missile to attack nearest enemy
-            # Active for duration
-            self.homing_timer = POWERUP_DURATION.get('homing', 15 * FPS)
+            # Kept across stages, only lost on death (per user request)
+            # Set to permanent until death: timer = -1 means infinite
+            self.homing_timer = -1  # permanent until death
             self.homing_active = True
             self.score += 200
         elif type_name == 'spread':
-            # 8-direction firing item
-            self.spread_timer = POWERUP_DURATION.get('spread', 12 * FPS)
+            # 8-direction firing item - kept across stages, lost on death
+            self.spread_timer = -1  # permanent until death
             self.spread_active = True
             self.score += 200
         # grenade, clock handled by game

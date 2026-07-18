@@ -125,18 +125,32 @@ class HUD:
             screen.blit(star_txt, (xpos, ypos))
             ypos += 16
 
-            # status
+            # status - items kept across stages, gone on death (per user request)
             statuses = []
             if p.helmet_timer > 0:
                 statuses.append("SHIELD")
             if p.spawn_protection > 0:
                 statuses.append("SPAWN")
-            if getattr(p, 'homing_timer', 0) > 0:
-                secs = p.homing_timer // FPS
-                statuses.append(f"MISSILE {secs}s")
-            if getattr(p, 'spread_timer', 0) > 0:
-                secs = p.spread_timer // FPS
-                statuses.append(f"8-WAY {secs}s")
+            # Homing missile - permanent until death (timer -1)
+            homing_t = getattr(p, 'homing_timer', 0)
+            if getattr(p, 'homing_active', False) or homing_t != 0:
+                if homing_t == -1:
+                    statuses.append(f"MISSILE PERM")
+                elif homing_t > 0:
+                    secs = homing_t // FPS
+                    statuses.append(f"MISSILE {secs}s")
+                elif getattr(p, 'homing_active', False):
+                    statuses.append(f"MISSILE")
+            # Spread 8-way - permanent until death
+            spread_t = getattr(p, 'spread_timer', 0)
+            if getattr(p, 'spread_active', False) or spread_t != 0:
+                if spread_t == -1:
+                    statuses.append(f"8-WAY PERM")
+                elif spread_t > 0:
+                    secs = spread_t // FPS
+                    statuses.append(f"8-WAY {secs}s")
+                elif getattr(p, 'spread_active', False):
+                    statuses.append(f"8-WAY")
             if statuses:
                 for st in statuses:
                     col = (255,140,0) if "MISSILE" in st else (160,80,255) if "8-WAY" in st else (80,200,255)

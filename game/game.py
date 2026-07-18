@@ -193,7 +193,7 @@ class Game:
         self.enemies_spawned = 0
         self.spawn_timer = 0
         self.freeze_timer = 0
-        # respawn players at start with protections
+        # respawn players at start with protections - preserve items across stages
         new_players = []
         for i, old_p in enumerate(prev_players):
             gx, gy = PLAYER_SPAWN[i]
@@ -201,6 +201,14 @@ class Game:
             p.score = old_p.score
             p.lives = old_p.lives
             p.star_level = old_p.star_level
+            # Preserve items across stages (homing, spread) - only lost on death, not on stage clear
+            p.homing_timer = getattr(old_p, 'homing_timer', 0)
+            p.spread_timer = getattr(old_p, 'spread_timer', 0)
+            p.homing_active = getattr(old_p, 'homing_active', False)
+            p.spread_active = getattr(old_p, 'spread_active', False)
+            # Also preserve helmet if still active? Keep star level only per classic, but items should persist
+            p.helmet_timer = getattr(old_p, 'helmet_timer', 0)
+            p.invulnerable_timer = getattr(old_p, 'helmet_timer', 0)  # if had helmet, keep shield briefly
             p.update_bullet_power()
             new_players.append(p)
         self.players = new_players
