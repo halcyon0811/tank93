@@ -1,0 +1,58 @@
+{
+  "TILE_SIZE": 24,
+  "GRID_W": 26,
+  "GRID_H": 26,
+  "PLAYFIELD_W": 624,
+  "PLAYFIELD_H": 624,
+  "PLAYFIELD_X": 48,
+  "PLAYFIELD_Y": 48,
+  "TANK_SIZE": 32,
+  "TANK_SPEED": {
+    "player": 3.3,
+    "enemy": 1.8,
+    "fast": 3.0
+  },
+  "BULLET_SPEED": 8.25,
+  "PLAYER_SPAWN": [
+    [
+      8,
+      24
+    ],
+    [
+      16,
+      24
+    ]
+  ],
+  "ENEMY_SPAWNS": [
+    [
+      0,
+      0
+    ],
+    [
+      12,
+      0
+    ],
+    [
+      24,
+      0
+    ]
+  ],
+  "BASE_POS": [
+    12,
+    24
+  ],
+  "POWERUP_TYPES": [
+    "helmet",
+    "clock",
+    "shovel",
+    "star",
+    "grenade",
+    "tank",
+    "gun",
+    "homing",
+    "spread",
+    "rapid",
+    "shrink",
+    "giant"
+  ]
+}

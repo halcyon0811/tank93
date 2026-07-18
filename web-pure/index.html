@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tank93 - Pure JS - 35 Original NES Maps</title>
+<link rel="stylesheet" href="style.css">
+<link rel="icon" href="assets/images/General-Sprites.png">
+</head>
+<body>
+<div id="gameContainer">
+    <div id="header">
+        <h1>TANK 93 - PURE JS - 35 ORIGINAL NES MAPS</h1>
+        <div id="subtitle">No Python - Pure JavaScript Canvas - Battle City Tribute</div>
+    </div>
+    
+    <div id="mainArea">
+        <div id="leftPanel">
+            <canvas id="gameCanvas" width="960" height="720"></canvas>
+            <div id="controls">
+                <b>Controls:</b> P1 WASD+SPACE | P2 ARROWS+ENTER | F11 Fullscreen | P Pause | ESC Menu | R Rapid 3x | M Homing | 8 Spread
+                <br><b>New:</b> Monster base (green in cage) - when hit releases BOSS tank (slowed to normal speed 1.8)
+                <br><b>Items:</b> Orange M=Tracking missile, Purple 8=8-way, Pink R=Rapid 3x - PERM until death, kept across stages
+            </div>
+        </div>
+        
+        <div id="rightPanel">
+            <div id="hud">
+                <h2>TANK 93</h2>
+                <div id="stageInfo">STAGE 1 / 35</div>
+                <div id="enemyInfo">ENEMY 20</div>
+                <div id="playerInfo">
+                    <div>P1: <span id="p1Lives">3</span> lives | Score: <span id="p1Score">0</span></div>
+                    <div id="p1Items"></div>
+                </div>
+                <div id="playerInfo2">
+                    <div>P2: <span id="p2Lives">3</span> lives | Score: <span id="p2Score">0</span></div>
+                    <div id="p2Items"></div>
+                </div>
+                <div id="bossInfo"></div>
+                <div id="mapPreview">
+                    <h3>Original NES Map - Stage 1</h3>
+                    <canvas id="mapCanvas" width="130" height="130"></canvas>
+                    <div id="mapInfo">18*basic 2*fast - 700 enemies total</div>
+                </div>
+                <div id="instructions">
+                    <h3>Features (All Fixed):</h3>
+                    <ul>
+                        <li>✅ Tank facing fixed (was RIGHT/LEFT swapped)</li>
+                        <li>✅ Enemy stuck fix + gradual increase (20→106)</li>
+                        <li>✅ Monster base cage → boss when hit (slowed to 1.8)</li>
+                        <li>✅ Boss releases random items to current enemies</li>
+                        <li>✅ Homing missile (M) + 8-way (8) + Rapid 3x (R)</li>
+                        <li>✅ Items persist across stages, lost on death</li>
+                        <li>✅ Freeze now attackable</li>
+                        <li>✅ Real tank sounds from distant_tank_shots.mp3</li>
+                        <li>✅ Brick hit hybrid real boom + synthetic crack</li>
+                        <li>✅ Fullscreen zoomed (F11/Cmd+F)</li>
+                        <li>✅ LAN remote P2 via same WiFi</li>
+                        <li>✅ Projector http://host:8080</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="footer">
+        <div>35 ORIGINAL NES MAPS - 700 ENEMIES - AUTHENTIC TILES | P1 WASD+SPACE P2 ARROWS+ENTER | LAN: Same WiFi Remote P2 via WebSocket (future) | PROJECTOR: F11 fullscreen</div>
+        <div>NEW: HOMING + 8-WAY + RAPID + BOSS + FREEZE FIX + GRADUAL ENEMIES + REAL TANK SOUNDS | Tank93 Pure JS v1.0 - No Python, Just Browser</div>
+    </div>
+
+    <div id="loading">Loading 35 original NES maps... tank facing fix, monster boss, gradual enemies, real sounds...</div>
+</div>
+
+<script type="module" src="game.js"></script>
+</body>
+</html>
