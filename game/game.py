@@ -134,6 +134,20 @@ class Game:
             self.network_host = None
             self.network_host_ip = None
 
+        # Projector Mode - Stream game to any device/browser on same local network (for projector)
+        self.projector_ip = None
+        self.projector_port = 8080
+        try:
+            from .projector import start_server, get_local_ip as proj_get_ip
+            self.projector_ip = start_server(port=self.projector_port)
+            if self.projector_ip:
+                print(f"[Game] Projector server ready - Open on same WiFi:")
+                print(f"[Game] Projector: http://{self.projector_ip}:{self.projector_port} - for projector or any browser")
+                print(f"[Game] For network projector: Connect laptop to projector via HDMI, open browser to above URL, F11 fullscreen")
+        except Exception as e:
+            print(f"[Game] Projector server failed to start: {e}")
+            self.projector_ip = None
+
     def _get_enemy_queue_for_level(self, level_idx):
         """Return authentic enemy queue if available, else generate fallback."""
         lvl = level_idx % len(LEVELS)
@@ -1318,6 +1332,13 @@ class Game:
             elif self.state in ('gameover', 'stage_clear'):
                 total_score = sum(p.score for p in self.players)
                 self.hud.draw_game_over(self.screen, self.gameover_won, total_score, self)
+
+        # Projector: update frame for network projector view (http://host_ip:8080)
+        try:
+            from .projector import update_frame
+            update_frame(self.screen)
+        except Exception:
+            pass
 
         pygame.display.flip()
 

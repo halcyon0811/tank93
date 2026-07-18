@@ -56,8 +56,18 @@ class HUD:
                     conn_txt = self.font_small.render("Remote P2: python3 remote_client.py --host "+str(game.network_host_ip), True, (150,150,150))
                 screen.blit(conn_txt, (xpos, ypos))
                 ypos += 14
+            # Projector status - for projecting to projector via local network browser
+            if hasattr(game, 'projector_ip') and game.projector_ip:
+                proj_txt = self.font_small.render(f"PROJECTOR: http://{game.projector_ip}:8080", True, (255,200,100))
+                screen.blit(proj_txt, (xpos, ypos))
+                ypos += 14
+                proj_hint = self.font_small.render("Open on projector browser / laptop HDMI -> F11", True, (180,180,120))
+                screen.blit(proj_hint, (xpos, ypos))
+                ypos += 14
         except:
             pass
+        ypos += 4
+        # Calibration status
         try:
             import game.settings as settings_mod
             cal_lines = []
@@ -431,19 +441,22 @@ class HUD:
                 local_ip = "127.0.0.1"
             footer_lines = [
                 f"{TOTAL_STAGES} ORIGINAL NES MAPS - 700 ENEMIES - AUTHENTIC TILES | P1 WASD+SPACE P2 ARROWS+ENTER",
-                f"LAN: {local_ip}:9999 | REMOTE P2: python3 remote_client.py --host {local_ip}",
-                f"NEW: HOMING + 8-WAY + RAPID + MINI + GIANT + VENOM BOSS + BULLET COUNTER",
+                f"LAN: {local_ip}:9999 | P2 REMOTE: python3 remote_client.py --host {local_ip}",
+                f"PROJECTOR: http://{local_ip}:8080 on same WiFi - open on projector/browser -> F11 fullscreen",
+                f"NEW: HOMING + 8-WAY + RAPID + BOSS + FREEZE FIX + GRADUAL ENEMIES",
             ]
             for j, line in enumerate(footer_lines):
-                f = pygame.font.Font(None, 15)
+                f = pygame.font.Font(None, 14)
                 if j == 0:
                     c = (200,200,100)
                 elif j == 1:
                     c = (100,200,255)
+                elif j == 2:
+                    c = (255,200,100)
                 else:
                     c = (255,140,0)
                 txt = f.render(line, True, c)
-                screen.blit(txt, txt.get_rect(center=(SCREEN_WIDTH//2, footer_y + 6 + j*16)))
+                screen.blit(txt, txt.get_rect(center=(SCREEN_WIDTH//2, footer_y + 2 + j*15)))
 
             if (t // 500) % 2 == 0:
                 coin_txt = pygame.font.Font(None, 18).render("INSERT COIN C/5 FOR 10 LIVES - PRESS ENTER TO START", True, (255,220,80))
@@ -567,7 +580,11 @@ class HUD:
                 " Each coin = 10 lives, Press C or 5 to Insert Coin",
                 " Press 1 = P1 Join, Press 2 = P2 Join (late join OK)",
                 " Joy-Con: Minus (-) = Coin, Plus (+) = Start/Join",
-                " LAN: Host shows IP, remote P2 runs remote_client.py --host <ip>",
+                " LAN: Host shows IP, remote P2 runs remote_client.py --host <ip> (same WiFi)",
+                " PROJECTOR: Open http://<host_ip>:8080 on projector browser / laptop HDMI -> F11",
+                "   - Game streams live 10 FPS, works for any smart projector with browser",
+                "   - Or use Mac AirPlay: Screen Mirroring to Apple TV + Projector",
+                "   - For network projector (Epson/BenQ): open browser on projector if supported",
                 " After Game Over, 15 sec to insert coin and continue same stage",
                 " Base repaired on continue, score kept",
                 "",
