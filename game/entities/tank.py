@@ -19,8 +19,9 @@ class Tank:
         self.grid_y = grid_y
         self.x = PLAYFIELD_X + grid_x * TILE_SIZE + TILE_SIZE//2
         self.y = PLAYFIELD_Y + grid_y * TILE_SIZE + TILE_SIZE//2
-        # target for smooth movement snapped to tile?
-        self.rect = pygame.Rect(0,0,TANK_SIZE-4, TANK_SIZE-4)
+        self.base_size = TANK_SIZE-4
+        self.current_scale = 1.0
+        self.rect = pygame.Rect(0,0,self.base_size, self.base_size)
         self.rect.center = (self.x, self.y)
 
         self.color = color
@@ -33,14 +34,60 @@ class Tank:
         self.cooldown = 0
         self.bullet_power = 1
         self.speed = TANK_SPEED['player'] if is_player else TANK_SPEED['enemy']
+        self.base_speed = self.speed
 
         self.invulnerable_timer = 0
         self.spawn_protection = 0
         self.on_ice = False
 
+        # size effects
+        self.shrink_timer = 0
+        self.giant_timer = 0
+        self.is_shrunk = False
+        self.is_giant = False
+
+        # venom
+        self.venom_timer = 0
+        self.venom_level = 0
+
         # animation
         self.move_timer = 0
         self.track_offset = 0
+
+    def update_size_state(self):
+        # Handle shrink/giant timers
+        if self.shrink_timer > 0:
+            self.shrink_timer -= 1
+            self.is_shrunk = True
+            self.current_scale = SHRINK_SCALE
+            self.speed = self.base_speed * SHRINK_SPEED_MULT
+            if self.shrink_timer == 0:
+                self.is_shrunk = False
+                self.current_scale = 1.0 if not self.is_giant else GIANT_SCALE
+                self.speed = self.base_speed * (2.0 if self.is_giant else 1.0)
+                self._update_rect_size()
+        if self.giant_timer > 0:
+            self.giant_timer -= 1
+            self.is_giant = True
+            self.current_scale = GIANT_SCALE
+            if self.giant_timer == 0:
+                self.is_giant = False
+                self.current_scale = SHRINK_SCALE if self.is_shrunk else 1.0
+                # speed back to normal or shrunk
+                if self.is_shrunk:
+                    self.speed = self.base_speed * SHRINK_SPEED_MULT
+                else:
+                    self.speed = self.base_speed
+                self._update_rect_size()
+        # update rect size based on scale
+        self._update_rect_size()
+
+    def _update_rect_size(self):
+        sz = int(self.base_size * self.current_scale)
+        # prevent too tiny
+        sz = max(12, sz)
+        self.rect = pygame.Rect(0,0,sz,sz)
+        self.rect.center = (self.x, self.y)
 
     def set_position(self, grid_x, grid_y):
         self.grid_x = grid_x
@@ -51,10 +98,9 @@ class Tank:
 
     def get_bullet_spawn(self):
         cx, cy = self.rect.center
-        offset = TANK_SIZE//2 + 4
-        # 8-direction support
+        scale = getattr(self, 'current_scale', 1.0)
+        offset = int((TANK_SIZE//2 + 4) * scale)
         dx, dy = DIRS.get(self.direction, (0, -1))
-        # For diagonal, offset both
         return cx + dx * offset, cy + dy * offset
 
     def can_shoot(self):
@@ -122,12 +168,18 @@ class Tank:
         if new_rect.top < PLAYFIELD_Y - 6 or new_rect.bottom > PLAYFIELD_Y + PLAYFIELD_H + 6:
             return False
 
-        # tile collision - authentic checks 2 front corners with small tolerance (2px) like original
-        # Shrink new_rect slightly for more forgiving collision (original allows 2px overlap)
+        # tile collision - giant can crush bricks but not steel/water/forest?
+        # Requirement: giant can run over bricks (but not steel or forest or water)
+        is_giant = getattr(self, 'is_giant', False) and getattr(self, 'giant_timer', 0) > 0
         check_rect = new_rect.inflate(-4, -4)
         tiles = tilemap.get_tiles_in_rect(check_rect)
+        crushed_bricks = []
         for ttype, gx, gy, trect in tiles:
             if check_rect.colliderect(trect):
+                if ttype == TILE_BRICK and is_giant:
+                    # giant crushes brick - mark for destruction
+                    crushed_bricks.append((gx, gy))
+                    continue  # don't block
                 # Try to nudge slightly if turning and close to wall
                 if is_turn and (abs(snap_x - self.x) > 0.1 or abs(snap_y - self.y) > 0.1):
                     new_rect2 = self.rect.copy()
@@ -137,25 +189,59 @@ class Tank:
                     tiles2 = tilemap.get_tiles_in_rect(check_rect2)
                     for _, _, _, tr2 in tiles2:
                         if check_rect2.colliderect(tr2):
-                            blocked2 = True
-                            break
+                            # giant can ignore bricks - check all tiles in rect for non-brick blockers
+                            has_non_brick_blocker = False
+                            for t2, gx2, gy2, tr2b in tiles2:
+                                if not check_rect2.colliderect(tr2b):
+                                    continue
+                                if t2 == TILE_BRICK and is_giant:
+                                    continue
+                                has_non_brick_blocker = True
+                                break
+                            blocked2 = has_non_brick_blocker
+                            if blocked2:
+                                break
                     if not blocked2:
                         snap_x, snap_y = self.x, self.y
                         new_x = self.x + dx * self.speed * speed_mult
                         new_y = self.y + dy * self.speed * speed_mult
                         new_rect = new_rect2
                         check_rect = check_rect2
+                        # crush bricks for new_rect2 as well
+                        tiles = tiles2
                     else:
                         return False
                 else:
                     return False
 
-        # tank-tank collision - authentic: tanks block each other, no overlap
+        # Destroy crushed bricks after deciding move is okay
+        for gx, gy in crushed_bricks:
+            try:
+                tilemap.destroy_tile(gx, gy, 2, dir_name)  # power 2 break
+                # add particles via game reference if available? we'll do via return flag
+            except:
+                try:
+                    tilemap.destroy_tile(gx, gy, 2)
+                except:
+                    pass
+
+        # tank-tank collision - giant can run over enemies and destroy them
         for other in other_tanks:
             if other is self or not other.alive:
                 continue
-            # Slight shrink for more forgiving feel (original has 2px gap)
             if new_rect.colliderect(other.rect.inflate(-2, -2)):
+                # If self is player giant and other is enemy, crush it
+                if is_giant and self.is_player and not other.is_player:
+                    # Crush enemy
+                    try:
+                        other.die()
+                        # score?
+                        if hasattr(self, 'score'):
+                            self.score += getattr(other, 'score_value', 100)
+                    except:
+                        other.alive = False
+                    continue  # don't block, ran over
+                # Shrink can go through smaller gaps? No, still block
                 return False
 
         # Move successful - apply snap if any
@@ -174,12 +260,27 @@ class Tank:
         if self.spawn_protection > 0:
             self.spawn_protection -= 1
 
+        # size effects
+        self.update_size_state()
+
+        # venom dissolve over 10s
+        if getattr(self, 'venom_timer', 0) > 0:
+            self.venom_timer -= 1
+            self.venom_level = 1.0 - (self.venom_timer / VENOM_DISSOLVE_TIME)
+            if self.venom_timer <= 0:
+                # destroyed by venom
+                self.alive = False
+                self.venom_level = 1.0
+
         # check ice under
-        gx = int((self.rect.centerx - PLAYFIELD_X) // TILE_SIZE)
-        gy = int((self.rect.centery - PLAYFIELD_Y) // TILE_SIZE)
-        if 0 <= gx < GRID_W and 0 <= gy < GRID_H:
-            self.on_ice = tilemap.tiles[gy][gx] == TILE_ICE
-        else:
+        try:
+            gx = int((self.rect.centerx - PLAYFIELD_X) // TILE_SIZE)
+            gy = int((self.rect.centery - PLAYFIELD_Y) // TILE_SIZE)
+            if 0 <= gx < GRID_W and 0 <= gy < GRID_H and tilemap is not None:
+                self.on_ice = tilemap.tiles[gy][gx] == TILE_ICE
+            else:
+                self.on_ice = False
+        except:
             self.on_ice = False
 
     def take_damage(self, power=1):
@@ -194,6 +295,17 @@ class Tank:
     def draw(self, screen):
         if not self.alive:
             return
+
+        # Venom dissolve visual - tank gradually dissolves/green slime over 10s
+        venom_t = getattr(self, 'venom_timer', 0)
+        venom_lv = getattr(self, 'venom_level', 0)
+        if venom_t > 0 and hasattr(self, 'venom_timer'):
+            # flicker green and shrink visually
+            diss = venom_lv  # 0->1
+            # green overlay
+            if int(pygame.time.get_ticks()/100) % 2 == 0 or diss > 0.5:
+                # will draw extra below
+                pass
 
         # If authentic NES sprites available, use them for true retro look matching downloaded_maps
         # This matches General-Sprites.png ripped from NES ROM (yellow player, green P2, silver enemy, red power)
@@ -258,37 +370,60 @@ class Tank:
                 # For authentic retro tanks we also want to mirror powerup flashing like original (red/silver flashing)
                 # Already handled color flashing above
 
-                # Get sprite scaled to TANK_SIZE (32 -> 16*2) using cached version for perf
+                # Get sprite scaled to current size (shrink/giant)
+                scale = getattr(self, 'current_scale', 1.0)
+                draw_size = int(TANK_SIZE * scale)
                 from ..assets.sprites import get_cached_tank
-                spr = get_cached_tank(sprite_color, self.direction, anim, sprite_level, TANK_SIZE)
+                spr = get_cached_tank(sprite_color, self.direction, anim, sprite_level, draw_size)
                 if spr is None:
-                    # fallback to non-cached
                     from ..assets.sprites import get_tank_sprite_scaled as _g
-                    spr = _g(sprite_color, self.direction, anim_frame=anim, level=sprite_level, size=TANK_SIZE)
+                    spr = _g(sprite_color, self.direction, anim_frame=anim, level=sprite_level, size=draw_size)
                 if spr is not None:
-                    # flicker when invulnerable (original NES tanks blink when spawn protection)
                     if shield_flicker and self.invulnerable_timer % 8 < 4:
-                        # skip draw for blink effect - draw only shield already
                         pass
                     else:
-                        # Center blit
-                        rect = spr.get_rect(center=self.rect.center)
-                        screen.blit(spr, rect)
+                        # Apply venom dissolve alpha
+                        venom_t = getattr(self, 'venom_timer', 0)
+                        venom_lv = getattr(self, 'venom_level', 0)
+                        draw_spr = spr
+                        if venom_t > 0:
+                            # make sprite greener and partially transparent as it dissolves
+                            # create tinted copy
+                            try:
+                                tinted = spr.copy()
+                                # green overlay with alpha based on level
+                                overlay = pygame.Surface(tinted.get_size(), pygame.SRCALPHA)
+                                alpha = int(120 * min(1.0, venom_lv*1.5 + 0.2))
+                                overlay.fill((40, 200, 40, alpha))
+                                tinted.blit(overlay, (0,0), special_flags=pygame.BLEND_RGBA_ADD)
+                                # dissolve: shrink alpha over time
+                                if venom_lv > 0.5:
+                                    fade_alpha = int(255 * (1.0 - (venom_lv-0.5)*2))
+                                    tinted.set_alpha(max(30, fade_alpha))
+                                draw_spr = tinted
+                            except:
+                                draw_spr = spr
+                        rect = draw_spr.get_rect(center=self.rect.center)
+                        screen.blit(draw_spr, rect)
 
-                        # player indicator small
                         if self.is_player:
                             pid = getattr(self, 'player_id', 1)
-                            # small P1/P2 label above like NES?
-                            # In original NES, no label, but we keep for co-op clarity small
                             font = pygame.font.Font(None, 14)
-                            txt = font.render(f"P{pid}", True, COLOR_WHITE if pid==1 else (100,255,100))
-                            # background black
+                            # show size effect
+                            extra = ""
+                            if getattr(self, 'is_giant', False):
+                                extra = " GIANT"
+                            elif getattr(self, 'is_shrunk', False):
+                                extra = " MINI"
+                            if venom_t > 0:
+                                extra += f" VENOM {venom_t//FPS}s"
+                            label = f"P{pid}{extra}"
+                            txt = font.render(label, True, COLOR_WHITE if pid==1 else (100,255,100))
                             txt_bg = pygame.Surface((txt.get_width()+4, txt.get_height()+2))
                             txt_bg.fill((0,0,0))
                             screen.blit(txt_bg, (self.rect.centerx - txt.get_width()//2 -2, self.rect.top - 14))
                             screen.blit(txt, (self.rect.centerx - txt.get_width()//2, self.rect.top - 14))
 
-                        # armor health bar for armor tanks (keep for gameplay clarity)
                         if getattr(self, 'enemy_type', '') == 'armor' and getattr(self, 'health',1) > 1 and not self.is_player:
                             bar_w = 20
                             bar_h = 4
@@ -296,12 +431,26 @@ class Tank:
                             cy = self.rect.bottom + 2
                             pygame.draw.rect(screen, (0,0,0), (cx-bar_w//2-1, cy-1, bar_w+2, bar_h+2))
                             pygame.draw.rect(screen, (60,60,60), (cx-bar_w//2, cy, bar_w, bar_h))
-                            # green to red based on health
                             frac = self.health / 4.0
                             col = (int(255*(1-frac)), int(255*frac), 0)
                             pygame.draw.rect(screen, col, (cx-bar_w//2, cy, int(bar_w*frac), bar_h))
 
-                    return  # authentic sprite drawn, skip fallback
+                        # Giant aura / shrink sparkles
+                        if getattr(self, 'is_giant', False):
+                            pygame.draw.rect(screen, (255, 80, 80), self.rect, 2, border_radius=4)
+                        if getattr(self, 'is_shrunk', False):
+                            for _ in range(2):
+                                sx = self.rect.centerx + random.randint(-6,6)
+                                sy = self.rect.centery + random.randint(-6,6)
+                                pygame.draw.circle(screen, (150, 220, 255), (sx, sy), 1)
+                        if venom_t > 0:
+                            # dripping slime
+                            for i in range(int(3 + venom_lv*4)):
+                                sx = self.rect.centerx + random.randint(-8,8)
+                                sy = self.rect.bottom - 4 + int(venom_lv*6) + i*3
+                                pygame.draw.circle(screen, (60, 200, 60), (sx, sy), max(1, int(3-venom_lv*2)))
+
+                    return
             except Exception as e:
                 # fallback to procedural if sprite fails
                 # print(f"Sprite draw error {e}")
@@ -309,7 +458,8 @@ class Tank:
 
         # ---- Fallback procedural retro (if sheet missing) ----
         cx, cy = self.rect.center
-        size = TANK_SIZE - 6
+        scale = getattr(self, 'current_scale', 1.0)
+        size = int((TANK_SIZE - 6) * scale)
 
         # Modern simplified fallback that resembles NES yellow/gray etc.
         body_rect = pygame.Rect(0,0,size-4, size-4)

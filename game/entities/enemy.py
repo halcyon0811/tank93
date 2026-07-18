@@ -123,15 +123,17 @@ class EnemyTank(Tank):
             self.score_value = 400
             self.shoot_chance = 0.020
         elif enemy_type in ('boss', 'monster_boss', 'monster'):
-            # Monster boss - released when monster base is hit
-            self.speed = TANK_SPEED['enemy'] * 1.1
-            self.health = 12  # boss has high health
-            self.bullet_power = 2  # can break steel
-            self.score_value = 2000
-            self.shoot_chance = 0.08  # shoots a lot
+            # Monster boss - enforced: 1.5x player tank speed, venom shooting
+            self.speed = TANK_SPEED['player'] * MONSTER_SPEED_MULT  # 1.5x player = 3.3
+            self.health = 18  # tougher boss now
+            self.bullet_power = 2
+            self.score_value = 3500
+            self.shoot_chance = 0.12  # shoots more, mix of normal + venom
             self.is_boss = True
+            self.venom_cooldown = 0
+            self.venom_shoot_chance = 0.06
             # Make boss bigger
-            self.rect = pygame.Rect(0,0, int((TANK_SIZE-4)*1.6), int((TANK_SIZE-4)*1.6))
+            self.rect = pygame.Rect(0,0, int((TANK_SIZE-4)*1.8), int((TANK_SIZE-4)*1.8))
             self.rect.center = (self.x, self.y)
         else:
             self.speed = TANK_SPEED['enemy']
@@ -362,14 +364,35 @@ class EnemyTank(Tank):
             shoot_chance *= 1.8
 
         if random.random() < shoot_chance and self.base_attack_cooldown == 0:
-            new_bullet = self.shoot()
-            if new_bullet:
-                bullets_list.append(new_bullet)
-                if is_base:
-                    self.base_attack_cooldown = 30
+            # boss has chance to shoot venom instead
+            if getattr(self, 'is_boss', False) and random.random() < 0.5:
+                vb = self.shoot_venom(players)
+                if vb:
+                    bullets_list.append(vb)
+                    new_bullet = vb
+                else:
+                    new_bullet = self.shoot()
+                    if new_bullet:
+                        bullets_list.append(new_bullet)
+            else:
+                new_bullet = self.shoot()
+                if new_bullet:
+                    bullets_list.append(new_bullet)
+            if is_base:
+                self.base_attack_cooldown = 30
+        else:
+            # boss independent venom timer even when not aligned
+            if getattr(self, 'is_boss', False):
+                if random.random() < getattr(self, 'venom_shoot_chance', 0.04):
+                    vb = self.shoot_venom(players)
+                    if vb:
+                        bullets_list.append(vb)
+                        new_bullet = vb
 
         super().update(tilemap, other_tanks + players)
         self.bullets = [b for b in self.bullets if b.alive]
+        if getattr(self, 'venom_cooldown', 0) > 0:
+            self.venom_cooldown -= 1
         return new_bullet
 
     def choose_new_direction(self, players, tilemap, base=None):
@@ -521,17 +544,32 @@ class EnemyTank(Tank):
         else:
             self.direction = opposite.get(self.direction, random.choice(['UP','DOWN','LEFT','RIGHT']))
 
-    def shoot(self):
-        if not self.can_shoot():
+    def shoot(self, venom=False):
+        if not self.can_shoot() and not venom:
             return None
         sx, sy = self.get_bullet_spawn()
+        if venom or (getattr(self, 'is_boss', False) and random.random() < 0.45):
+            # venom shot from boss
+            b = Bullet(sx, sy, self.direction, 'enemy', power=1, venom=True)
+            b.owner = 'boss'
+            self.bullets.append(b)
+            if getattr(self, 'is_boss', False):
+                self.cooldown = random.randint(35, 80)
+                self.venom_cooldown = 25
+            try:
+                from ..sound_manager import sound_manager
+                sound_manager.play_shoot()
+            except:
+                pass
+            return b
         b = Bullet(sx, sy, self.direction, 'enemy', power=self.bullet_power, color=(255, 100, 100))
         self.bullets.append(b)
-        # Authentic cooldown varies by type (merged with sound)
         if self.enemy_type == 'fast':
             self.cooldown = random.randint(30, 70)
         elif self.enemy_type == 'power':
             self.cooldown = random.randint(25, 60)
+        elif getattr(self, 'is_boss', False):
+            self.cooldown = random.randint(30, 60)
         else:
             self.cooldown = random.randint(40, 95)
         try:
@@ -540,6 +578,40 @@ class EnemyTank(Tank):
         except:
             pass
         return b
+
+    def shoot_venom(self, players):
+        if not getattr(self, 'is_boss', False):
+            return None
+        if getattr(self, 'venom_cooldown', 0) > 0:
+            self.venom_cooldown -= 1
+            return None
+        # find closest player
+        alive = [p for p in players if p.alive]
+        if not alive:
+            return None
+        closest = min(alive, key=lambda p: math.hypot(p.x - self.x, p.y - self.y))
+        # aim at player
+        dx = closest.x - self.x
+        dy = closest.y - self.y
+        # choose direction closest to player
+        best_dir = None
+        best_dot = -2
+        for dname, (ddx, ddy) in DIRS.items():
+            if ddx == 0 and ddy == 0:
+                continue
+            ndx, ndy = ddx, ddy
+            if ndx != 0 and ndy != 0:
+                nlen = math.hypot(ndx, ndy)
+                ndx /= nlen
+                ndy /= nlen
+            norm = math.hypot(dx, dy) or 1
+            dot = (dx/norm)*ndx + (dy/norm)*ndy
+            if dot > best_dot:
+                best_dot = dot
+                best_dir = dname
+        if best_dir:
+            self.direction = best_dir
+        return self.shoot(venom=True)
 
     def take_damage(self, power=1):
         if self.invulnerable_timer > 0 or self.spawn_protection > 0:
@@ -601,14 +673,23 @@ class EnemyTank(Tank):
             # Teeth
             pygame.draw.rect(screen, (255,255,200), (cx-6, eye_y+8, 3, 5))
             pygame.draw.rect(screen, (255,255,200), (cx+3, eye_y+8, 3, 5))
+            # Venom drip from mouth when about to shoot
+            if random.random() < 0.3:
+                pygame.draw.circle(screen, (80, 200, 40), (cx, eye_y+14), 2)
+                pygame.draw.circle(screen, (60, 180, 60), (cx+1, eye_y+16), 1)
+            # Speed lines for 1.5x
+            if getattr(self, 'move_timer', 0) % 6 < 3:
+                pygame.draw.line(screen, (255,255,100), (cx-size//2-2, cy-4), (cx-size//2-6, cy-4), 2)
+                pygame.draw.line(screen, (255,255,100), (cx-size//2-2, cy+6), (cx-size//2-7, cy+6), 2)
             # Boss label and health bar - big
-            bar_w = 40
-            bar_h = 6
+            bar_w = 48
+            bar_h = 7
             bar_x = cx - bar_w//2
-            bar_y = cy - size//2 - 12
+            bar_y = cy - size//2 - 14
             pygame.draw.rect(screen, (0,0,0), (bar_x-1, bar_y-1, bar_w+2, bar_h+2))
             pygame.draw.rect(screen, (60,60,60), (bar_x, bar_y, bar_w, bar_h))
-            frac = max(0, self.health / 12.0)
+            max_h = 18.0
+            frac = max(0, self.health / max_h)
             col = (int(255*(1-frac)), int(255*frac), 0)
             pygame.draw.rect(screen, col, (bar_x, bar_y, int(bar_w*frac), bar_h))
             # BOSS text

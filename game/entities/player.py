@@ -27,10 +27,13 @@ class PlayerTank(Tank):
         self.helmet_timer = 0
         self.spawn_protection = 120  # initial protection
         self.speed = TANK_SPEED['player']
-        # New item system: tracking missile and 8-way firing and rapid 3x attack
-        self.homing_timer = 0    # tracking missile active
-        self.spread_timer = 0    # 8-direction active
-        self.rapid_timer = 0     # rapid 3x attack speed
+        self.base_speed = TANK_SPEED['player']
+        # New item system: tracking missile and 8-way firing and rapid 3x attack + shrink/giant
+        self.homing_timer = 0
+        self.spread_timer = 0
+        self.rapid_timer = 0
+        self.shrink_timer = 0
+        self.giant_timer = 0
         self.homing_active = False
         self.spread_active = False
         self.rapid_active = False
@@ -51,19 +54,39 @@ class PlayerTank(Tank):
         return not self.alive and self.lives < 0
 
     def update_bullet_power(self):
+        # Don't override speed if shrink/giant active - they manage speed themselves via base_speed
+        if self.shrink_timer > 0 or self.giant_timer > 0:
+            # size effects manage speed
+            if self.star_level == 0:
+                self.bullet_power = 1
+                MAX_BULLETS['player'] = 1
+            elif self.star_level == 1:
+                self.bullet_power = 1
+                MAX_BULLETS['player'] = 2
+            elif self.star_level == 2:
+                self.bullet_power = 1
+            elif self.star_level >= 3:
+                self.bullet_power = 2
+            return
+
         if self.star_level == 0:
             self.bullet_power = 1
             self.speed = TANK_SPEED['player']
-            MAX_BULLETS['player'] = 1  # actually keep 2 but low level slower
+            self.base_speed = TANK_SPEED['player']
+            MAX_BULLETS['player'] = 1
         elif self.star_level == 1:
             self.bullet_power = 1
+            self.base_speed = TANK_SPEED['player']
+            self.speed = TANK_SPEED['player']
             MAX_BULLETS['player'] = 2
         elif self.star_level == 2:
             self.bullet_power = 1
-            self.speed = TANK_SPEED['player'] * 1.3
+            self.base_speed = TANK_SPEED['player'] * 1.3
+            self.speed = self.base_speed
         elif self.star_level >= 3:
-            self.bullet_power = 2  # can break steel
-            self.speed = TANK_SPEED['player'] * 1.3
+            self.bullet_power = 2
+            self.base_speed = TANK_SPEED['player'] * 1.3
+            self.speed = self.base_speed
 
     def handle_input(self, keys, joystick=None, tilemap=None, other_tanks=None, num_players=1):
         if not self.alive:
@@ -514,13 +537,16 @@ class PlayerTank(Tank):
             # Fire 8 directions at once
             for d in EIGHT_DIRS:
                 sx, sy = self.get_bullet_spawn_for(d)
-                # Homing spread: if homing active too, make each homing
+                # Homing spread: if homing active too, make each homing but with stagger for perf (avoid 8 A* same frame)
                 is_homing = self.homing_active
                 col = (255, 140, 0) if is_homing else base_color
                 if self.rapid_active and not is_homing:
-                    # rapid visual: add pink
                     col = (255, 100, 150) if col == self.color else col
                 bullet = Bullet(sx, sy, d, f"player{self.player_id}", power=self.bullet_power, color=col, homing=is_homing)
+                # stagger replan to avoid 8 A* spike same frame
+                if is_homing:
+                    import random as _rnd
+                    bullet.replan_timer = _rnd.randint(0, 25)
                 self.bullets.append(bullet)
                 bullets_created.append(bullet)
             # Cooldown: base 25, /3 if rapid active = ~8
@@ -534,8 +560,8 @@ class PlayerTank(Tank):
                 # Override with rapid color if not homing
                 col = (255, 50, 150)
             bullet = Bullet(sx, sy, self.direction, f"player{self.player_id}", power=self.bullet_power, color=col, homing=is_homing)
-            # If rapid, bullet speed *1.5 for extra feel of 3x attack?
-            if self.rapid_active:
+            # If rapid, bullet speed *1.2 for extra feel, but NOT for homing (keep tank speed)
+            if self.rapid_active and not is_homing:
                 bullet.speed *= 1.2
             self.bullets.append(bullet)
             bullets_created.append(bullet)
@@ -571,10 +597,8 @@ class PlayerTank(Tank):
             if self.homing_timer <= 0:
                 self.homing_active = False
         else:
-            # Only set inactive if not permanent
             if self.homing_timer != -1:
                 self.homing_active = False
-
         # Spread
         if self.spread_timer == -1:
             self.spread_active = True
@@ -586,8 +610,7 @@ class PlayerTank(Tank):
         else:
             if self.spread_timer != -1:
                 self.spread_active = False
-
-        # Rapid 3x attack speed - permanent until death
+        # Rapid
         if self.rapid_timer == -1:
             self.rapid_active = True
         elif self.rapid_timer > 0:
@@ -598,6 +621,16 @@ class PlayerTank(Tank):
         else:
             if self.rapid_timer != -1:
                 self.rapid_active = False
+        # Shrink - 15s temp
+        if self.shrink_timer > 0:
+            self.shrink_timer -= 1
+            if self.shrink_timer <= 0:
+                self.shrink_timer = 0
+        # Giant - 15s
+        if self.giant_timer > 0:
+            self.giant_timer -= 1
+            if self.giant_timer <= 0:
+                self.giant_timer = 0
 
         # clean bullets
         self.bullets = [b for b in self.bullets if b.alive]
@@ -612,14 +645,23 @@ class PlayerTank(Tank):
     def die(self):
         super().die()
         self.lives -= 1
-        # reset star level but keep? Classic loses all power
         self.star_level = 0
         self.homing_timer = 0
         self.spread_timer = 0
         self.rapid_timer = 0
+        self.shrink_timer = 0
+        self.giant_timer = 0
         self.homing_active = False
         self.spread_active = False
         self.rapid_active = False
+        self.is_shrunk = False
+        self.is_giant = False
+        self.current_scale = 1.0
+        self.speed = TANK_SPEED['player']
+        self.base_speed = TANK_SPEED['player']
+        self.venom_timer = 0
+        self.venom_level = 0
+        self._update_rect_size()
         self.update_bullet_power()
 
     def respawn(self, grid_x, grid_y):
@@ -662,8 +704,21 @@ class PlayerTank(Tank):
             self.spread_active = True
             self.score += 200
         elif type_name == 'rapid':
-            # Rapid fire item: speed up attacking to *3
-            self.rapid_timer = -1  # permanent until death
+            self.rapid_timer = -1
             self.rapid_active = True
             self.score += 200
+        elif type_name == 'shrink':
+            # Half size, double speed for 15s
+            self.shrink_timer = POWERUP_DURATION.get('shrink', 15*FPS)
+            # cancel giant if active (can't be both)
+            self.giant_timer = 0
+            self.is_giant = False
+            self.score += 150
+            self.update_bullet_power()
+        elif type_name == 'giant':
+            self.giant_timer = GIANT_DURATION
+            self.shrink_timer = 0
+            self.is_shrunk = False
+            self.score += 300
+            self.update_bullet_power()
         # grenade, clock handled by game

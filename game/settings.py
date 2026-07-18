@@ -87,6 +87,17 @@ BULLET_SPEED = 5.5
 BULLET_SIZE = 6
 MAX_BULLETS = {"player": 2, "enemy": 1}  # classic limiting
 
+# Smart M (homing) missile - new behavior: tank speed, limited range, avoids walls
+HOMING_SPEED = TANK_SPEED["player"] * 1.08  # ~2.38, very similar to tank moving speed (2.2)
+HOMING_MAX_DISTANCE = GRID_W * TILE_SIZE * 0.92  # ~574 px = 24 tiles travel limit (limited but allows going around walls)
+HOMING_TURN_SPEED = 0.068  # slightly higher than before for wall avoidance agility, still smooth (was 0.18 before, now smarter slower)
+HOMING_DETECTION_RANGE = PLAYFIELD_W * 0.92  # only track enemies within range
+HOMING_LOS_CHECK = True  # prefer direct if line of sight, else A* waypoints
+HOMING_ASTAR_REPLAN_INTERVAL = 36  # frames between path replan (faster replan for moving enemies)
+HOMING_AVOIDANCE_LOOKAHEAD = 2.6  # tiles lookahead for obstacle avoidance (longer = earlier dodge)
+HOMING_WALL_SAFE_MARGIN = 0.28  # safe margin from walls in tile units
+HOMING_STUCK_DESTROY_THRESHOLD = 16  # frames stuck before destroying brick fallback
+
 PLAYER_SPAWN = [
     (8, 24),   # P1 grid position
     (16, 24),  # P2
@@ -94,8 +105,8 @@ PLAYER_SPAWN = [
 ENEMY_SPAWNS = [(0, 0), (12, 0), (24, 0)]
 BASE_POS = (12, 24)  # eagle position (top-left of 2x2)
 
-# Powerups - classic + new items (homing missile, 8-way spread, rapid fire 3x)
-POWERUP_TYPES = ['helmet', 'clock', 'shovel', 'star', 'grenade', 'tank', 'gun', 'homing', 'spread', 'rapid']
+# Powerups - classic + new items (homing missile, 8-way spread, rapid fire 3x, shrink, giant)
+POWERUP_TYPES = ['helmet', 'clock', 'shovel', 'star', 'grenade', 'tank', 'gun', 'homing', 'spread', 'rapid', 'shrink', 'giant']
 POWERUP_DURATION = {
     'helmet': 10 * FPS,
     'clock': 5 * FPS,
@@ -103,8 +114,20 @@ POWERUP_DURATION = {
     'homing': 15 * FPS,   # tracking missile active for 15 sec (now PERM until death)
     'spread': 12 * FPS,   # 8-direction firing for 12 sec (now PERM until death)
     'rapid': 10 * FPS,    # rapid fire 3x attack speed - now PERM until death
+    'shrink': 15 * FPS,   # half size double speed for 15s
+    'giant': 15 * FPS,    # double size crush bricks + enemies for 15s
 }
 STAR_LEVELS = 4
+
+# New item specifics
+SHRINK_SCALE = 0.5
+SHRINK_SPEED_MULT = 2.0
+GIANT_SCALE = 2.0
+GIANT_DURATION = 15 * FPS
+MONSTER_SPEED_MULT = 1.5  # relative to player speed
+VENOM_DISSOLVE_TIME = 10 * FPS
+VENOM_SPEED = BULLET_SPEED * 0.7
+BULLET_COUNTER_ENABLED = True
 
 # Enemy count per level
 ENEMIES_PER_LEVEL = 20

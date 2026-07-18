@@ -49,6 +49,19 @@ class ParticleSystem:
             vy = math.sin(angle)*speed
             self.particles.append(Particle(x, y, (255,255,255), vx, vy, life=25))
 
+    def add_venom(self, x, y):
+        for _ in range(14):
+            c = random.choice([(80,220,80), (40,160,40), (120,255,120), (20,100,20)])
+            self.particles.append(Particle(x, y, c, life=random.randint(18, 36), vx=random.uniform(-2.5,2.5), vy=random.uniform(-3,1)))
+        # drip
+        for _ in range(6):
+            self.particles.append(Particle(x+random.uniform(-4,4), y, (60,180,60), vx=random.uniform(-0.5,0.5), vy=random.uniform(0.5,1.5), life=random.randint(25,45)))
+
+    def add_crush(self, x, y):
+        for _ in range(16):
+            c = random.choice([(210,56,24), (140,30,10), (180,180,180)])
+            self.particles.append(Particle(x, y, c, life=random.randint(15,30)))
+
     def update(self):
         self.particles = [p for p in self.particles if p.update()]
 

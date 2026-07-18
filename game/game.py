@@ -31,8 +31,6 @@ from .ui.hud import HUD
 
 class Game:
     def __init__(self):
-        # Fix macOS IMK crash "error messaging the mach port for IMKCFRunLoopWakeUpReliable"
-        # and libpng iCCP warning - set env before init
         import os
         os.environ.setdefault('SDL_IME_SHOWUI', '0')
         os.environ.setdefault('PYGAME_HIDE_SUPPORT_PROMPT', '1')
@@ -53,7 +51,6 @@ class Game:
                     temp.append(js)
                 except Exception:
                     continue
-            # Sort L/R for consistent 2P assignment fix
             def sort_key(js):
                 try:
                     n = js.get_name().lower()
@@ -80,20 +77,28 @@ class Game:
             pygame.event.set_allowed(pygame.JOYDEVICEREMOVED)
         except:
             pass
+        # FIX: block noisy motion events causing menu stuck / SystemError on macOS virtual joystick
+        try:
+            pygame.event.set_blocked(pygame.JOYAXISMOTION)
+            pygame.event.set_blocked(pygame.JOYBALLMOTION)
+        except:
+            pass
 
         self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
         pygame.display.set_caption("Tank 93 Enhanced - Battle City Tribute")
         self.clock = pygame.time.Clock()
         self.hud = HUD()
 
-        self.state = 'menu'  # menu, playing, paused, gameover, stage_clear
+        self.state = 'menu'
         self.menu_selected = 0
-        self.menu_mode = 'main'  # main, level, howto
+        self.menu_mode = 'main'
         self.num_players = 1
         self.current_level = 0
         self.high_score = 0
+        self.menu_hat_cooldown = 0
+        self.menu_stuck_timer = 0
+        self.joystick_error_count = 0
 
-        # gameplay vars inited later
         self.tilemap = None
         self.base = None
         self.players = []
@@ -109,11 +114,10 @@ class Game:
         self.muted = False
         self.gameover_won = False
 
-        # Arcade Coin System
-        self.coins = 0  # total coins inserted
-        self.coins_total = 0  # for stats
-        self.continue_timer = 0  # countdown when gameover
-        self.credits = {1: 0, 2: 0}  # per player credits, each coin gives COIN_LIVES
+        self.coins = 0
+        self.coins_total = 0
+        self.continue_timer = 0
+        self.credits = {1: 0, 2: 0}
 
         # LAN Multiplayer - Remote P2 join via same local network
         self.network_host = None
@@ -547,29 +551,53 @@ class Game:
             try:
                 pygame.event.set_allowed(pygame.JOYDEVICEADDED)
                 pygame.event.set_allowed(pygame.JOYDEVICEREMOVED)
+                pygame.event.set_blocked(pygame.JOYAXISMOTION)
+                pygame.event.set_blocked(pygame.JOYBALLMOTION)
             except:
                 pass
         except Exception as e:
             print(f"Rescan failed: {e}")
 
     def handle_events(self):
+        if hasattr(self, 'menu_hat_cooldown') and self.menu_hat_cooldown > 0:
+            self.menu_hat_cooldown -= 1
+        # Emergency: if menu stuck for 180 frames (3 sec) without input, allow ANY key (including mouse) to start
+        if not hasattr(self, 'menu_stuck_timer'):
+            self.menu_stuck_timer = 0
+            self.joystick_error_count = 0
+        if self.state == 'menu':
+            self.menu_stuck_timer += 1
+        else:
+            self.menu_stuck_timer = 0
+
         try:
             events = pygame.event.get()
-        except SystemError as e:
-            # Pygame can throw SystemError: KeyError inside event.get() when a virtual joystick is broken
-            # Workaround: log and try to recover without disabling all joysticks permanently
-            print(f"Joystick event error (recovering): {e}")
+        except (SystemError, KeyError, Exception) as e:
+            self.joystick_error_count = getattr(self, 'joystick_error_count', 0) + 1
+            print(f"Joystick event error ({self.joystick_error_count}) recovering: {e}")
             try:
                 pygame.event.clear()
-                events = pygame.event.get()
             except:
-                events = []
-                # As last resort, block only motion events which are spammy, keep button events for Joy-Con
+                pass
+            try:
+                pygame.event.set_blocked(pygame.JOYAXISMOTION)
+                pygame.event.set_blocked(pygame.JOYBALLMOTION)
+            except:
+                pass
+            events = []
+            # After 8 errors, disable joysticks entirely - keyboard will work
+            if self.joystick_error_count > 8 and len(getattr(self, 'joysticks', [])) > 0:
+                print("Too many joystick errors - disabling all joysticks, using keyboard only")
                 try:
-                    pygame.event.set_blocked(pygame.JOYAXISMOTION)
-                    pygame.event.set_blocked(pygame.JOYBALLMOTION)
+                    self.joysticks.clear()
+                    pygame.joystick.quit()
                 except:
                     pass
+            # Force start on joystick error - assume user wants to play
+            if self.state == 'menu' and self.menu_stuck_timer > 180:
+                print("Force starting game due to joystick spam")
+                self.handle_menu_select()
+                return
         for event in events:
             if event.type == pygame.QUIT:
                 pygame.quit()
@@ -650,16 +678,42 @@ class Game:
                     # Don't crash on joystick quirks
                     pass
 
+            if event.type in (pygame.MOUSEBUTTONDOWN, pygame.MOUSEBUTTONUP):
+                if self.state == 'menu' and event.type == pygame.MOUSEBUTTONDOWN:
+                    # Ignore mouse clicks in first 60 frames (avoid accidental trackpad)
+                    if getattr(self, 'menu_stuck_timer', 0) > 60:
+                        print(f"Mouse click to start menu {self.menu_selected}")
+                        self.handle_menu_select()
+                    else:
+                        print(f"Ignoring early mouse click at frame {self.menu_stuck_timer}")
+
             if event.type == pygame.JOYHATMOTION:
                 try:
-                    if self.state == 'menu':
+                    if self.state == 'menu' and self.menu_hat_cooldown == 0:
                         opts = 5 if self.menu_mode=='main' else (len(LEVELS) + 1 if self.menu_mode=='level' else 1)
                         hx, hy = getattr(event, 'value', (0,0))
-                        if hy == 1:
-                            self.menu_selected = (self.menu_selected - 1) % opts
-                        elif hy == -1:
-                            self.menu_selected = (self.menu_selected + 1) % opts
-                except:
+                        # Ignore if HAT is stuck reporting (0,0) drift - only process non-zero
+                        if hy == 0 and hx == 0:
+                            pass
+                        else:
+                            if hy == 1:
+                                self.menu_selected = (self.menu_selected - 1) % opts
+                                self.menu_hat_cooldown = 12
+                                print(f"Menu UP via hat -> {self.menu_selected}")
+                            elif hy == -1:
+                                self.menu_selected = (self.menu_selected + 1) % opts
+                                self.menu_hat_cooldown = 12
+                                print(f"Menu DOWN via hat -> {self.menu_selected}")
+                            if self.menu_mode == 'level' and hx != 0:
+                                if hx == -1:
+                                    self.menu_selected = (self.menu_selected - 1) % (len(LEVELS)+1)
+                                else:
+                                    self.menu_selected = (self.menu_selected + 1) % (len(LEVELS)+1)
+                                self.menu_hat_cooldown = 8
+                            # Reset stuck timer on intentional hat move
+                            self.menu_stuck_timer = 0
+                except Exception as e:
+                    print(f"HAT error {e}")
                     pass
 
             if event.type == pygame.KEYDOWN:
@@ -715,11 +769,14 @@ class Game:
 
                 if self.state == 'menu':
                     if self.menu_mode == 'main':
-                        if event.key == pygame.K_UP:
+                        if event.key == pygame.K_UP or event.key == pygame.K_w:
                             self.menu_selected = (self.menu_selected - 1) % 5
-                        elif event.key == pygame.K_DOWN:
+                            print(f"Menu selected {self.menu_selected} via keyboard UP/W")
+                        elif event.key == pygame.K_DOWN or event.key == pygame.K_s:
                             self.menu_selected = (self.menu_selected + 1) % 5
-                        elif event.key == pygame.K_RETURN or event.key == pygame.K_SPACE:
+                            print(f"Menu selected {self.menu_selected} via keyboard DOWN/S")
+                        elif event.key in (pygame.K_RETURN, pygame.K_SPACE, pygame.K_KP_ENTER):
+                            print(f"Menu SELECT {self.menu_selected} ENTER/SPACE")
                             self.handle_menu_select()
                         elif event.key == pygame.K_ESCAPE:
                             pygame.quit()
@@ -937,14 +994,27 @@ class Game:
                 js = self.joysticks[i] if i < len(self.joysticks) else None
 
             other_tanks = self.enemies + [op for j, op in enumerate(self.players) if j != i]
+            # snapshot enemy count before move for crush detection
+            enemies_before = len([e for e in self.enemies if e.alive])
             b = p.handle_input(keys, js, self.tilemap, other_tanks, num_players=len(self.players))
             if b:
                 if isinstance(b, list):
                     self.bullets.extend(b)
                 else:
                     self.bullets.append(b)
-                # add to player's bullets already done in shoot()
             p.update(self.tilemap, other_tanks)
+            # giant crush detection - if giant killed enemies by running over
+            if getattr(p, 'is_giant', False):
+                # check for crushed bricks under player for particles
+                gx = int((p.rect.centerx - PLAYFIELD_X) // TILE_SIZE)
+                gy = int((p.rect.centery - PLAYFIELD_Y) // TILE_SIZE)
+                # brick crush particles handled in tank.py but add extra visual
+                if random.random() < 0.3:
+                    self.particles.add_crush(p.rect.centerx + random.randint(-8,8), p.rect.centery + random.randint(-8,8))
+                # detect crushed enemies
+                enemies_now = [e for e in self.enemies if e.alive]
+                if len(enemies_now) < enemies_before:
+                    self.particles.add_explosion(p.rect.centerx, p.rect.centery, (255,80,80), 15)
 
         # enemies
         players_list = self.players
@@ -971,18 +1041,50 @@ class Game:
         for b in self.bullets[:]:
             if not b.alive:
                 continue
-            # all tanks
             all_tanks = self.players + self.enemies
             result = b.update(self.tilemap, all_tanks, self.base)
             if result:
                 if result in ('hit_brick', 'hit_steel'):
                     self.particles.add_hit(b.x, b.y)
                 elif result == 'hit_tank':
-                    # find tank at position
-                    # explosion already handled via tank death? Add particles
                     self.particles.add_explosion(b.x, b.y, (255, 150, 0), 12)
                 elif result == 'hit_base':
                     self.particles.add_explosion(b.x, b.y, (255, 50, 50), 25)
+                elif result == 'out_of_fuel':
+                    self.particles.add_explosion(b.x, b.y, (120, 120, 120), 10)
+                    self.particles.add_hit(b.x, b.y)
+                elif result == 'venom_hit':
+                    self.particles.add_venom(b.x, b.y)
+                    self.particles.add_explosion(b.x, b.y, (80, 200, 80), 12)
+
+        # === Bullet vs Bullet counter: player can counter enemy bullets ===
+        if BULLET_COUNTER_ENABLED:
+            # Only check player bullets vs enemy/boss bullets
+            player_bullets = [b for b in self.bullets if b.alive and b.owner.startswith('player')]
+            enemy_bullets = [b for b in self.bullets if b.alive and (b.owner == 'enemy' or b.owner == 'boss')]
+            for pb in player_bullets:
+                if not pb.alive:
+                    continue
+                for eb in enemy_bullets:
+                    if not eb.alive:
+                        continue
+                    # Don't counter venom with normal? Allow but venom is stronger - player needs power>=2 to counter venom
+                    if getattr(eb, 'venom', False) and pb.power < 2:
+                        continue
+                    dist = math.hypot(pb.x - eb.x, pb.y - eb.y)
+                    if dist < (BULLET_SIZE + 3):  # direct hit
+                        # Both explode
+                        pb.alive = False
+                        eb.alive = False
+                        self.particles.add_explosion((pb.x+eb.x)/2, (pb.y+eb.y)/2, (255, 220, 80), 10)
+                        self.particles.add_hit(pb.x, pb.y)
+                        # sound
+                        try:
+                            if snd_mgr:
+                                snd_mgr.play_hit_steel()
+                        except:
+                            pass
+                        break  # this player bullet destroyed, go next
 
         # cleanup dead bullets
         self.bullets = [b for b in self.bullets if b.alive]
@@ -1002,6 +1104,12 @@ class Game:
                 self.particles.add_explosion(pu.x, pu.y, (100,255,100), 15)
             if not pu.alive:
                 self.powerups.remove(pu)
+
+        # venom particles for affected players
+        for p in self.players:
+            if p.alive and getattr(p, 'venom_timer', 0) > 0:
+                if random.random() < 0.4 + getattr(p, 'venom_level', 0)*0.6:
+                    self.particles.add_venom(p.rect.centerx + random.randint(-10,10), p.rect.centery + random.randint(-10,10))
 
         # particles
         self.particles.update()
@@ -1155,6 +1263,23 @@ class Game:
             player.apply_powerup('spread', self)
         elif pu_type == 'rapid':
             player.apply_powerup('rapid', self)
+        elif pu_type == 'shrink':
+            player.apply_powerup('shrink', self)
+            self.particles.add_explosion(player.rect.centerx, player.rect.centery, (80, 220, 255), 12)
+            try:
+                # shrink sound - use powerup appear + pitch?
+                if snd_mgr:
+                    snd_mgr.play_powerup_appear()
+            except:
+                pass
+        elif pu_type == 'giant':
+            player.apply_powerup('giant', self)
+            self.particles.add_explosion(player.rect.centerx, player.rect.centery, (255, 80, 80), 18)
+            try:
+                if snd_mgr:
+                    snd_mgr.play_powerup_appear()
+            except:
+                pass
 
     def draw(self):
         if self.state == 'menu':
