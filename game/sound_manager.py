@@ -264,22 +264,44 @@ class SoundManager:
                 self.sounds['shoot_power_real_recorded'] = self.sounds['real_tank_power']
                 print("[Sound] -> 'shoot_power' now uses REAL power shot (1.0s)")
 
-            # For brick hitting, user also wants real tank sound
-            # Use real_brick extracted (0.6s) which is actually a tank shot hitting brick, more realistic debris
+            # For brick hitting: user wants real tank sound for attack, but brick hit should be realistic brick breaking
+            # Previously we overrode hit_brick with real_brick which is actually tank shot, not brick - that was wrong
+            # Now keep hit_brick as improved synthetic realistic (concrete crack + debris + thud) for close-to-real brick
+            # And keep real recorded as alternative, plus create hybrid: tank shot low-end + brick crack high-end
             if 'real_brick' in self.sounds:
-                # Keep synthetic as backup
-                if 'hit_brick' in self.sounds and 'hit_brick_synthetic_real' not in self.sounds:
-                    self.sounds['hit_brick_synthetic_real'] = self.sounds['hit_brick']
-                self.sounds['hit_brick'] = self.sounds['real_brick']
+                # Keep synthetic improved as primary for brick (more correct)
+                # Save real recorded as alternative
                 self.sounds['hit_brick_real_recorded'] = self.sounds['real_brick']
                 self.sounds['brick_real_recorded'] = self.sounds['real_brick']
-                print("[Sound] -> 'hit_brick' now uses REAL recorded brick hit from distant tank shots")
-                print("[Sound]    File: game/assets/sounds/real/brick_hit_real.wav + distant_tank_shots.mp3")
+                print("[Sound] Real brick recorded kept as 'hit_brick_real_recorded' (0.6s tank shot)")
+
+            # Create hybrid brick hit: Real tank shot low-end (boom) + synthetic brick crack high-end (debris)
+            # This makes hitting brick sound like tank shell hitting brick wall - both explosion and brick shattering
+            try:
+                if 'real_tank_single' in self.sounds and 'hit_brick' in self.sounds:
+                    import numpy as np
+                    # Get arrays from sounds
+                    # real_tank_single is 0.8s, hit_brick synthetic is 0.65s improved
+                    # Mix them: low frequencies from tank shot, high from brick crack
+                    # For simplicity, we will generate a new hybrid via method
+                    hybrid = self.generate_brick_hit_hybrid()
+                    if hybrid:
+                        # Keep previous hit_brick as backup
+                        if 'hit_brick' in self.sounds:
+                            self.sounds['hit_brick_synthetic_improved'] = self.sounds['hit_brick']
+                        self.sounds['hit_brick'] = hybrid
+                        self.sounds['hit_brick_hybrid_real'] = hybrid
+                        print("[Sound] -> 'hit_brick' now uses HYBRID: real tank low boom + synthetic brick crack (improved)")
+            except Exception as e:
+                print(f"[Sound] Hybrid brick gen failed: {e}")
 
             # Also set distant original as alternative for variety
             if 'real_distant' in self.sounds:
                 self.sounds['shoot_distant_original'] = self.sounds['real_distant']
                 print("[Sound] Original 17.6s distant shots kept as 'shoot_distant_original'")
+
+            # Ensure shoot still uses real recorded as user requested for attack
+            # (already set above to real_tank_single)
 
         except Exception as e:
             print(f"[Sound] Retro generation failed: {e}")
@@ -692,71 +714,262 @@ class SoundManager:
             traceback.print_exc()
             return None
 
-    def generate_real_brick_hit(self, volume=0.8):
+    def generate_real_brick_hit(self, volume=0.9):
         """
-        Realistic brick/concrete hit - when tank shell hits brick wall
-        Layers:
-        - Sharp impact click 0-5ms
-        - Crack 800-2000Hz bandpass noise 0-0.25s
-        - Debris crumbling random pops 0.1-0.5s
+        Realistic brick/concrete hit - when tank shell hits brick wall - IMPROVED
+        User feedback: previous brick hit still not correct, needs more realistic
+        Layers for close-to-real-life brick wall hit by tank shell:
+        - 0-3ms: Ultra-sharp transient crack (4000Hz + 8000Hz) - initial shell impact
+        - 3-30ms: Main loud crack - broadband noise + 1200Hz + 2500Hz resonances - brick shattering
+        - 10-150ms: Heavy thud - 80Hz + 150Hz low boom from wall mass
+        - 30-400ms: Multiple secondary cracks - random high-freq pops mimicking bricks breaking apart
+        - 100-500ms: Debris crumble - small pieces falling, granular noise
+        - 200-600ms: Dust hiss - high-freq filtered noise tail
         """
         try:
             import numpy as np
             sr = 44100
-            duration = 0.45
+            duration = 0.65  # slightly longer for more realistic tail
             N = int(sr * duration)
             t = np.linspace(0, duration, N, False)
             wave = np.zeros(N)
 
-            # 1. Sharp impact click - high freq transient
-            click_dur = int(0.005 * sr)
+            # 1. Ultra-sharp initial impact - 0-3ms, very high freq, mimics shell hitting hard brick
+            click_dur = int(0.003 * sr)
             if click_dur < N:
-                # High freq sine burst
-                click_t = np.linspace(0, 0.005, click_dur, False)
-                click = np.sin(2 * np.pi * 3500 * click_t) * np.exp(-500 * click_t) * 0.8
-                wave[:click_dur] += click
+                click_t = np.linspace(0, 0.003, click_dur, False)
+                # Combination of 4000Hz and 8000Hz for sharp crack
+                click = np.sin(2 * np.pi * 4000 * click_t) * 0.6
+                click += np.sin(2 * np.pi * 8000 * click_t) * 0.3
+                click *= np.exp(-600 * click_t)  # ultra-fast decay
+                wave[:click_dur] += click * 1.2
 
-            # 2. Main crack - bandpass noise around 1000Hz
-            crack_dur = int(0.25 * sr)
-            if crack_dur < N:
-                # White noise
-                noise = np.random.uniform(-1, 1, crack_dur)
-                # Simple bandpass via two moving averages (very rough)
-                # Low-pass at 2000Hz: window ~ sr/2000 = 22
-                # High-pass at 500Hz: subtract low-pass at 500Hz (window ~88)
-                # For simplicity, just filter via sine modulation
-                # Create crack with decaying noise
-                crack_env = np.exp(-12 * np.linspace(0, 0.25, crack_dur))
-                # Modulate noise with 1000Hz sine for bandpass feel
-                crack = noise * crack_env * (0.5 + 0.5 * np.sin(2 * np.pi * 1000 * np.linspace(0, 0.25, crack_dur)))
-                wave[:crack_dur] += crack * 0.7
+            # 2. Main loud crack - 3-80ms, broadband with resonances at 1200Hz and 2500Hz
+            # This is the core brick shattering sound
+            crack_start = int(0.003 * sr)
+            crack_dur = int(0.08 * sr)
+            if crack_start + crack_dur < N:
+                crack_N = crack_dur
+                crack_t = np.linspace(0, 0.08, crack_N, False)
+                # White noise burst
+                noise = np.random.uniform(-1, 1, crack_N)
+                # Bandpass around 1200Hz and 2500Hz via sine modulation + filtering
+                # Create two resonant cracks
+                env = np.exp(-18 * crack_t)  # fast decay for main crack
+                crack1 = noise * env * 0.7
+                # Add tonal resonances for brick size (bricks resonate around 1-2.5kHz when breaking)
+                res1 = np.sin(2 * np.pi * 1200 * crack_t) * env * 0.5
+                res2 = np.sin(2 * np.pi * 2500 * crack_t) * np.exp(-25 * crack_t) * 0.35
+                crack = crack1 + res1 + res2
+                wave[crack_start:crack_start+crack_N] += crack * 1.0
 
-            # 3. Debris - random small pops/cracks in tail
-            num_pops = 8
-            for _ in range(num_pops):
-                pop_time = np.random.uniform(0.05, 0.4)
-                pop_idx = int(pop_time * sr)
-                pop_dur = int(np.random.uniform(0.01, 0.03) * sr)
-                if pop_idx + pop_dur < N:
-                    pop_freq = np.random.uniform(600, 1800)
-                    pop_t = np.linspace(0, pop_dur/sr, pop_dur, False)
-                    pop = np.sin(2 * np.pi * pop_freq * pop_t) * np.exp(-30 * pop_t) * np.random.uniform(0.15, 0.35)
-                    wave[pop_idx:pop_idx+pop_dur] += pop
+            # 3. Heavy thud - low frequency from wall mass and tank shell energy
+            # 80Hz and 150Hz with slower decay, starts slightly after impact (5ms delay)
+            thud_start = int(0.005 * sr)
+            thud_dur = int(0.18 * sr)
+            if thud_start + thud_dur < N:
+                thud_t = np.linspace(0, 0.18, thud_dur, False)
+                thud = np.sin(2 * np.pi * 80 * thud_t) * np.exp(-10 * thud_t) * 0.9
+                thud += np.sin(2 * np.pi * 150 * thud_t) * np.exp(-12 * thud_t) * 0.5
+                # Add slight distortion for weight
+                thud = np.tanh(thud * 1.3) * 0.8
+                wave[thud_start:thud_start+thud_dur] += thud * 0.7
 
-            # 4. Low rumble for heavy brick
-            rumble = np.sin(2 * np.pi * 90 * t) * np.exp(-8 * t) * 0.3
-            wave += rumble * 0.4
+            # 4. Secondary cracks - multiple random high-freq pops 20-200ms
+            # Real brick wall doesn't break cleanly, it has multiple secondary fractures
+            num_secondary = 12
+            for _ in range(num_secondary):
+                sec_time = np.random.uniform(0.02, 0.20)
+                sec_idx = int(sec_time * sr)
+                sec_dur = int(np.random.uniform(0.015, 0.04) * sr)
+                if sec_idx + sec_dur < N:
+                    sec_freq = np.random.uniform(1800, 4500)
+                    sec_t = np.linspace(0, sec_dur/sr, sec_dur, False)
+                    sec = np.sin(2 * np.pi * sec_freq * sec_t) * np.exp(-35 * sec_t)
+                    # Add noise for roughness
+                    sec_noise = np.random.uniform(-1, 1, sec_dur) * np.exp(-30 * sec_t) * 0.3
+                    wave[sec_idx:sec_idx+sec_dur] += (sec + sec_noise) * np.random.uniform(0.15, 0.4)
 
-            # Normalize
+            # 5. Debris crumble - granular, random small pieces 80-450ms
+            num_debris = 15
+            for _ in range(num_debris):
+                deb_time = np.random.uniform(0.08, 0.45)
+                deb_idx = int(deb_time * sr)
+                deb_dur = int(np.random.uniform(0.02, 0.06) * sr)
+                if deb_idx + deb_dur < N:
+                    deb_freq = np.random.uniform(400, 2200)
+                    deb_t = np.linspace(0, deb_dur/sr, deb_dur, False)
+                    # Debris is more noisy, less tonal
+                    deb = np.sin(2 * np.pi * deb_freq * deb_t) * np.exp(-20 * deb_t) * 0.5
+                    deb += np.random.uniform(-1, 1, deb_dur) * np.exp(-15 * deb_t) * 0.3
+                    wave[deb_idx:deb_idx+deb_dur] += deb * np.random.uniform(0.1, 0.28)
+
+            # 6. Dust hiss - high-frequency filtered noise tail 150-600ms
+            # Fine dust after bricks break
+            dust_start = int(0.15 * sr)
+            dust_dur = int(0.45 * sr)
+            if dust_start + dust_dur < N:
+                dust_t = np.linspace(0, 0.45, dust_dur, False)
+                # High-freq hiss: white noise with high-pass feel (modulate with high freq)
+                dust_noise = np.random.uniform(-1, 1, dust_dur)
+                # High-pass via differencing (simple)
+                dust_noise = np.diff(np.concatenate([[0], dust_noise]))
+                dust_env = np.exp(-4 * dust_t) * 0.25
+                dust = dust_noise * dust_env * (0.3 + 0.3 * np.sin(2 * np.pi * 6000 * dust_t * 0.1))
+                wave[dust_start:dust_start+dust_dur] += dust * 0.35
+
+            # 7. Add slight stereo variation for realism (delay one channel by 1ms)
+            # We'll handle in final stereo conversion with slight pan
+
+            # Normalize with headroom, keep punch
             max_val = np.max(np.abs(wave))
             if max_val > 0:
-                wave = wave / max_val * 0.85
+                # Leave headroom for punch, but make it loud
+                wave = wave / max_val * 0.88
 
-            audio = (wave * 32767 * volume).astype(np.int16)
-            stereo = np.column_stack([audio, audio])
+            # Soft clipping for extra punch and warmth
+            wave = np.tanh(wave * 1.15) * 0.92
+
+            # Create stereo with slight difference for width (delay right channel by 2ms for spaciousness)
+            # Convert to float for processing to avoid int16 casting issues
+            audio_float = wave * 32767 * volume
+            # Create stereo float
+            stereo_float = np.column_stack([audio_float, audio_float])
+            # Add slight pan variation for debris to feel spatial - Haas effect
+            delay_samples = int(0.002 * sr)  # 2ms delay
+            if len(stereo_float) > delay_samples:
+                delay_end = int(0.1 * sr)
+                if delay_end < len(stereo_float):
+                    orig_right = stereo_float[:delay_end, 1].copy()
+                    # Apply with float operations
+                    stereo_float[delay_samples:delay_end, 1] = orig_right[:-delay_samples] * 0.9
+                    stereo_float[:delay_samples, 1] *= 0.5
+
+            # Convert to int16 for pygame
+            # Clip to prevent overflow
+            stereo_float = np.clip(stereo_float, -32767, 32767)
+            stereo = stereo_float.astype(np.int16)
+
             return pygame.sndarray.make_sound(stereo)
         except Exception as e:
             print(f"[Sound] Real brick hit gen failed: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+
+    def generate_brick_hit_hybrid(self, volume=0.9):
+        """
+        Hybrid brick hit: Mix real tank shot low-end boom with synthetic brick crack high-end
+        This sounds like a tank shell actually hitting a brick wall - both explosion and brick shattering
+        Much more realistic than just tank shot or just crack alone
+        """
+        try:
+            import numpy as np
+            # Try to get the two source sounds if already loaded
+            tank_sound = None
+            brick_sound = None
+
+            # Try to use already generated or loaded sounds
+            if 'real_tank_single' in self.sounds:
+                tank_sound = self.sounds['real_tank_single']
+            elif 'shoot' in self.sounds:
+                tank_sound = self.sounds['shoot']
+
+            # For brick, use the synthetic improved version that is currently in hit_brick or generate fresh
+            if 'hit_brick' in self.sounds:
+                # This should be the improved synthetic at this point
+                brick_sound = self.sounds['hit_brick']
+
+            # If we don't have both, try to generate fresh synthetic brick
+            if brick_sound is None:
+                brick_sound = self.generate_real_brick_hit(volume=0.8)
+
+            if tank_sound is None or brick_sound is None:
+                print("[Sound] Hybrid: missing source sounds, generating fresh")
+                return self.generate_real_brick_hit(volume=volume)
+
+            # Get arrays
+            try:
+                tank_arr = pygame.sndarray.array(tank_sound)
+                brick_arr = pygame.sndarray.array(brick_sound)
+            except Exception as e:
+                print(f"[Sound] Hybrid array conversion failed: {e}, using brick only")
+                return brick_sound
+
+            # Convert to mono float for mixing
+            if len(tank_arr.shape) == 2:
+                tank_mono = np.mean(tank_arr, axis=1).astype(np.float32)
+            else:
+                tank_mono = tank_arr.astype(np.float32)
+
+            if len(brick_arr.shape) == 2:
+                brick_mono = np.mean(brick_arr, axis=1).astype(np.float32)
+            else:
+                brick_mono = brick_arr.astype(np.float32)
+
+            # Make same length - use max length, pad shorter with zeros
+            max_len = max(len(tank_mono), len(brick_mono))
+            # Pad both to max_len
+            tank_padded = np.zeros(max_len, dtype=np.float32)
+            brick_padded = np.zeros(max_len, dtype=np.float32)
+            tank_padded[:len(tank_mono)] = tank_mono[:max_len]
+            brick_padded[:len(brick_mono)] = brick_mono[:max_len]
+
+            # Mix: tank low frequencies (boom) + brick high frequencies (crack/debris)
+            # For tank, keep mostly low frequencies: we can low-pass by smoothing
+            # Simple low-pass for tank: moving average to keep low end
+            # For brick, keep high frequencies: subtract moving average
+            # But for simplicity, mix with volumes: tank 0.5 (for boom) + brick 0.9 (for crack)
+            # Tank has strong low-end, brick has strong high-end, so they complement
+
+            # Normalize each first
+            tank_max = np.max(np.abs(tank_padded))
+            brick_max = np.max(np.abs(brick_padded))
+            if tank_max > 0:
+                tank_norm = tank_padded / tank_max
+            else:
+                tank_norm = tank_padded
+
+            if brick_max > 0:
+                brick_norm = brick_padded / brick_max
+            else:
+                brick_norm = brick_padded
+
+            # Mix: 35% tank (for thump) + 75% brick (for crack) - brick should be more prominent for hit feedback
+            hybrid = tank_norm * 0.35 + brick_norm * 0.85
+
+            # Add extra punch - emphasize initial transient from both
+            # Find initial 50ms and boost by 1.2x
+            attack_samples = int(44100 * 0.05)
+            if len(hybrid) > attack_samples:
+                hybrid[:attack_samples] *= 1.25
+
+            # Normalize final
+            max_val = np.max(np.abs(hybrid))
+            if max_val > 0:
+                hybrid = hybrid / max_val * 0.92
+
+            # Convert to int16 stereo
+            # Slight stereo width: left slightly more brick, right slightly more tank
+            left = hybrid * 0.95 + tank_norm[:len(hybrid)] * 0.05
+            right = hybrid * 0.95 + brick_norm[:len(hybrid)] * 0.05
+
+            # Normalize stereo together
+            stereo_max = max(np.max(np.abs(left)), np.max(np.abs(right)))
+            if stereo_max > 0:
+                left = left / stereo_max * 0.9
+                right = right / stereo_max * 0.9
+
+            stereo = np.column_stack([
+                (left * 32767 * volume).astype(np.int16),
+                (right * 32767 * volume).astype(np.int16)
+            ])
+
+            return pygame.sndarray.make_sound(stereo)
+        except Exception as e:
+            print(f"[Sound] Hybrid brick hit gen failed: {e}")
+            import traceback
+            traceback.print_exc()
             return None
 
     def generate_real_steel_hit(self, volume=0.85):
