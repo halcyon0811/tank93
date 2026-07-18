@@ -2,14 +2,31 @@ import pygame
 from ..settings import *
 
 class HUD:
-    def __init__(self):
+    def __init__(self, is_mega=False):
+        self.is_mega = is_mega
         self.font_small = pygame.font.Font(None, 22)
         self.font_mid = pygame.font.Font(None, 26)
         self.font_big = pygame.font.Font(None, 32)
         self.font_huge = pygame.font.Font(None, 48)
 
     def draw(self, screen, game):
-        panel_rect = pygame.Rect(HUD_X, PLAYFIELD_Y, HUD_W, PLAYFIELD_H)
+        # Dynamic HUD position for mega (52x52 map 1248px playfield)
+        hud_x = HUD_X
+        hud_w = HUD_W
+        hud_h = PLAYFIELD_H
+        try:
+            if getattr(game, 'is_mega', False):
+                hud_x = MEGA_PLAYFIELD_W + MEGA_PLAYFIELD_X + 20
+                hud_w = 260
+                hud_h = MEGA_PLAYFIELD_H
+            elif hasattr(game, 'tilemap') and game.tilemap:
+                # Dynamic based on tilemap actual size
+                hud_x = game.tilemap.grid_w * game.tilemap.tile_size + PLAYFIELD_X + 20
+                hud_w = max(200, 1600 - hud_x - 20) if 'MEGA' in str(type(game)) else HUD_W
+                hud_h = game.tilemap.grid_h * game.tilemap.tile_size
+        except:
+            pass
+        panel_rect = pygame.Rect(hud_x, PLAYFIELD_Y, hud_w, hud_h)
         pygame.draw.rect(screen, (28, 28, 38), panel_rect, border_radius=8)
         pygame.draw.rect(screen, (60, 60, 80), panel_rect, 2, border_radius=8)
 
