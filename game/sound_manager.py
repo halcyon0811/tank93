@@ -33,13 +33,15 @@ import math
 # Pygame mixer sounds
 SOUND_DIR = pathlib.Path(__file__).parent / "assets" / "sounds"
 
-# NES Battle City authentic sound list
+# NES Battle City authentic sound list + real tank sounds from freesound community
 # Authentic + user intro - intro m4a is real Battle City Tank 1990 NES Intro 8bit Live by deegee (D.G.)
 # We prioritize wav for compatibility (intro.m4a converted to battle_city_intro_final.wav 5.59 sec)
+# NEW: Real distant tank shots from freesound_community-distant-tank-shots-33735.mp3 (17.6s, 7 shots)
+# Extracted to real/ folder: tank_shot_single.wav, tank_shot_power.wav, brick_hit_real.wav, tank_shot_close.wav
 AUTHENTIC_SOUNDS = {
-    'shoot': 'bullet_shot.ogg',          # weapon fire SFX (tank fire)
-    'hit_brick': 'bullet_hit_1.ogg',     # brick break / hit (tile destroy)
-    'hit_steel': 'bullet_hit_2.ogg',     # steel clang
+    'shoot': 'bullet_shot.ogg',          # weapon fire SFX (tank fire) - will be overridden by real
+    'hit_brick': 'bullet_hit_1.ogg',     # brick break / hit (tile destroy) - will be overridden by real
+    'hit_steel': 'bullet_hit_2.ogg',     # steel clang - will be overridden by real
     'explosion': 'explosion_1.ogg',      # explosion (tank death)
     'explosion_big': 'explosion_2.ogg',  # base / big explosion
     'powerup_appear': 'powerup_appear.ogg',
@@ -52,6 +54,12 @@ AUTHENTIC_SOUNDS = {
     'battle_intro': 'battle_city_intro_final.wav',  # 5.59 sec authentic intro, used for new game start
     'battle_intro_m4a': 'intro.m4a',      # backup original m4a
     'battle_intro_wav_classic': 'battle_city_intro_classic.wav',
+    # Real tank sounds from freesound community (distant tank shots) - user provided
+    'real_distant': 'distant_tank_shots.mp3',  # original 17.6s file with 7 shots
+    'real_tank_single': 'real/tank_shot_single.wav',  # 0.8s single shot - for normal attack
+    'real_tank_power': 'real/tank_shot_power.wav',    # 1.0s power shot - for power level
+    'real_tank_close': 'real/tank_shot_close.wav',    # 0.7s close shot
+    'real_brick': 'real/brick_hit_real.wav',          # 0.6s brick hit - for brick destruction
 }
 
 class SoundManager:
@@ -237,6 +245,41 @@ class SoundManager:
                 self.sounds['hit_steel_real'] = real_steel
                 self.sounds['steel_real'] = real_steel
                 print("[Sound] -> Upgraded 'hit_steel' to realistic clang + ricochet whine")
+
+            # === USE REAL RECORDED DISTANT TANK SHOTS FROM USER PROVIDED FILE ===
+            # User: /Users/lida/Downloads/freesound_community-distant-tank-shots-33735.mp3 for tank attack and hitting bricks
+            # This file was copied to game/assets/sounds/distant_tank_shots.mp3 and extracted to real/ folder
+            print("[Sound] Applying user-provided real distant tank shots for attack and brick hit...")
+            if 'real_tank_single' in self.sounds:
+                # Backup current shoot as synthetic
+                if 'shoot' in self.sounds and 'shoot_synthetic_real' not in self.sounds:
+                    self.sounds['shoot_synthetic_real'] = self.sounds['shoot']
+                self.sounds['shoot'] = self.sounds['real_tank_single']
+                self.sounds['shoot_real_recorded'] = self.sounds['real_tank_single']
+                print("[Sound] -> FINAL 'shoot' now uses REAL recorded distant tank shot (single) from freesound_community-distant-tank-shots-33735.mp3")
+                print("[Sound]    File: game/assets/sounds/real/tank_shot_single.wav (0.8s extracted from 17.6s)")
+            if 'real_tank_power' in self.sounds:
+                self.sounds['shoot_power'] = self.sounds['real_tank_power']
+                self.sounds['shoot_strong'] = self.sounds['real_tank_power']
+                self.sounds['shoot_power_real_recorded'] = self.sounds['real_tank_power']
+                print("[Sound] -> 'shoot_power' now uses REAL power shot (1.0s)")
+
+            # For brick hitting, user also wants real tank sound
+            # Use real_brick extracted (0.6s) which is actually a tank shot hitting brick, more realistic debris
+            if 'real_brick' in self.sounds:
+                # Keep synthetic as backup
+                if 'hit_brick' in self.sounds and 'hit_brick_synthetic_real' not in self.sounds:
+                    self.sounds['hit_brick_synthetic_real'] = self.sounds['hit_brick']
+                self.sounds['hit_brick'] = self.sounds['real_brick']
+                self.sounds['hit_brick_real_recorded'] = self.sounds['real_brick']
+                self.sounds['brick_real_recorded'] = self.sounds['real_brick']
+                print("[Sound] -> 'hit_brick' now uses REAL recorded brick hit from distant tank shots")
+                print("[Sound]    File: game/assets/sounds/real/brick_hit_real.wav + distant_tank_shots.mp3")
+
+            # Also set distant original as alternative for variety
+            if 'real_distant' in self.sounds:
+                self.sounds['shoot_distant_original'] = self.sounds['real_distant']
+                print("[Sound] Original 17.6s distant shots kept as 'shoot_distant_original'")
 
         except Exception as e:
             print(f"[Sound] Retro generation failed: {e}")
