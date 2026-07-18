@@ -137,11 +137,11 @@ ENEMY_COLORS = {
 }
 
 # Gameplay
-TANK_SIZE = 32  # visual tank size similar to tile size now (fine-grained bricks)
-TANK_SPEED = {"player": 3.3, "enemy": 1.8, "fast": 3.0}  # 1.5x faster: player was 2.2 -> 3.3
-BULLET_SPEED = 5.5
+TANK_SIZE = 32  # visual tank size similar to tile
+TANK_SPEED = {"player": 3.3, "enemy": 1.8, "fast": 3.0}  # 1.5x faster
+BULLET_SPEED = 8.25  # 1.5x faster: was 5.5 -> 8.25
 BULLET_SIZE = 6
-MAX_BULLETS = {"player": 2, "enemy": 1}  # classic limiting
+MAX_BULLETS = {"player": 2, "enemy": 1}
 
 # Brick fine-grained: make brick tiles smaller visual detail similar to tank size
 # Previously brick was full tile (24px). Now we want fine-grained like sub-tiles, but keep collision same

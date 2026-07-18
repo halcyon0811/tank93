@@ -208,24 +208,8 @@ class TileMap:
     def destroy_tile(self, gx, gy, bullet_power=1, bullet_dir=None):
         if not (0 <= gx < self.grid_w and 0 <= gy < self.grid_h):
             return False
-        # Determine which tiles to destroy based on direction - original destroys 2 tiles side by side
+        # NEW: Only destroy 1 brick per hit (tank-sized), not 2 like old authentic logic
         tiles_to_destroy = [(gx, gy)]
-        if bullet_dir in ('UP', 'DOWN'):
-            # Vertical bullet - destroys 2 horizontal small bricks in same big tile row
-            # Find big tile
-            bx = gx // 2
-            by = gy // 2
-            # Same row within big tile, other column
-            # Determine row offset inside big tile (0 or 1)
-            row_in_big = gy % 2
-            # Destroy both columns in that row
-            tiles_to_destroy = [(bx*2, by*2 + row_in_big), (bx*2 + 1, by*2 + row_in_big)]
-        elif bullet_dir in ('LEFT', 'RIGHT'):
-            # Horizontal bullet - destroys 2 vertical bricks in same big tile column
-            bx = gx // 2
-            by = gy // 2
-            col_in_big = gx % 2
-            tiles_to_destroy = [(bx*2 + col_in_big, by*2), (bx*2 + col_in_big, by*2 + 1)]
 
         destroyed = False
         for tx, ty in tiles_to_destroy:
