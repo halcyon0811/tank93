@@ -58,7 +58,14 @@ import traceback
 
 if __name__ == "__main__":
     try:
+        # Check for --fullscreen argument
+        fullscreen_arg = "--fullscreen" in sys.argv or "-f" in sys.argv or "--fs" in sys.argv
         game = Game()
+        if fullscreen_arg:
+            print("[Main] Starting in fullscreen mode (from --fullscreen flag)")
+            # Use toggle to go fullscreen (starts windowed, toggle to fullscreen)
+            # Need to have display already created, so toggle after init
+            game.toggle_fullscreen()
         game.run()
     except Exception as e:
         print(f"CRASH: {e}")

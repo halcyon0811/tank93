@@ -84,8 +84,9 @@ class Game:
         except:
             pass
 
+        self.is_fullscreen = False
         self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-        pygame.display.set_caption("Tank 93 Enhanced - Battle City Tribute")
+        pygame.display.set_caption("Tank 93 Enhanced - Battle City Tribute - F11/F for Fullscreen")
         self.clock = pygame.time.Clock()
         self.hud = HUD()
 
@@ -138,15 +139,33 @@ class Game:
         self.projector_ip = None
         self.projector_port = 8080
         try:
-            from .projector import start_server, get_local_ip as proj_get_ip
+            from .projector import start_server
             self.projector_ip = start_server(port=self.projector_port)
             if self.projector_ip:
                 print(f"[Game] Projector server ready - Open on same WiFi:")
                 print(f"[Game] Projector: http://{self.projector_ip}:{self.projector_port} - for projector or any browser")
-                print(f"[Game] For network projector: Connect laptop to projector via HDMI, open browser to above URL, F11 fullscreen")
         except Exception as e:
             print(f"[Game] Projector server failed to start: {e}")
             self.projector_ip = None
+
+    def toggle_fullscreen(self):
+        """Toggle fullscreen mode - for projector or immersive play"""
+        try:
+            self.is_fullscreen = not self.is_fullscreen
+            if self.is_fullscreen:
+                self.screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
+                print("[Display] Switched to FULLSCREEN mode - press F11/F to exit, ESC to exit fullscreen")
+            else:
+                self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+                print("[Display] Switched to WINDOWED mode")
+            pygame.display.set_caption("Tank 93 Enhanced - Battle City Tribute - F11/F for Fullscreen")
+        except Exception as e:
+            print(f"[Display] Fullscreen toggle failed: {e}")
+            try:
+                self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+                self.is_fullscreen = False
+            except:
+                pass
 
     def _get_enemy_queue_for_level(self, level_idx):
         """Return authentic enemy queue if available, else generate fallback."""
@@ -731,6 +750,19 @@ class Game:
                     pass
 
             if event.type == pygame.KEYDOWN:
+                # Global fullscreen toggle - F11 / F10 for projector / immersive, F for fullscreen in menu
+                if event.key in (pygame.K_F11, pygame.K_F10):
+                    self.toggle_fullscreen()
+                if event.key == pygame.K_f and self.state != 'playing':
+                    # F for fullscreen in menu (F is shoot in playing, so only in non-playing)
+                    self.toggle_fullscreen()
+                # Alt+Enter also toggles fullscreen (common)
+                if event.key == pygame.K_RETURN and (pygame.key.get_mods() & pygame.KMOD_ALT):
+                    self.toggle_fullscreen()
+                # ESC in fullscreen first exits fullscreen
+                if event.key == pygame.K_ESCAPE and self.is_fullscreen:
+                    self.toggle_fullscreen()
+                    continue  # skip other ESC handling this frame
                 # Global coin keys - work in any state (arcade style)
                 if event.key in (pygame.K_c, pygame.K_5):
                     # Insert coin: if gameover, continue; if playing with dead, rejoin
@@ -1332,13 +1364,6 @@ class Game:
             elif self.state in ('gameover', 'stage_clear'):
                 total_score = sum(p.score for p in self.players)
                 self.hud.draw_game_over(self.screen, self.gameover_won, total_score, self)
-
-        # Projector: update frame for network projector view (http://host_ip:8080)
-        try:
-            from .projector import update_frame
-            update_frame(self.screen)
-        except Exception:
-            pass
 
         pygame.display.flip()
 
