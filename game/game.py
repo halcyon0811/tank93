@@ -162,16 +162,24 @@ class Game:
             self.projector_ip = None
 
     def toggle_fullscreen(self):
-        """Toggle fullscreen mode - for projector or immersive play"""
+        """Toggle fullscreen mode - for projector or immersive play, with content zoomed"""
         try:
             self.is_fullscreen = not self.is_fullscreen
             if self.is_fullscreen:
-                self.screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
-                print("[Display] Switched to FULLSCREEN mode - press F11/F to exit, ESC to exit fullscreen")
+                # Use SCALED flag so 960x720 content is zoomed to fill fullscreen (fixes 'content not zoomed' issue)
+                # SCALED keeps logical size as SCREEN_WIDTH x SCREEN_HEIGHT but scales to desktop res
+                try:
+                    self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.FULLSCREEN | pygame.SCALED)
+                    print(f"[Display] Switched to FULLSCREEN SCALED mode {SCREEN_WIDTH}x{SCREEN_HEIGHT} -> fullscreen, content zoomed - press F11/F to exit, ESC to exit fullscreen")
+                except Exception as e:
+                    # Fallback to (0,0) fullscreen if SCALED not supported
+                    print(f"[Display] SCALED fullscreen failed ({e}), trying (0,0) fullscreen")
+                    self.screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
+                    print("[Display] Switched to FULLSCREEN mode (0,0) - press F11/F to exit, ESC to exit fullscreen")
             else:
                 self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
                 print("[Display] Switched to WINDOWED mode")
-            pygame.display.set_caption("Tank 93 Enhanced - Battle City Tribute - F11/F for Fullscreen")
+            pygame.display.set_caption("Tank 93 Enhanced - Battle City Tribute - F11/F for Fullscreen - Content Zoomed")
         except Exception as e:
             print(f"[Display] Fullscreen toggle failed: {e}")
             try:
@@ -667,8 +675,9 @@ class Game:
                 return
         for event in events:
             if event.type == pygame.QUIT:
+                print(f"[Event] QUIT received - exiting")
                 pygame.quit()
-                sys.exit()
+                sys.exit(0)
             # Joystick hotplug - important for Switch Joy-Con
             try:
                 if event.type == pygame.JOYDEVICEADDED:
@@ -1370,42 +1379,69 @@ class Game:
                 pass
 
     def draw(self):
+        # Create canvas at original resolution for consistent drawing and easy scaling to fullscreen
+        # This fixes "content not zoomed" issue when in fullscreen with (0,0) mode
+        canvas = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
+
         if self.state == 'menu':
-            self.hud.draw_menu(self.screen, self.menu_selected, self.menu_mode)
+            self.hud.draw_menu(canvas, self.menu_selected, self.menu_mode)
         elif self.state in ('playing', 'paused', 'gameover', 'stage_clear'):
             # bg
-            self.screen.fill(COLOR_BG)
+            canvas.fill(COLOR_BG)
             # playfield border
             border_rect = pygame.Rect(PLAYFIELD_X-4, PLAYFIELD_Y-4, PLAYFIELD_W+8, PLAYFIELD_H+8)
-            pygame.draw.rect(self.screen, (70,70,90), border_rect, border_radius=6)
+            pygame.draw.rect(canvas, (70,70,90), border_rect, border_radius=6)
             # tilemap
-            self.tilemap.draw(self.screen)
+            self.tilemap.draw(canvas)
             # base
-            self.base.draw(self.screen)
+            self.base.draw(canvas)
             # tanks
             for e in self.enemies:
-                e.draw(self.screen)
+                e.draw(canvas)
             for p in self.players:
-                p.draw(self.screen)
+                p.draw(canvas)
             # bullets
             for b in self.bullets:
-                b.draw(self.screen)
+                b.draw(canvas)
             # powerups
             for pu in self.powerups:
-                pu.draw(self.screen)
+                pu.draw(canvas)
             # overlay tiles (grass)
-            self.tilemap.draw_overlay(self.screen)
+            self.tilemap.draw_overlay(canvas)
             # particles top
-            self.particles.draw(self.screen)
+            self.particles.draw(canvas)
 
             # HUD
-            self.hud.draw(self.screen, self)
+            self.hud.draw(canvas, self)
 
             if self.state == 'paused':
-                self.hud.draw_pause(self.screen)
+                self.hud.draw_pause(canvas)
             elif self.state in ('gameover', 'stage_clear'):
                 total_score = sum(p.score for p in self.players)
-                self.hud.draw_game_over(self.screen, self.gameover_won, total_score, self)
+                self.hud.draw_game_over(canvas, self.gameover_won, total_score, self)
+
+        # Now blit canvas to screen with scaling if fullscreen
+        # This ensures content is zoomed to fill fullscreen, not just small in corner
+        if self.is_fullscreen:
+            # Scale canvas to fullscreen size (e.g., 960x720 -> 1920x1080) - zoomed
+            try:
+                scaled = pygame.transform.scale(canvas, self.screen.get_size())
+                self.screen.blit(scaled, (0, 0))
+            except Exception:
+                # Fallback: centered blit without scaling if scale fails
+                self.screen.fill(COLOR_BG)
+                self.screen.blit(canvas, ((self.screen.get_width()-SCREEN_WIDTH)//2, (self.screen.get_height()-SCREEN_HEIGHT)//2))
+        else:
+            # Windowed: direct blit (no scaling needed, same size)
+            self.screen.blit(canvas, (0, 0))
+
+        # Projector: update frame for network projector view (http://host_ip:8080)
+        # Use canvas (original res) for consistent quality
+        try:
+            from .projector import update_frame
+            update_frame(canvas)
+        except Exception:
+            pass
 
         pygame.display.flip()
 
