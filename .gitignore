@@ -24,3 +24,4 @@ game/assets/sounds/battle_city_intro_classic.wav
 *.db-wal
 *.db-shm
 crash.log
+bug_trace.log
