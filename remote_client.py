@@ -186,116 +186,47 @@ def main():
         print("Failed to start client")
         return
 
-    # Enhanced connectivity test with retry + subnet scan fallback for No route case
-    print(f"\n[Testing] Checking if host {args.host}:{args.port} is reachable...")
+    # Quick connectivity check - non-blocking for Lida case where discovery floods logs but game input never starts
+    # If --host provided explicitly, we trust it and start game loop immediately even if test fails
+    # Previous version did 3 attempts + 4 sec broadcast + 10 sec subnet scan = 15 sec blocked before game loop, causing only discovery packets to be seen
+    print(f"\n[Testing] Quick check host {args.host}:{args.port} (will start game loop regardless, to allow immediate driving)...")
     import socket, json
     reachable = False
-    # Try 3 times with increasing timeout, to handle transient No route
-    for attempt in range(3):
-        test_sock = None
+    quick_sock = None
+    try:
+        quick_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        quick_sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        quick_sock.settimeout(1.5)
+        test_msg = json.dumps({"type": "discovery", "player_id": 2}).encode()
+        quick_sock.sendto(test_msg, (args.host, args.port))
+        print(f"  Sent quick discovery to {args.host}:{args.port}, waiting 1.5s...")
         try:
-            test_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            test_sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-            test_sock.settimeout(2 + attempt)  # 2s, 3s, 4s
-            test_msg = json.dumps({"type": "discovery", "player_id": 2}).encode()
-            test_sock.sendto(test_msg, (args.host, args.port))
-            # Also broadcast to find host if direct fails
-            test_sock.sendto(test_msg, ("255.255.255.255", 9998))
-            test_sock.sendto(test_msg, ("255.255.255.255", 9999))
-            print(f"  Attempt {attempt+1}/3: Sent discovery to {args.host}:{args.port} (timeout {2+attempt}s)...")
-            try:
-                data, addr = test_sock.recvfrom(1024)
-                reply = json.loads(data.decode())
-                print(f"  ✓ Host {args.host} responded! {reply} from {addr}")
-                print(f"  Host is reachable, game should work")
-                reachable = True
-                break
-            except socket.timeout:
-                print(f"  ✗ No reply attempt {attempt+1} (timeout {2+attempt}s)")
-                if attempt < 2:
-                    print(f"    Retrying...")
-                    time.sleep(0.5)
+            data, addr = quick_sock.recvfrom(1024)
+            reply = json.loads(data.decode())
+            print(f"  ✓ Host {args.host} responded! {reply} from {addr}")
+            reachable = True
+        except socket.timeout:
+            print(f"  ⚠ No immediate reply (will still start game loop - Lida can try driving, and background retry will continue)")
+            # Don't block, will start game loop and retry in background via send_input failures triggering discovery
         except OSError as e:
-            # This is the No route to host case Lida sees: Errno 65
-            print(f"  ✗ Send failed attempt {attempt+1}: {e} (No route to host)")
-            if "65" in str(e) or "No route" in str(e):
-                print(f"    This is the 'No route to host' Lida sees - diagnostics:")
-                print(f"    - Your IP: {get_local_ip()} -> Host IP: {args.host}")
-                print(f"    - Both must be same WiFi SSID, not guest network with AP isolation")
-                print(f"    - macOS Firewall may block: System Settings -> Network -> Firewall -> Options -> allow Python")
-                print(f"    - Host may have changed IP (DHCP): check host HUD for current IP")
-        except Exception as e:
-            print(f"  Connectivity test error attempt {attempt+1}: {e}")
-        finally:
-            if test_sock:
-                try:
-                    test_sock.close()
-                except:
-                    pass
+            print(f"  ⚠ Send failed (No route?): {e} - will still start game loop and keep trying to send input")
+    except Exception as e:
+        print(f"  Quick check error: {e} - proceeding to game loop anyway")
+    finally:
+        if quick_sock:
+            try:
+                quick_sock.close()
+            except:
+                pass
 
-    if not reachable:
-        print(f"\n[Warning] Host {args.host} did not respond after 3 attempts")
-        # Try ping + ARP + subnet scan
-        import subprocess, platform
-        try:
-            param = "-n" if platform.system().lower()=="windows" else "-c"
-            result = subprocess.run(["ping", param, "1", args.host], capture_output=True, text=True, timeout=3)
-            if result.returncode==0:
-                print(f"  Ping to {args.host} OK - host is up but game not responding on port 9999")
-                print(f"  => Firewall likely blocking UDP 9999/9998. Allow Python in firewall.")
-                print(f"  macOS: System Settings -> Network -> Firewall -> Off or allow incoming for Python")
-            else:
-                print(f"  Ping to {args.host} FAIL - No route to host or offline")
-                print(f"  Possible reasons for Lida's case (192.168.0.131 -> 192.168.0.194):")
-                print(f"    - Host {args.host} offline or different WiFi")
-                print(f"    - AP isolation enabled on router (common on guest WiFi) - use main WiFi")
-                print(f"    - Host IP changed (DHCP): on host run: python3 -c \"from game.network import get_local_ip, get_all_local_ips; print(get_all_local_ips())\"")
-                print(f"    - Try connecting both to phone hotspot as test")
-        except Exception as e:
-            print(f"  Ping check failed: {e}")
-
-        print(f"\n[Recovery] Trying auto-discovery via broadcast + subnet scan of same /24...")
-        from game.network import get_local_ip as net_get_ip, get_ip_subnet, get_all_local_ips, scan_subnet_for_hosts
-        my_ip = net_get_ip()
-        subnet = get_ip_subnet(my_ip)
-        print(f"  My IP {my_ip} subnet {subnet} all IPs {get_all_local_ips()}")
-        found = discover_hosts(timeout=4)
-        if found:
-            print(f"  Found alternative hosts via discovery:")
-            for ip, port, info in found:
-                print(f"    {ip}:{port} - {info}")
-            # Auto-switch to first found if different from intended
-            if found[0][0] != args.host:
-                print(f"  Auto-switching to discovered host {found[0][0]}:{found[0][1]} (previous {args.host} had No route)")
-                args.host, args.port = found[0][0], found[0][1]
-                client = NetworkClient(args.host, args.port)
-                client.start()
-                reachable = True
-            else:
-                print(f"  Try: python3 remote_client.py --host {found[0][0]}")
-        else:
-            print(f"  No hosts via broadcast, trying direct subnet scan {subnet}0/24...")
-            if subnet:
-                scanned = scan_subnet_for_hosts(subnet, timeout_per_host=0.2, max_hosts=50, verbose=True)
-                if scanned:
-                    print(f"  Subnet scan found {len(scanned)} host(s): {scanned}")
-                    args.host, args.port = scanned[0][0], scanned[0][1]
-                    print(f"  Auto-switching to {args.host}:{args.port}")
-                    client = NetworkClient(args.host, args.port)
-                    client.start()
-                    reachable = True
-                else:
-                    print(f"  Subnet scan also found nothing. Checklist for Lida:")
-                    print(f"    1. Host running? Check host terminal shows [Network] Host listening")
-                    print(f"    2. Same WiFi? Both on same SSID, not guest")
-                    print(f"    3. Firewall: macOS System Settings -> Firewall -> allow Python")
-                    print(f"    4. IP changed? Host: python3 -c \"from game.network import get_all_local_ips; print(get_all_local_ips())\"")
-                    print(f"    5. Try phone hotspot: both join same hotspot, retry")
-                    print(f"    6. Manual: on host, ifconfig en0 | grep inet")
-            else:
-                print(f"  Could not determine subnet from {my_ip}")
-    else:
+    if reachable:
         print(f"  ✓ Host reachable, starting game loop with 30Hz + change detection (fixed Lida drive bug)...")
+    else:
+        print(f"  → Starting game loop immediately (even though quick check failed).")
+        print(f"    If you see discovery spam in host logs but no 'Lida CONNECTED', it means input packets not arriving (firewall/AP isolation)")
+        print(f"    Try: ping {args.host} from this machine. If ping fails -> different WiFi or AP isolation.")
+        print(f"    Firewall: macOS System Settings -> Firewall -> allow Python")
+        print(f"    Alternative: both join phone hotspot")
 
     # For button mapping, try to load custom mapping
     from game.input_manager import load_mapping

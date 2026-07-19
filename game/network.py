@@ -206,10 +206,22 @@ class NetworkHost:
             def safe_log_gameplay(*a, **kw): pass
             def safe_log_event(*a, **kw): pass
         packet_count = 0
+        # For Lida debug: track last time we saw packet from .131
+        last_lida_log = 0
         while self.running:
             try:
                 data, addr = self.sock.recvfrom(1024)
                 packet_count += 1
+                # Lida specific debug: log any packet from 192.168.0.131 even if not JSON, to diagnose No route vs no send
+                is_lida = '192.168.0.131' in str(addr) or str(addr).startswith("('192.168.0.13")
+                if is_lida and time.time() - last_lida_log > 1.0:
+                    # Log raw bytes length for diagnosis (discovery vs input)
+                    try:
+                        preview = data[:200].decode('utf-8', errors='replace')
+                    except:
+                        preview = repr(data[:100])
+                    print(f"[Network] Packet from Lida {addr} len={len(data)} preview={preview[:120]}")
+                    last_lida_log = time.time()
                 try:
                     # Robust decode: ignore stray binary packets (e.g., 0xd0 byte crash reported)
                     text = data.decode('utf-8', errors='replace')
@@ -225,7 +237,9 @@ class NetworkHost:
                                 "timestamp": time.time()
                             }
                             self.sock.sendto(json.dumps(reply).encode('utf-8'), addr)
-                            print(f"[Network] Discovery via main port from {addr}, replied")
+                            # Reduce spam: only print discovery occasionally, not every packet (Lida case floods)
+                            if packet_count % 20 == 1 or is_lida:
+                                print(f"[Network] Discovery via main port from {addr}, replied ({packet_count} pkts)")
                             if HAS_DEBUG:
                                 safe_log_event("NETWORK", f"Discovery via main port from {addr}", level="INFO")
                             continue
