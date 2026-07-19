@@ -604,7 +604,7 @@ class PlayerTank(Tank):
                     col = (255, 140, 0)  # normal homing orange
                 else:
                     if self.rapid_active and not is_homing:
-                        col = (255, 100, 150) if col == self.color else (255, 100, 150)
+                        col = (255, 100, 150)  # rapid pink (fix: was referencing undefined col)
                     else:
                         col = base_color
                         if has_power:
