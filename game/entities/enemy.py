@@ -1133,12 +1133,14 @@ class EnemyTank(Tank):
                 cy = self.rect.top - 12
             pygame.draw.rect(screen, (60,60,60), (cx-bar_w//2, cy, bar_w, bar_h))
             health_colors = [(0,255,0), (255,255,0), (255,140,0), (180,180,180)]
-            if self.health <= len(health_colors):
-                col = health_colors[self.health-1]
+            # Fix: health can be float due to stacking damage bonus (power 3.58 etc) - cast to int for index
+            health_int = max(1, int(self.health))
+            if health_int <= len(health_colors):
+                col = health_colors[health_int-1]
             else:
                 # boss gradient green->red
-                frac = self.health / 12.0
+                frac = health_int / 12.0
                 col = (int(255*(1-frac)), int(255*frac), 0)
             # For armor, health is out of 4; for boss out of 12
             max_h = 4 if self.enemy_type == 'armor' else 12
-            pygame.draw.rect(screen, col, (cx-bar_w//2, cy, int(bar_w*(self.health/max_h)), bar_h))
+            pygame.draw.rect(screen, col, (cx-bar_w//2, cy, int(bar_w*(health_int/max_h)), bar_h))
