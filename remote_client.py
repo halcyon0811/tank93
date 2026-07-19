@@ -249,9 +249,11 @@ def main():
 
     running = True
     last_send = 0
-    send_interval = 1/20  # 20 Hz
+    send_interval = 1/30  # 30 Hz for smoother control (was 20Hz, Lida reported cannot drive = need more responsive)
     consecutive_failures = 0
     last_fail_msg_time = 0
+    last_sent_dir = None
+    last_sent_shoot = False
 
     try:
         while running:
@@ -313,13 +315,21 @@ def main():
                                 shoot_joy = True
 
             # Combine: joystick takes precedence over keyboard if present
+            # FIX: Previously joy took absolute precedence even if None, keyboard fallback already via `or`
+            # Now ensure keyboard always works even if joystick idle (important for Lida)
             final_dir = dir_joy or dir_keyboard
             final_shoot = shoot_joy or shoot_keyboard
 
-            # Send at 20Hz or on change
+            # Send at 30Hz + immediately on direction/shoot change for responsiveness (fix cannot drive)
             now = time.time()
-            if now - last_send > send_interval:
+            changed = (final_dir != last_sent_dir) or (final_shoot != last_sent_shoot)
+            if changed or (now - last_send > send_interval):
                 success = client.send_input(final_dir, final_shoot)
+                if changed:
+                    print(f"[Input] Sending dir={final_dir} shoot={final_shoot} (changed)")
+                # update last sent for change detection
+                last_sent_dir = final_dir
+                last_sent_shoot = final_shoot
                 if not success:
                     consecutive_failures += 1
                     # If many failures, show troubleshooting

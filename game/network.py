@@ -158,7 +158,9 @@ class NetworkHost:
                 data, addr = self.sock.recvfrom(1024)
                 packet_count += 1
                 try:
-                    msg = json.loads(data.decode('utf-8'))
+                    # Robust decode: ignore stray binary packets (e.g., 0xd0 byte crash reported)
+                    text = data.decode('utf-8', errors='replace')
+                    msg = json.loads(text)
                     if isinstance(msg, dict) and "player_id" in msg:
                         if msg.get("type") == "discovery":
                             ip = get_local_ip()

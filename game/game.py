@@ -1568,43 +1568,80 @@ class Game:
             except:
                 pass
 
-        # Check for remote P2 input via LAN
+        # Check for remote P2 input via LAN - FIXED: Lida cannot drive bug
+        # Root cause: old code only used remote input when (dir or shoot) truthy, otherwise fell back to local
+        # This caused P2 to be controllable by host arrows and also lose ownership when idle
+        # Also remote_p2 fetch only when len>=2, but should always fetch when connected
+        # Now: if remote client connected, P2 is exclusively controlled by remote (authoritative)
         remote_p2 = None
+        remote_connected = False
         if self.network_host:
             try:
+                remote_connected = self.network_host.is_client_connected()
                 # Auto-join remote P2 if client connected and we have only 1 player
-                if self.network_host.is_client_connected() and len(self.players) == 1:
-                    # Check if P2 doesn't already exist
+                if remote_connected and len(self.players) == 1:
                     if not any(p.player_id == 2 for p in self.players):
-                        print("[Network] Remote P2 joining via LAN!")
-                        # Spawn P2 at its spawn point
+                        print("[Network] Remote P2 (Lida) joining via LAN! Spawning P2")
                         gx, gy = PLAYER_SPAWN[1]
-                        p2 = PlayerTank(2, gx, gy, lives=3)
+                        # Pass is_mega flag correctly (was missing before)
+                        p2 = PlayerTank(2, gx, gy, lives=3, is_mega=getattr(self, 'is_mega', False))
                         p2.score = 0
                         self.players.append(p2)
                         self.num_players = 2
                         self.particles.add_spawn(p2.rect.centerx, p2.rect.centery)
-                        # Ensure P2 has lives
                         if p2.lives < 0:
                             p2.lives = 3
-                if len(self.players) >= 2:
-                    remote_p2 = self.network_host.get_remote_p2_input()
+                        try:
+                            _log_gameplay("REMOTE_P2_SPAWN", level_idx=self.current_level, player_id=2, data={"gx": gx, "gy": gy, "is_mega": getattr(self, 'is_mega', False)})
+                        except:
+                            pass
+                # Always fetch remote input when connected OR when we have 2 players and host exists (to keep timestamp fresh)
+                # Previously only fetched when len>=2, causing 1-frame delay and missing input on first frame
+                if self.network_host:
+                    # get_remote_p2_input returns {} with old timestamp if stale, we handle below
+                    try:
+                        remote_p2 = self.network_host.get_remote_p2_input()
+                    except:
+                        remote_p2 = None
             except Exception as e:
                 # print(f"Network check error: {e}")
                 remote_p2 = None
+                remote_connected = False
 
         for i, p in enumerate(self.players):
             if not p.alive:
                 continue
-            # If this is P2 and remote input is active, use remote input instead of local joystick
-            if p.player_id == 2 and remote_p2 and (remote_p2.get("dir") or remote_p2.get("shoot")):
-                # Remote P2 input from LAN
+            # If this is P2 and remote is connected, use remote input exclusively (authoritative)
+            # FIX: Previously required (dir or shoot) truthy, so when remote idle, it fell back to local keyboard
+            # which allowed host to steal control and also made remote feel unresponsive if packets lost
+            # Now: if remote_connected and player is P2, we ALWAYS enter remote handling (even if idle)
+            # This gives Lida exclusive ownership of P2 tank
+            is_remote_p2 = (p.player_id == 2 and self.network_host and self.network_host.is_client_connected())
+            if is_remote_p2 and remote_p2 is not None:
+                # Remote P2 input from LAN - authoritative
                 other_tanks = self.enemies + [op for j, op in enumerate(self.players) if j != i]
                 r_dir = remote_p2.get("dir")
                 r_shoot = remote_p2.get("shoot", False)
+                # Debug: occasional log of remote driving (use spawn_timer to avoid spam)
+                if r_dir and (getattr(self, 'spawn_timer', 0) % 90 == 0):
+                    try:
+                        _log_gameplay("REMOTE_P2_MOVE", level_idx=self.current_level, player_id=2, data={"dir": r_dir, "shoot": r_shoot, "x": p.x, "y": p.y})
+                    except:
+                        pass
                 if r_dir:
-                    p.direction = r_dir
-                    p.try_move(r_dir, self.tilemap, other_tanks)
+                    # Validate direction string (must be in DIRS)
+                    if r_dir in DIRS:
+                        # try_move already sets direction and handles collision
+                        moved = p.try_move(r_dir, self.tilemap, other_tanks)
+                        # Also ensure direction face even if blocked (try_move sets it, but we set explicitly for clarity)
+                        p.direction = r_dir
+                    else:
+                        # Invalid dir from client, ignore but log
+                        try:
+                            _log_event("NETWORK", f"Invalid dir from remote: {r_dir}", level="WARN")
+                        except:
+                            pass
+                # Shooting (can shoot even while idle)
                 if r_shoot:
                     b = p.shoot()
                     if b:
