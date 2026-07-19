@@ -168,7 +168,7 @@ class NetworkHost:
                     continue
                 data, addr = self.discovery_sock.recvfrom(1024)
                 try:
-                    msg = json.loads(data.decode('utf-8'))
+                    msg = json.loads(data.decode('utf-8', errors='replace'))
                     if msg.get("type") == "discovery" and msg.get("player_id") == 2:
                         ip = get_local_ip()
                         reply = {
@@ -255,8 +255,9 @@ class NetworkHost:
                         except:
                             pass
                 except json.JSONDecodeError:
-                    if HAS_DEBUG:
-                        safe_log_event("NETWORK", f"JSON decode error from {addr}", level="WARN")
+                    # Ignore stray non-JSON packets (e.g., from 192.168.0.140 or mDNS) - don't spam WARN
+                    # Previously logged as WARN causing Lida confusion: JSON decode error from ('192.168.0.140', 9999)
+                    # Now silent unless debug verbose
                     continue
             except socket.timeout:
                 with self.lock:
