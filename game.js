@@ -36,17 +36,20 @@ const BASE_POS = [12,24];
 
 let mapsData = null;
 let settingsData = null;
+let tankSpriteSheet = null;
+let tankSpriteLoaded = false;
+let soundBuffers = {};
+let audioContext = null;
 
-// Load maps
+// Load maps and assets - exact same as Python version
 async function loadAssets() {
-    document.getElementById('loading').textContent = 'Loading 35 original NES maps...';
+    document.getElementById('loading').textContent = 'Loading 35 original NES maps... exact same as Python';
     try {
         const res = await fetch('assets/maps.json');
         mapsData = await res.json();
-        console.log(`Loaded ${mapsData.levels_26.length} maps`);
+        console.log(`Loaded ${mapsData.levels_26.length} maps - same as Python LEVELS_26`);
     } catch(e) {
         console.error("Failed to load maps", e);
-        // Fallback empty
         mapsData = {levels_26: [[[0]]], levels_13: [[[0]]], stage_count: 1, bots_raw: []};
     }
 
@@ -57,8 +60,157 @@ async function loadAssets() {
         settingsData = {};
     }
 
-    document.getElementById('loading').textContent = 'Loading sounds...';
-    // Sounds will be loaded via Audio elements
+    // Load tank sprite sheet - same as Python game/assets/General-Sprites.png - exact same
+    document.getElementById('loading').textContent = 'Loading authentic NES tank sprites (General-Sprites.png)...';
+    try {
+        tankSpriteSheet = new Image();
+        tankSpriteSheet.src = 'assets/images/General-Sprites.png';
+        await new Promise((resolve, reject) => {
+            tankSpriteSheet.onload = () => {
+                console.log(`Loaded tank sprite sheet ${tankSpriteSheet.width}x${tankSpriteSheet.height} - same as Python`);
+                tankSpriteLoaded = true;
+                resolve();
+            };
+            tankSpriteSheet.onerror = (e) => {
+                console.warn("Failed to load sprite sheet, using fallback rect drawing");
+                tankSpriteLoaded = false;
+                resolve(); // still resolve, fallback to rect
+            };
+        });
+    } catch(e) {
+        console.warn("Sprite sheet load failed", e);
+        tankSpriteLoaded = false;
+    }
+
+    document.getElementById('loading').textContent = 'Loading real tank sounds (distant_tank_shots.mp3)...';
+    // Load sounds via Web Audio API - same files as Python: distant_tank_shots.mp3 and real/*.wav
+    try {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        const soundFiles = [
+            'assets/sounds/distant_tank_shots.mp3',
+            'assets/sounds/real/tank_shot_single.wav',
+            'assets/sounds/real/tank_shot_power.wav',
+            'assets/sounds/real/brick_hit_real.wav'
+        ];
+        // Load first one as main shoot sound (real)
+        for(let sf of soundFiles) {
+            try {
+                const resp = await fetch(sf);
+                const arrayBuf = await resp.arrayBuffer();
+                const audioBuf = await audioContext.decodeAudioData(arrayBuf);
+                let key = sf.split('/').pop().replace('.wav','').replace('.mp3','');
+                soundBuffers[key] = audioBuf;
+                console.log(`Loaded sound ${key} - ${audioBuf.duration.toFixed(2)}s`);
+            } catch(e) {
+                console.warn(`Failed to load sound ${sf}: ${e}`);
+            }
+        }
+        // Also try to load authentic NES sounds if available (ogg)
+        const oggSounds = ['bullet_shot', 'bullet_hit_1', 'explosion_1'];
+        for(let name of oggSounds) {
+            try {
+                const resp = await fetch(`../game/assets/sounds/${name}.ogg`);
+                if(resp.ok) {
+                    const buf = await resp.arrayBuffer();
+                    const audioBuf = await audioContext.decodeAudioData(buf);
+                    soundBuffers[name] = audioBuf;
+                }
+            } catch(e) {}
+        }
+    } catch(e) {
+        console.warn("Web Audio not supported or failed", e);
+    }
+
+    document.getElementById('loading').textContent = 'All assets loaded - exact same as Python - starting...';
+}
+
+function playSound(name, volume=0.7) {
+    try {
+        if(!audioContext) return;
+        // Resume if suspended (browser autoplay policy)
+        if(audioContext.state === 'suspended') audioContext.resume();
+        let buf = soundBuffers[name] || soundBuffers['distant_tank_shots'] || soundBuffers['tank_shot_single'] || soundBuffers['bullet_shot'];
+        if(!buf) {
+            // Try fallback names
+            buf = soundBuffers[Object.keys(soundBuffers)[0]];
+        }
+        if(!buf) return;
+        let source = audioContext.createBufferSource();
+        source.buffer = buf;
+        let gain = audioContext.createGain();
+        gain.gain.value = volume;
+        source.connect(gain);
+        gain.connect(audioContext.destination);
+        source.start();
+    } catch(e) {
+        // Silent fail
+    }
+}
+
+// Sprite sheet mapping - EXACT SAME AS PYTHON game/assets/sprites.py (fixed RIGHT/LEFT swap)
+const TANK_BASE = {
+    "yellow": [0, 0],   // P1
+    "silver": [8, 0],   // basic enemy
+    "green": [0, 8],    // P2
+    "red": [8, 8],      // power/armor/boss
+};
+const DIR_OFFSETS = {'UP':0, 'RIGHT':6, 'DOWN':4, 'LEFT':2}; // Fixed: was RIGHT=2 LEFT=6 swapped, now corrected to match Python fix
+const DIR_ANGLE_8 = {'UP':0,'UP_RIGHT':45,'RIGHT':90,'DOWN_RIGHT':135,'DOWN':180,'DOWN_LEFT':225,'LEFT':270,'UP_LEFT':315};
+
+function getTankFrame(color, direction, animFrame=0, level=0) {
+    // Same logic as Python get_tank_frame
+    if(!tankSpriteLoaded || !tankSpriteSheet) return null;
+    let base = TANK_BASE[color] || [0,0];
+    let base_x = base[0], base_y = base[1];
+    let d = (direction||'UP').toUpperCase();
+    let baseDir = DIR_OFFSETS.hasOwnProperty(d) ? d : 'UP';
+    let colOffset = (DIR_OFFSETS[baseDir]||0) + (animFrame%2);
+    let fx = base_x + colOffset;
+    let fy = base_y + level;
+    // Bounds check 25x16 tiles
+    if(fx<0||fy<0||fx>=25||fy>=16) { fx=base_x; fy=base_y; }
+    return {x: fx*16, y: fy*16, w: 16, h: 16};
+}
+
+function drawTankSprite(ctx, color, direction, animFrame, level, cx, cy, size) {
+    // Try to draw authentic NES sprite from sheet, fallback to rect
+    let frame = getTankFrame(color, direction, animFrame, level);
+    if(frame && tankSpriteLoaded) {
+        // Check if direction is diagonal - need rotation
+        let d = (direction||'UP').toUpperCase();
+        if(!DIR_OFFSETS.hasOwnProperty(d) && DIR_ANGLE_8.hasOwnProperty(d)) {
+            // Diagonal - get UP sprite and rotate
+            let upFrame = getTankFrame(color, 'UP', animFrame, level);
+            if(upFrame) {
+                // Save context, translate to center, rotate, draw
+                ctx.save();
+                ctx.translate(cx, cy);
+                let angle = DIR_ANGLE_8[d] * Math.PI/180;
+                ctx.rotate(angle);
+                // Draw UP sprite centered, rotated
+                // Need to draw from sheet: source x,y,w,h to dest -size/2,-size/2,size,size
+                try {
+                    ctx.drawImage(tankSpriteSheet, upFrame.x, upFrame.y, upFrame.w, upFrame.h, -size/2, -size/2, size, size);
+                } catch(e) {
+                    // Fallback
+                    ctx.fillStyle = color==='yellow' ? '#ffd700' : color==='green' ? '#0f0' : color==='red' ? '#ff5050' : '#b4b4b4';
+                    ctx.fillRect(-size/2+2, -size/2+2, size-4, size-4);
+                }
+                ctx.restore();
+                return true;
+            }
+        } else {
+            // Cardinal - direct draw
+            try {
+                ctx.drawImage(tankSpriteSheet, frame.x, frame.y, frame.w, frame.h, cx-size/2, cy-size/2, size, size);
+                return true;
+            } catch(e) {
+                // Fallback
+            }
+        }
+    }
+    // Fallback procedural (same as before but with exact Python colors)
+    return false;
 }
 
 class TileMap {
@@ -416,56 +568,134 @@ class Tank {
         let cx=this.rect.centerx, cy=this.rect.centery;
         let size=TANK_SIZE-6;
 
-        // Body
-        ctx.fillStyle = this.color;
-        ctx.fillRect(cx-size/2+2, cy-size/2+2, size-4, size-4);
-        ctx.strokeStyle = '#000';
-        ctx.lineWidth = 2;
-        ctx.strokeRect(cx-size/2+2, cy-size/2+2, size-4, size-4);
+        // Try authentic NES sprite - exact same as Python game/assets/sprites.py
+        // Determine sprite color and level like Python does
+        let spriteColor = 'yellow';
+        let spriteLevel = 0;
+        if(this.is_player) {
+            spriteColor = this.player_id===1 ? 'yellow' : 'green';
+            spriteLevel = this.star_level||0;
+        } else {
+            let etype = this.enemy_type||'basic';
+            if(etype==='basic') { spriteColor='silver'; spriteLevel=0; }
+            else if(etype==='fast') { spriteColor='silver'; spriteLevel=1; }
+            else if(etype==='power') { spriteColor='red'; spriteLevel=0; }
+            else if(etype==='armor') { spriteColor='red'; let hp=this.health||1; spriteLevel=Math.max(0,4-hp); }
+            else if(etype==='monster_boss' || etype==='boss' || this.is_boss) { spriteColor='red'; spriteLevel=0; }
+            else { spriteColor='silver'; }
+        }
+        // Anim frame based on move_timer (tread animation like NES)
+        let anim = 0;
+        if(this.move_timer) anim = Math.floor(this.move_timer/6)%2;
 
-        // Turret direction line - shows facing where aims
-        let [dx,dy] = DIRS[this.direction]||[0,-1];
-        let x2 = cx + dx*(size/2+8);
-        let y2 = cy + dy*(size/2+8);
-        ctx.strokeStyle = '#222';
-        ctx.lineWidth = 4;
-        ctx.beginPath();
-        ctx.moveTo(cx,cy);
-        ctx.lineTo(x2,y2);
-        ctx.stroke();
-
-        // Center dot
-        ctx.fillStyle = '#111';
-        ctx.beginPath();
-        ctx.arc(cx,cy,4,0,Math.PI*2);
-        ctx.fill();
-
-        // Boss?
-        if(this.enemy_type==='monster_boss' || this.is_boss) {
-            // Monster boss eyes
-            ctx.fillStyle = '#fff';
-            ctx.beginPath();
-            ctx.arc(cx-6, cy-4, 5,0,Math.PI*2);
-            ctx.arc(cx+6, cy-4, 5,0,Math.PI*2);
-            ctx.fill();
-            ctx.fillStyle = '#f00';
-            ctx.beginPath();
-            ctx.arc(cx-6, cy-4, 2,0,Math.PI*2);
-            ctx.arc(cx+6, cy-4, 2,0,Math.PI*2);
-            ctx.fill();
-            // Health bar
-            let barW=40, barH=6;
-            let frac = this.health/18;
-            ctx.fillStyle='#000';
-            ctx.fillRect(cx-barW/2-1, cy-size/2-12, barW+2, barH+2);
-            ctx.fillStyle=`rgb(${Math.floor(255*(1-frac))},${Math.floor(255*frac)},0)`;
-            ctx.fillRect(cx-barW/2, cy-size/2-11, barW*frac, barH);
+        // Try to draw authentic sprite - same logic as Python Tank.draw()
+        let drewSprite = false;
+        try {
+            drewSprite = drawTankSprite(ctx, spriteColor, this.direction, anim, spriteLevel, cx, cy, TANK_SIZE);
+        } catch(e) {
+            drewSprite = false;
         }
 
-        // Venom overlay
+        if(drewSprite) {
+            // Draw P1/P2 label and health bar on top of sprite, like Python does
+            if(this.is_player) {
+                ctx.fillStyle = 'black';
+                ctx.fillRect(cx-12, this.rect.top-14, 24, 12);
+                ctx.fillStyle = this.player_id===1 ? 'white' : '#64ff64';
+                ctx.font = '10px monospace';
+                ctx.fillText(`P${this.player_id}`, cx-8, this.rect.top-4);
+            }
+            // Armor/health bar for boss and armor
+            if((this.enemy_type==='armor' || this.is_boss) && this.health>1) {
+                let barW = this.is_boss ? 40 : 20;
+                let barH = this.is_boss ? 6 : 4;
+                let maxH = this.is_boss ? 18 : 4;
+                let frac = this.health / maxH;
+                let bx = cx - barW/2;
+                let by = this.is_boss ? this.rect.top - 12 : this.rect.bottom + 2;
+                ctx.fillStyle='#000';
+                ctx.fillRect(bx-1, by-1, barW+2, barH+2);
+                ctx.fillStyle='#444';
+                ctx.fillRect(bx, by, barW, barH);
+                ctx.fillStyle=`rgb(${Math.floor(255*(1-frac))},${Math.floor(255*frac)},0)`;
+                ctx.fillRect(bx, by, barW*frac, barH);
+                if(this.is_boss) {
+                    ctx.fillStyle='red';
+                    ctx.font='10px monospace';
+                    ctx.fillText('BOSS', cx-14, by-8);
+                }
+            }
+        }
+
+        if(!drewSprite) {
+            // Fallback procedural retro - same as Python fallback
+            // Body
+            ctx.fillStyle = this.color;
+            ctx.fillRect(cx-size/2+2, cy-size/2+2, size-4, size-4);
+            ctx.strokeStyle = '#000';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(cx-size/2+2, cy-size/2+2, size-4, size-4);
+
+            // Turret direction line - shows facing where aims (exact same as Python fallback)
+            let [dx,dy] = DIRS[this.direction]||[0,-1];
+            let x2 = cx + dx*(size/2+8);
+            let y2 = cy + dy*(size/2+8);
+            ctx.strokeStyle = '#222';
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.moveTo(cx,cy);
+            ctx.lineTo(x2,y2);
+            ctx.stroke();
+
+            // Center dot
+            ctx.fillStyle = '#111';
+            ctx.beginPath();
+            ctx.arc(cx,cy,4,0,Math.PI*2);
+            ctx.fill();
+
+            // Boss?
+            if(this.enemy_type==='monster_boss' || this.is_boss) {
+                ctx.fillStyle = '#fff';
+                ctx.beginPath();
+                ctx.arc(cx-6, cy-4, 5,0,Math.PI*2);
+                ctx.arc(cx+6, cy-4, 5,0,Math.PI*2);
+                ctx.fill();
+                ctx.fillStyle = '#f00';
+                ctx.beginPath();
+                ctx.arc(cx-6, cy-4, 2,0,Math.PI*2);
+                ctx.arc(cx+6, cy-4, 2,0,Math.PI*2);
+                ctx.fill();
+                let barW=40, barH=6;
+                let frac = this.health/18;
+                ctx.fillStyle='#000';
+                ctx.fillRect(cx-barW/2-1, cy-size/2-12, barW+2, barH+2);
+                ctx.fillStyle=`rgb(${Math.floor(255*(1-frac))},${Math.floor(255*frac)},0)`;
+                ctx.fillRect(cx-barW/2, cy-size/2-11, barW*frac, barH);
+            }
+        }
+
+        // Venom overlay - same as Python
         if(this.venom_timer>0) {
             ctx.fillStyle = `rgba(60,200,60,${0.2+this.venom_timer/1080*0.3})`;
             ctx.fillRect(cx-size/2, cy-size/2, size, size);
+            // Dripping slime
+            for(let i=0; i<3+this.venom_level*4; i++) {
+                let sx = cx + (Math.random()*16-8);
+                let sy = this.rect.bottom - 4 + this.venom_level*6 + i*3;
+                ctx.fillStyle = '#3cc83c';
+                ctx.beginPath();
+                ctx.arc(sx, sy, Math.max(1, 3-this.venom_level*2), 0, Math.PI*2);
+                ctx.fill();
+            }
+        }
+
+        // Invulnerable flicker (shield)
+        if(this.invulnerable_timer>0 && Math.floor(this.invulnerable_timer/4)%2===0) {
+            ctx.strokeStyle = '#ccc';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(cx, cy, TANK_SIZE/2+6, 0, Math.PI*2);
+            ctx.stroke();
         }
     }
 }
