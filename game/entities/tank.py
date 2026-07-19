@@ -330,17 +330,23 @@ class Tank:
         # User reported: destroyed brick area smaller than tank width, cannot pass through
         # Fix: use smaller collision rect for tile checks (24x24 = TANK_SIZE-8) so single destroyed brick = passable
         # For tank-tank collision, keep full rect to prevent overlapping tanks
-        # Visual gap: tank drawn 30 vs collision 24 = 3px visual overlap with adjacent bricks when squeezing through 1-tile gap - acceptable and matches classic Battle City feel
-        # Also log for debug: if tank cannot pass through destroyed area, we can see via breadcrumbs
+        # Visual gap: user reports 24px gap still too small for 32px tank to pass (one-time destroyable brick)
+        # Fix: use smaller collision rect 20x20 (inflate -12) for normal tanks, giving 4px clearance in 24px gap
+        # Previously 24x24 required perfect centering, now 20x20 allows ±2px tolerance, feels better
+        # Giant/boss keep full rect for crush detection
         is_giant = getattr(self, 'is_giant', False) and getattr(self, 'giant_timer', 0) > 0
-        is_boss = getattr(self, 'is_boss', False)  # boss monster can also crush bricks (free-for-all threat)
+        is_boss = getattr(self, 'is_boss', False)
         can_crush_brick = is_giant or is_boss
+        is_shrunk = getattr(self, 'is_shrunk', False) and getattr(self, 'shrink_timer', 0) > 0
 
-        # For tile collision, use 24x24 for normal tanks (allows 1-tile gap pass), full for giant/boss crushing detection
         if can_crush_brick:
-            tile_check_rect = new_rect.copy()  # full for crush detection
+            tile_check_rect = new_rect.copy()  # full 32 for crush detection
+        elif is_shrunk:
+            tile_check_rect = new_rect.inflate(-16, -16)  # shrink: 32*0.5=16 visual, but collision 16 -> 32-16=16, even smaller for easy passage
         else:
-            tile_check_rect = new_rect.inflate(-8, -8)  # 32->24, matches tile size, allows passing through single destroyed brick
+            # Normal tank: 20x20 collision (was 24x24) - allows passing through single destroyed brick (24px gap) with 4px clearance
+            # TANK_SIZE 32, TILE 24, collision 20 = 6px visual overlap each side when squeezing, acceptable
+            tile_check_rect = new_rect.inflate(-12, -12)  # 32->20
 
         tiles = tilemap.get_tiles_in_rect(tile_check_rect)
         crushed_bricks = []
@@ -362,8 +368,10 @@ class Tank:
                     new_rect2.center = (self.x + dx * self.speed * speed_mult, self.y + dy * self.speed * speed_mult)
                     if can_crush_brick:
                         tile_check_rect2 = new_rect2.copy()
+                    elif is_shrunk:
+                        tile_check_rect2 = new_rect2.inflate(-16, -16)
                     else:
-                        tile_check_rect2 = new_rect2.inflate(-8, -8)
+                        tile_check_rect2 = new_rect2.inflate(-12, -12)  # 20x20 for normal (was 24x24)
                     tiles2 = tilemap.get_tiles_in_rect(tile_check_rect2)
                     blocked2 = False
                     for t2, gx2, gy2, tr2b in tiles2:
@@ -390,9 +398,48 @@ class Tank:
                         self._log_stuck_if_needed(dir_name)
                         return False
                 else:
-                    self.stuck_timer = getattr(self, 'stuck_timer', 0) + 1
-                    self._log_stuck_if_needed(dir_name)
-                    return False
+                    # Try sliding through 1-tile gap: if moving vertically, nudge X slightly to find gap; if horizontal, nudge Y
+                    # This helps passing through destroyed brick channel even if not perfectly centered (user report)
+                    slid = False
+                    if not can_crush_brick:
+                        for offset in (4, -4, 8, -8, 12, -12):
+                            test_x = new_x
+                            test_y = new_y
+                            if dy != 0:  # vertical movement, try X slide
+                                test_x = new_x + offset
+                            else:  # horizontal, try Y slide
+                                test_y = new_y + offset
+                            test_rect = self.rect.copy()
+                            test_rect.center = (test_x, test_y)
+                            if is_shrunk:
+                                test_check = test_rect.inflate(-16, -16)
+                            else:
+                                test_check = test_rect.inflate(-12, -12)
+                            # Check tiles for this offset
+                            blocked = False
+                            for ttype2, gx2, gy2, trect2 in tilemap.get_tiles_in_rect(test_check):
+                                if test_check.colliderect(trect2):
+                                    if ttype2 == TILE_BRICK and can_crush_brick:
+                                        continue
+                                    blocked = True
+                                    break
+                            if not blocked:
+                                # Found slide path
+                                new_x = test_x
+                                new_y = test_y
+                                new_rect.center = (new_x, new_y)
+                                tile_check_rect = test_check
+                                slid = True
+                                try:
+                                    from .logger_integration import safe_log_gameplay
+                                    safe_log_gameplay("SLIDE_THROUGH_GAP", data={"x": self.x, "y": self.y, "dir": dir_name, "offset": offset})
+                                except:
+                                    pass
+                                break
+                    if not slid:
+                        self.stuck_timer = getattr(self, 'stuck_timer', 0) + 1
+                        self._log_stuck_if_needed(dir_name)
+                        return False
 
         for gx, gy in crushed_bricks:
             try:
