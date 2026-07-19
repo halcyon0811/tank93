@@ -1,4 +1,4 @@
-# Tank93 Debug Logging System - Comprehensive Guide
+# Tank93 Debug Logging System - Comprehensive Guide (Updated for Recent Changes)
 
 ## Overview
 
@@ -7,8 +7,9 @@ Tank93 now has a **production-grade debug logging system** with:
 - **SQLite DB** (`debug.db`) in WAL mode for 0-latency concurrent read/write queries
 - **Async writer thread** with queue to avoid game loop stalls
 - **Text mirror** (`bug_trace.log`) for quick tail
-- **Structured events**: sessions, state_changes, gameplay, perf, inputs, exceptions
+- **Structured events**: sessions, state_changes, gameplay, perf, inputs, exceptions, network, edge, steel, weapons, maps, HUD, perf
 - **Detailed breadcrumbs** for instant root cause analysis
+- **Enhanced observability** for all recent features (network, steel, edge, startup perf, weapon stacking, map select, HUD)
 
 ## Architecture
 
@@ -20,173 +21,195 @@ Game Loop -> debug_logger.log_event/state/gameplay/input -> Queue (size 10000) -
 - **No frame drop**: Queue decouples game loop from disk I/O
 - **Auto-pruning**: Keep last N sessions (default 20)
 
-## Database Tables
+## Database Tables (same as before)
 
 | Table | Purpose |
 |-------|---------|
 | `sessions` | Each run: git commit, platform, screen size, joystick info, start/end time |
-| `events` | Generic structured logs: tag, level, message, extra JSON, stack trace |
+| `events` | Generic structured logs: tag, level, message, extra JSON, stack trace (now includes NETWORK, MAP, PERF, HUD) |
 | `state_changes` | Every `old_state -> new_state` with reason and stack |
-| `gameplay` | Game-specific: ENEMY_SPAWN, ENEMY_KILL, BASE_DAMAGE, POWERUP_SPAWN/PICK, BRICK_DESTROY, etc |
+| `gameplay` | Game-specific: now includes NETWORK_*, EDGE_*, STEEL_*, WEAPON_*, MAP_*, PERF_*, HUD_*, PWR_* etc |
 | `perf_samples` | Every 30 frames: fps, dt, enemies/bullets count |
-| `inputs` | Every KEYDOWN, JOYBUTTONDOWN, JOYHATMOTION with device and mapped action |
-| `exceptions_log` | Every caught exception with full traceback |
+| `inputs` | Every KEYDOWN, JOYBUTTONDOWN, JOYHATMOTION |
+| `exceptions_log` | Every caught exception |
 
-## Logs Captured (Detailed)
+## Logs Captured - Enhanced for Recent Changes
 
-### State Transitions
-- `menu -> playing` (level init), `playing -> menu` (ESC, crash guard, gameover timer)
-- `playing -> paused`, `paused -> playing`
-- With stack trace for `playing -> menu` (WARN level) - instant bounce detection
-
-### Gameplay Events
-- `LEVEL_INIT`: level_idx, enemies_total, max_on_field, spawn_interval
-- `ENEMY_SPAWN`: type, grid_x,y, spawned/total, carrier
-- `ENEMY_KILL`: type, x,y, killer player, carrier, score
-- `POWERUP_SPAWN`, `POWERUP_PICK`: type, x,y
-- `BASE_DAMAGE`, `BASE_RESPAWN`
-- `BRICK_DESTROY`: x,y, hits, bullet_type
-- `BULLET_HIT_BRICK/STEEL/TANK/BASE/VENOM/OUT`
-- `PLAYER_DEATH`, `PLAYER_RESPAWN`, `PLAYER_JOIN_ATTEMPT`
-- `BOSS_RELEASE`, `GAMEOVER`, `STAGE_CLEAR`, `COIN_INSERT`
-- etc (search `log_gameplay` in code)
-
-### Input Events
-- Every `KEYDOWN`: key name, mods, unicode
-- Every `JOYBUTTONDOWN`: button idx, instance_id, joy_count, mapped player
-- `JOYHATMOTION`: hat value
-- Throttling: inputs logged to DB, not text (to avoid spam)
-
-### Performance
-- Every 0.5 sec sampled every 30 frames: fps, dt, update_ms, draw_ms, counts
-
-### Exceptions
-- Any crash in `update_playing`, `draw`, main loop, etc with full traceback
-
-## Query CLI - 0 Latency
-
-All queries hit SQLite directly, no game running needed.
-
-```bash
-# Stats
-python -m game.debug_logger stats
-
-# List sessions
-python debug_query.py --sessions --limit 10
-# or
-python -m game.debug_logger sessions --limit 10
-
-# Last session state changes
-python debug_query.py --last --state
-
-# Last session errors + exceptions
-python debug_query.py --last --errors
-
-# Bounce analysis - playing->menu with breadcrumbs (CRITICAL for bounce bug)
-python debug_query.py --last --bounce
-
-# Search events
-python debug_query.py --last --tag STATE --level WARN
-python debug_query.py --last --search "menu" --limit 20
-
-# Gameplay
-python debug_query.py --last --gameplay ENEMY_SPAWN
-python debug_query.py --last --gameplay BASE_DAMAGE
-
-# Inputs
-python debug_query.py --last --inputs --limit 50
-
-# Tail text log
-python debug_query.py --tail 100
-python -m game.debug_logger tail --lines 100
-
-# Or use game.debug_logger module directly:
-python -m game.debug_logger query --last --state-changes --limit 20
-python -m game.debug_logger query --crashes --last
-python -m game.debug_logger query --session 1 --tag BUG --level ERROR
-```
-
-## Example: Finding Bounce Bug (Fixed)
-
-Before fix, HEAD had:
-
-```python
-# EnemyTank.draw(self, screen):  # no tilemap arg
-# Game.draw: e.draw(canvas, tilemap=self.tilemap)
-```
+### 1. Network (Lida remote join - critical)
+- **Before fix**: Discovery flood `192.168.0.131:58678` only, no `Lida CONNECTED`, No route 65
+- **Now logs**:
+  - `NETWORK_LIDA_CONNECTED` / `LIDA_CONNECTED_BROADCAST_FALLBACK` (AP isolation workaround)
+  - `NETWORK_LIDA_DISCONNECT`, `LIDA_KICK`
+  - `BROADCAST_FALLBACK_ACTIVE`: when unicast `No route` fails, input sent via `255.255.255.255:9999` broadcast
+  - `Packet from Lida` preview to distinguish discovery vs `dir=UP` input
+  - Old client detection: `⚠ Lida sending ONLY discovery for 10+ sec, no dir input`
 
 Query:
+```bash
+python -m game.debug_logger query --last --network
+python debug_report.py  # shows network section
+```
+
+### 2. Edge / Stuck / Outside Map (new fixes)
+- `EDGE_BLOCK`, `EDGE_AUTO_CLAMP`, `PLAYER_STUCK`, `PLAYER_AUTO_UNSTUCK`
+- `SLIDE_THROUGH_GAP`: tank nudged ±4/8/12px to pass 1-tile destroyed brick channel (new 20px collision)
+- `CLAMP_OUTSIDE`, `SPAWN_CLAMP`: enemy outside map bug fixed, clamp to fully inside
+- `EDGE_STUCK_SUMMARY` (via query)
+
+Query:
+```bash
+python -m game.debug_logger query --last --stuck
+```
+
+### 3. Steel / Concrete Destructible (new: harder than brick)
+- **Before**: steel required power>=2 instant, else indestructible
+- **Now**: `STEEL_HITS_NEEDED` normal 5, power 3→2 after reduction, rapid 8, homing 6, etc
+- Logs: `STEEL_DESTROY`, `STEEL_CHIP`, `BRICK_DESTROY` (now includes is_steel flag)
+
+Query:
+```bash
+python -m game.debug_logger query --last --steel
+```
+
+### 4. Weapon Stacking (spread+homing both)
+- **Before**: spread+homing = 8 homing (replacing)
+- **Now**: spread+homing = 8 spread + 1-3 homing = 9+ bullets, both fire
+- Logs: `WEAPON_COMBINED_SHOOT` with count, `SYNERGY_POWER_HOMING`, `PWR_UPDATE`
+
+Query:
+```bash
+python -m game.debug_logger query --last --weapons
+```
+
+### 5. Performance / Startup (was 5s blocking)
+- **Before**: `get_all_local_ips()` looped 6x ifconfig = 5.034s blocking Game.__init__
+- **Now**: cached fast path 0.000s, async startup, menu instant 0.106s
+- Logs: `PERF_STARTUP_INIT`, `PERF_NETWORK_STARTUP`, `PERF_PROJECTOR_STARTUP`, `PERF_STARTUP_SOLO`
+
+Query:
+```bash
+python -m game.debug_logger query --last --perf
+```
+
+### 6. Map Select (redesign)
+- **Before**: 104x38 cells overlapping preview at x=800, enemy text spam `18*basic 2*fast` cut off, LEFT/RIGHT +-5 broken for 7 cols, header "SELECT STAGE"
+- **Now**: 84x52 cells, 7x5 grid width 608 centered, preview 160px at right with margin no overlap, short names (Outpost, Bunkers, Jungle...), grid-aware nav UP/DOWN=±7 cols, LEFT/RIGHT=±1 within row, BACK handling
+- Logs: `MAP_GRID_NAV` with from/to rc, `MAP_SELECT`
+
+Query:
+```bash
+python -m game.debug_logger query --last --maps
+```
+
+### 7. HUD (redesign + explicit P/C buttons + HP rename)
+- **Before**: Joy count, LAN Host long URL cut off, Cal, TOTAL (BASE...), SPAWN..., 20 icons overflow, no explicit Pause/Coin
+- **Now**: concise: ENEMY LEFT, LIFE x3, Score, HP (renamed from ARMOR), PWR index (weapon damage), ITEMS ON MAP with descriptions, COINS, minimal LAN, explicit clickable buttons `P = PAUSE` blue and `C = COIN` yellow
+- Logs: `HUD_PAUSE_BUTTON_CLICK`, `HUD_COIN_BUTTON_CLICK`, `HUD_PWR_UPDATE`
+
+### 8. State Transitions, Gameplay, Input, Perf, Exceptions (existing)
+- Same as before, plus new tags MAP, PERF, HUD, NETWORK, etc.
+
+## Query CLI - Enhanced
 
 ```bash
-python debug_query.py --last --bounce
-```
-
-Output would show:
-
-```
---- BOUNCE at frame 12 elapsed 200ms ---
-  playing -> menu reason=CRASH_GUARD draw 11 crashes
-  Last 30 events before bounce:
-    F2 [ERROR CRASH] draw failed: EnemyTank.draw() got unexpected keyword argument 'tilemap'
-    F1 [ERROR CRASH] draw failed: ...
-```
-
-And:
-
-```bash
+# Existing
+python -m game.debug_logger stats
+python debug_query.py --last --state
 python debug_query.py --last --errors
+python debug_query.py --last --bounce
+python debug_query.py --last --gameplay ENEMY_SPAWN
+
+# New observability queries
+python -m game.debug_logger query --last --network   # broadcast fallback, No route, old client
+python -m game.debug_logger query --last --stuck     # edge stuck, outside map, slide, clamp
+python -m game.debug_logger query --last --steel     # steel destructible harder than brick
+python -m game.debug_logger query --last --weapons   # spread+homing both, PWR index
+python -m game.debug_logger query --last --perf      # startup 5s -> 0.1s async
+python -m game.debug_logger query --last --maps      # grid nav, short names
+
+# Auto-diagnosis now includes all new sections
+python debug_report.py
+# Shows:
+# - Network Issues (broadcast fallback, No route, old client)
+# - Stuck / Edge / Outside Map
+# - Steel / Concrete Destruction
+# - Weapon Stacking (spread+homing both)
+# - Performance (startup)
+# - Map Select (grid nav)
+# - Auto-diagnosis summary for recent changes (stuck count, outside clamps, broadcast fallback usage, steel destroyed, weapon synergy)
+
+python debug_report.py --last-bounce  # only bounce
+python -m game.debug_logger tail --lines 100
 ```
 
-Shows `TypeError` stack trace.
+## Example: Finding Recent Bugs
 
-After fix, bounce disappears and `debug_query.py --last --bounce` says "No playing->menu bounces found - good!"
+### Lida No route + discovery flood
+```bash
+python debug_report.py
+# Shows:
+# --- Network Issues ---
+# F123 [NETWORK] Packet from Lida len=69 preview={"type":"discovery"...}
+# F124 NETWORK_LIDA_CONNECTED_BROADCAST_FALLBACK
+# --- Auto-diagnosis ---
+# Broadcast fallback active (Lida AP isolation) - 3 times
+```
 
-## Integration Points
+### Edge stuck
+```bash
+python -m game.debug_logger query --last --stuck
+# Should show SLIDE_THROUGH_GAP, AUTO_UNSTUCK, CLAMP_OUTSIDE if bug recurs
+```
 
-- `game/game.py`: state changes, input logging, gameplay (enemy spawn/kill, bullet hits, powerup, base), crash guards, perf
-- `game/entities/tank.py`: tank die
-- `game/entities/bullet.py`: base damage/respawn
-- `game/entities/enemy.py`: (future) spawn
-- `game/entities/powerup.py`: spawn
-- `game/tilemap.py`: brick destroy
-- `game/debug_logger.py`: core logger (SQLite WAL, async queue, query CLI)
-- `game/logger_integration.py`: safe wrappers to avoid import cycles
-- `main.py`: session end on SystemExit / crash logging
-- `debug_query.py`: standalone query tool (0 latency)
+### Steel destructible
+```bash
+python -m game.debug_logger query --last --steel
+# STEEL_DESTROY after 5 normal hits, 2 power hits
+```
 
-## Performance Impact
+### Weapon stacking both
+```bash
+python -m game.debug_logger query --last --weapons
+# WEAPON_COMBINED_SHOOT {spread:8, homing:1, total:9, power:True}
+```
 
-- Queue size 10000, drop oldest if full (never blocks)
-- Text log: ~1-2 µs per event (buffered)
-- DB: WAL mode, NORMAL sync, 64MB cache, async thread
-- Perf sample: every 30 frames only
-- Input logging: every event but lightweight JSON
-- Measured: <0.1ms overhead per frame on Mac M1 (60 FPS target 16ms)
+## Integration Points - Updated
+
+- `game/game.py`: async network/projector startup with PERF logs, MAP_GRID_NAV, HUD button clicks
+- `game/entities/tank.py`: EDGE auto-clamp, SLIDE_THROUGH_GAP, CLAMP_OUTSIDE, SPAWN_CLAMP
+- `game/entities/bullet.py`: STEEL handling via destroy_tile
+- `game/tilemap.py`: STEEL_DESTROY/CHIP logs, BRICK_DESTROY with is_steel
+- `game/entities/player.py`: WEAPON_COMBINED_SHOOT, PWR_UPDATE, spread+homing both
+- `game/network.py`: BROADCAST_FALLBACK_ACTIVE, LIDA_CONNECTED_BROADCAST_FALLBACK, packet preview, old client detection
+- `game/ui/hud.py`: HP renamed from ARMOR, PWR index, explicit P/C buttons with HUD logs
+- `game/projector.py`: cached IP, non-blocking start with PERF log
+- `game/logger_integration.py`: new helpers safe_log_network, safe_log_steel, safe_log_edge, safe_log_weapon, safe_log_map, safe_log_perf, safe_log_hud
+
+## Performance Impact - Still <0.1ms
+
+- Cache for get_all_local_ips 30s TTL: first call 0.000s (was 5s)
+- Async network/projector: Game() init 0.106s (was 5s+)
+- Queue size 10000, WAL 64MB cache, async thread unchanged
+- New logs are throttled (e.g., PWR_UPDATE every 5 sec, STUCK every 60 frames)
 
 ## Maintenance
 
-- DB size grows: use prune
-
 ```bash
-python debug_query.py --stats
+python -m game.debug_logger stats
 python -m game.debug_logger prune --keep 20
+python debug_report.py  # now includes observability for all recent changes
 ```
 
-- Text log `bug_trace.log` grows indefinitely - rotate manually or add to .gitignore (already ignores *.db-wal, *.db-shm)
-- DB at `debug.db` (gitignored WAL/SHM, but DB itself kept for queries - can be committed if small, but .gitignore currently ignores wal/shm only)
+## Files Updated for Observability
 
-## Future Improvements
-
-- Add `debug_overlay` in-game (F3) to show last events
-- Add `log_upload` for bug reports (zip db + text log)
-- Add `session` comparison tool for regression
-- Add `perf` graph
-
-## Files
-
-- `game/debug_logger.py`: core (600+ lines): DB + async writer + query CLI
-- `game/logger_integration.py`: safe wrappers
-- `debug_query.py`: user-friendly query wrapper
-- `debug.db`: SQLite DB (WAL)
-- `bug_trace.log`: text mirror
-- `README_DEBUG.md`: this file
+- `game/debug_logger.py`: +6 query helpers, +6 CLI flags (--network, --stuck, --steel, --weapons, --perf, --maps)
+- `game/logger_integration.py`: +7 safe wrappers + docs
+- `game/game.py`: + PERF logs for startup, MAP_GRID_NAV, HUD button logs
+- `game/entities/player.py`: + WEAPON_COMBINED_SHOOT, PWR_UPDATE
+- `game/entities/tank.py`: + EDGE/ CLAMP logs (already existed, kept)
+- `game/tilemap.py`: + STEEL logs (already)
+- `game/network.py`: + BROADCAST_FALLBACK_ACTIVE, CONNECTED_BROADCAST_FALLBACK, packet preview
+- `game/ui/hud.py`: + HP rename, PWR index, explicit buttons
+- `debug_report.py`: +5 new sections + auto-diagnosis for recent changes
+- `docs/DEBUG_LOGGING.md`: this file
+- `docs/DEBUG_PROTOCOL.md` (if exists) should also be updated

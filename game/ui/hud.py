@@ -130,13 +130,21 @@ class HUD:
                 bonus = getattr(p, 'bullet_damage_bonus', 0.0)
                 stars = p.star_level
                 extra = getattr(p, 'star_extra_count', 0)
-                # Power index formula: base bullet power + bonus + stars*0.5 + extra*0.5
+                # Power index formula: base bullet power + bonus + stars*0.5 + extra*0.3
                 pwr_index = bp + bonus + stars*0.5 + extra*0.3
                 # Also factor in rapid/homing/spread levels
                 pwr_index += getattr(p, 'homing_level', 0)*0.3 + getattr(p, 'spread_level', 0)*0.2 + getattr(p, 'rapid_level', 0)*0.2
                 star_visual = '★'*min(3,p.star_level) + '☆'*(3-min(3,p.star_level))
                 # Show PWR with one decimal and stars
                 draw_line(f"PWR: {pwr_index:.1f} {star_visual} (DMG x{pwr_index:.1f})", (255,220,80), self.font_small)
+                # Log PWR update occasionally for observability (every 5 sec)
+                if getattr(p, '_pwr_log_timer', 0) % (5*FPS) == 0:
+                    try:
+                        from ..logger_integration import safe_log_weapon
+                        safe_log_weapon("PWR_UPDATE", {"player_id": p.player_id, "pwr": round(pwr_index,2), "bullet_power": bp, "bonus": round(bonus,2), "stars": stars, "total_items": getattr(p, 'total_items_collected', 0)})
+                    except:
+                        pass
+                p._pwr_log_timer = getattr(p, '_pwr_log_timer', 0) + 1
             except:
                 # Fallback old power stars
                 stars = '★'*p.star_level + '☆'*(3-p.star_level)

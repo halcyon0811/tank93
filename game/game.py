@@ -244,8 +244,10 @@ class Game:
 
         # LAN Multiplayer - Remote P2 join via same local network - OPTIMIZED: async startup to avoid 5+ sec block
         # Previously get_all_local_ips() did 6x ifconfig = 5 sec blocking in Game.__init__, causing long wait for menu
-        # Now start network in background thread, menu appears instantly
+        # Now start network in background thread, menu appears instantly - observability added
         import sys as _sys
+        import time as _time_perf
+        _game_init_start = _time_perf.time()
         _no_network_flag = "--solo" in _sys.argv or "--no-network" in _sys.argv or "--no-remote" in _sys.argv
         self.network_host = None
         self.network_host_ip = None
@@ -254,29 +256,49 @@ class Game:
         if _no_network_flag:
             print(f"[Game] Network disabled via --solo flag - Chad solo mode, Lida remote disabled (fast startup)")
             _trace_log("NETWORK", "Network disabled via --solo flag - solo mode", level="INFO")
+            try:
+                from .logger_integration import safe_log_perf
+                safe_log_perf("STARTUP_SOLO", ( _time_perf.time() - _game_init_start)*1000, {"mode": "solo"})
+            except:
+                pass
         elif not getattr(self, 'is_web', False):
             # Async start - don't block Game.__init__ (menu appears instantly)
             def _start_network_async():
+                _net_start = _time_perf.time()
                 try:
                     from .network import NetworkHost
+                    from .logger_integration import safe_log_perf, safe_log_network
                     nh = NetworkHost()
                     ip = nh.start()
                     # Update game object (thread-safe, just assignment)
                     self.network_host = nh
                     self.network_host_ip = ip
                     self._network_starting = False
+                    elapsed = (_time_perf.time() - _net_start)*1000
+                    safe_log_perf("NETWORK_STARTUP", elapsed, {"ip": ip, "mode": "async", "was_blocking_5s_before": True})
                     if ip:
                         print(f"[Game] LAN Host ready (async) - Lida (P2) can join via same WiFi")
                         print(f"[Game] Remote: python3 remote_client.py --host {ip}")
+                        safe_log_network("HOST_READY", {"ip": ip, "startup_ms": elapsed, "async": True})
                 except Exception as e:
                     print(f"[Game] Network host failed to start: {e}")
                     self.network_host = None
                     self.network_host_ip = None
                     self._network_starting = False
+                    try:
+                        from .logger_integration import safe_log_event
+                        safe_log_event("NETWORK", f"Host start failed: {e}", level="ERROR", with_stack=True)
+                    except:
+                        pass
             self._network_starting = True
             print(f"[Game] Starting LAN host in background... (menu will appear instantly, network ready in ~0.1s)")
             import threading
             threading.Thread(target=_start_network_async, daemon=True).start()
+            try:
+                from .logger_integration import safe_log_perf
+                safe_log_perf("STARTUP_INIT", (_time_perf.time() - _game_init_start)*1000, {"mode": "async_menu_instant", "old_blocking_ms": 5000})
+            except:
+                pass
         else:
             print("[Game] Web mode: LAN host disabled (no UDP in browser)")
 
@@ -286,8 +308,10 @@ class Game:
         if not getattr(self, 'is_web', False) and not _no_network_flag:
             # Async projector too
             def _start_projector_async():
+                _proj_start = _time_perf.time()
                 try:
                     from .projector import start_server
+                    from .logger_integration import safe_log_perf
                     pip = start_server(port=self.projector_port, blocking=False)
                     # For display, get actual IP quickly via cached method
                     try:
@@ -295,11 +319,17 @@ class Game:
                         actual_ip = proj_ip()
                         self.projector_ip = actual_ip
                         print(f"[Game] Projector server ready (async) - http://{actual_ip}:{self.projector_port}")
+                        safe_log_perf("PROJECTOR_STARTUP", (_time_perf.time() - _proj_start)*1000, {"ip": actual_ip, "was_blocking_500ms": True})
                     except:
                         self.projector_ip = pip
                 except Exception as e:
                     print(f"[Game] Projector server failed to start: {e}")
                     self.projector_ip = None
+                    try:
+                        from .logger_integration import safe_log_event
+                        safe_log_event("PROJECTOR", f"Start failed: {e}", level="ERROR")
+                    except:
+                        pass
             print(f"[Game] Starting projector server in background...")
             import threading
             threading.Thread(target=_start_projector_async, daemon=True).start()
@@ -1119,16 +1149,31 @@ class Game:
                                 self.state = 'paused'
                                 _trace_log("INPUT", f"HUD PAUSE button clicked -> paused", level="INFO")
                                 _trace_state_change(old, 'paused', "HUD PAUSE button")
+                                try:
+                                    from .logger_integration import safe_log_hud
+                                    safe_log_hud("PAUSE_BUTTON_CLICK", {"action": "pause"})
+                                except:
+                                    pass
                             elif self.state == 'paused':
                                 old = self.state
                                 self.state = 'playing'
                                 _trace_log("INPUT", f"HUD RESUME button clicked -> playing", level="INFO")
                                 _trace_state_change(old, 'playing', "HUD RESUME button")
+                                try:
+                                    from .logger_integration import safe_log_hud
+                                    safe_log_hud("PAUSE_BUTTON_CLICK", {"action": "resume"})
+                                except:
+                                    pass
                             continue
                         if hasattr(self, '_hud_coin_rect') and self._hud_coin_rect.collidepoint(mx, my):
                             # C = Coin
                             print(f"[HUD] Coin button clicked")
                             self.insert_coin()
+                            try:
+                                from .logger_integration import safe_log_hud
+                                safe_log_hud("COIN_BUTTON_CLICK", {"coins": self.coins})
+                            except:
+                                pass
                             continue
                     except:
                         pass
@@ -1441,6 +1486,7 @@ class Game:
                         cols = 7  # 7 columns x5 rows = 35 maps
                         rows = 5
                         sel = self.menu_selected
+                        old_sel = sel
                         if event.key == pygame.K_UP:
                             if sel == opts-1:  # BACK -> last row middle
                                 self.menu_selected = 31  # row 4 col 3 center
@@ -1477,6 +1523,13 @@ class Game:
                                 c = sel % cols
                                 if c < cols-1 and sel+1 < len(LEVELS):
                                     self.menu_selected = r*cols + (c+1)
+                        # Log grid navigation (observability for map select fix)
+                        if old_sel != self.menu_selected:
+                            try:
+                                from .logger_integration import safe_log_map
+                                safe_log_map("GRID_NAV", {"from": old_sel, "to": self.menu_selected, "key": pygame.key.name(event.key), "cols": cols, "from_rc": (old_sel//cols, old_sel%cols) if old_sel < len(LEVELS) else "BACK", "to_rc": (self.menu_selected//cols, self.menu_selected%cols) if self.menu_selected < len(LEVELS) else "BACK"})
+                            except:
+                                pass
                         elif event.key == pygame.K_PAGEUP:
                             self.menu_selected = max(0, self.menu_selected - 10) % opts
                         elif event.key == pygame.K_PAGEDOWN:

@@ -745,6 +745,12 @@ class PlayerTank(Tank):
             if has_rapid:
                 base_cd = max(4, base_cd - self.rapid_level*2)
             self.cooldown = max(3, base_cd // 3) if has_rapid else max(4, base_cd)
+            # Log combined firing observability (user request: fire both)
+            try:
+                from ..logger_integration import safe_log_weapon
+                safe_log_weapon("COMBINED_SHOOT", {"player_id": self.player_id, "spread": 8, "homing": len([b for b in bullets_created if b.homing]), "total": len(bullets_created), "power": has_power})
+            except:
+                pass
         elif has_spread:
             base_cd = 25
             if power_synergy:

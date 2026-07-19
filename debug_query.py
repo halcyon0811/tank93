@@ -42,6 +42,14 @@ def main():
     parser.add_argument("--inputs", action="store_true", help="Show inputs")
     parser.add_argument("--limit", type=int, default=50)
     parser.add_argument("--tail", type=int, help="Tail text log bug_trace.log lines")
+    # New observability for recent changes
+    parser.add_argument("--network", action="store_true", help="Network: broadcast fallback, No route, old client, discovery flood")
+    parser.add_argument("--stuck", action="store_true", help="Edge stuck, outside map, sliding, auto-unstuck")
+    parser.add_argument("--steel", action="store_true", help="Steel/concrete destructible harder than brick")
+    parser.add_argument("--weapons", action="store_true", help="Weapon stacking: spread+homing both, PWR index")
+    parser.add_argument("--perf", action="store_true", help="Startup perf: was 5s blocking, now 0.1s async")
+    parser.add_argument("--maps", action="store_true", help="Map select: grid navigation, short names, no overlap")
+    parser.add_argument("--hud", action="store_true", help="HUD: P/C buttons, HP renamed, PWR index")
     args = parser.parse_args()
 
     logger = DebugLogger()
@@ -158,6 +166,59 @@ def main():
         print(f"\n=== Inputs for session {session_id} (last {args.limit}) ===")
         for r in rows:
             print(f"[F{r['frame']} {r['input_type']} {r['device']} {r['code']}={r['value']} -> {r['mapped_action']}] {r['extra_json']}")
+        return
+
+    if args.network:
+        ev, gp = logger.query_network_issues(session_id=session_id, limit=args.limit)
+        print(f"\n=== Network issues (broadcast fallback, No route, old client) for session {session_id} ===")
+        for r in ev:
+            print(f"[F{r['frame']} {r['tag']}] {r['message']} {r['extra_json']}")
+        for r in gp:
+            print(f"[F{r['frame']} {r['event_type']}] {r['data_json']}")
+        return
+
+    if args.stuck:
+        rows = logger.query_stuck_events(session_id=session_id, limit=args.limit)
+        print(f"\n=== Stuck/Edge/Outside for session {session_id} ===")
+        for r in rows:
+            print(f"[F{r['frame']} {r['event_type']}] {r['data_json']}")
+        return
+
+    if args.steel:
+        rows = logger.query_steel_events(session_id=session_id, limit=args.limit)
+        print(f"\n=== Steel/Concrete (harder than brick) for session {session_id} ===")
+        for r in rows:
+            print(f"[F{r['frame']} {r['event_type']}] {r['data_json']}")
+        return
+
+    if args.weapons:
+        rows = logger.query_weapon_stacking(session_id=session_id, limit=args.limit)
+        print(f"\n=== Weapon stacking (spread+homing both, PWR) for session {session_id} ===")
+        for r in rows:
+            print(f"[F{r['frame']} {r['event_type']} p={r['player_id']}] {r['data_json']}")
+        return
+
+    if args.perf:
+        rows = logger.query_performance(session_id=session_id, limit=args.limit)
+        print(f"\n=== Performance (startup 5s->0.1s) for session {session_id} ===")
+        for r in rows:
+            print(f"[F{r['frame']} {r['event_type']}] {r['data_json']}")
+        return
+
+    if args.maps:
+        gp, ev = logger.query_map_select(session_id=session_id, limit=args.limit)
+        print(f"\n=== Map select (grid nav, short names) for session {session_id} ===")
+        for r in gp:
+            print(f"[F{r['frame']} {r['event_type']}] {r['data_json']}")
+        for r in ev:
+            print(f"[F{r['frame']} {r['tag']}] {r['message']}")
+        return
+
+    if args.hud:
+        rows = logger.query_sql("SELECT * FROM gameplay WHERE session_id=? AND event_type LIKE 'HUD_%' ORDER BY id DESC LIMIT ?", (session_id, args.limit))
+        print(f"\n=== HUD (P/C buttons, HP renamed, PWR index) for session {session_id} ===")
+        for r in rows:
+            print(f"[F{r['frame']} {r['event_type']}] {r['data_json']}")
         return
 
     # Default: events

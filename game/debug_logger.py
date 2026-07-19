@@ -563,6 +563,69 @@ class DebugLogger:
             "db_path": str(self.db_path)
         }
 
+    def query_network_issues(self, session_id=None, limit=50):
+        """Observability: network issues - broadcast fallback, No route, old client, discovery flood"""
+        # Events: tag NETWORK
+        if session_id is not None:
+            events = self.query_sql("SELECT * FROM events WHERE session_id=? AND tag='NETWORK' ORDER BY id DESC LIMIT ?", (session_id, limit))
+            gameplay = self.query_sql("SELECT * FROM gameplay WHERE session_id=? AND event_type LIKE 'NETWORK%' ORDER BY id DESC LIMIT ?", (session_id, limit))
+        else:
+            events = self.query_sql("SELECT * FROM events WHERE tag='NETWORK' ORDER BY id DESC LIMIT ?", (limit,))
+            gameplay = self.query_sql("SELECT * FROM gameplay WHERE event_type LIKE 'NETWORK%' ORDER BY id DESC LIMIT ?", (limit,))
+        return events, gameplay
+
+    def query_stuck_events(self, session_id=None, limit=50):
+        """Observability: edge stuck, outside map, sliding, auto-unstuck"""
+        where = "WHERE event_type LIKE '%STUCK%' OR event_type LIKE '%EDGE%' OR event_type LIKE '%CLAMP%' OR event_type LIKE '%SLIDE%'"
+        args = []
+        if session_id is not None:
+            where += " AND session_id=?"
+            args.append(session_id)
+        where += f" ORDER BY id DESC LIMIT {limit}"
+        return self.query_sql(f"SELECT * FROM gameplay {where}", args)
+
+    def query_steel_events(self, session_id=None, limit=50):
+        """Observability: steel/concrete destructible (new: harder than brick)"""
+        where = "WHERE event_type LIKE '%STEEL%'"
+        args = []
+        if session_id is not None:
+            where += " AND session_id=?"
+            args.append(session_id)
+        where += f" ORDER BY id DESC LIMIT {limit}"
+        return self.query_sql(f"SELECT * FROM gameplay {where}", args)
+
+    def query_weapon_stacking(self, session_id=None, limit=50):
+        """Observability: spread+homing stacking (fire both), PWR index"""
+        where = "WHERE event_type LIKE '%WEAPON%' OR event_type LIKE '%PWR%' OR event_type LIKE '%SYNERGY%'"
+        args = []
+        if session_id is not None:
+            where += " AND session_id=?"
+            args.append(session_id)
+        where += f" ORDER BY id DESC LIMIT {limit}"
+        return self.query_sql(f"SELECT * FROM gameplay {where}", args)
+
+    def query_performance(self, session_id=None, limit=100):
+        """Observability: startup perf (was 5s blocking), network startup time"""
+        where = "WHERE event_type LIKE 'PERF_%'"
+        args = []
+        if session_id is not None:
+            where += " AND session_id=?"
+            args.append(session_id)
+        where += f" ORDER BY id DESC LIMIT {limit}"
+        return self.query_sql(f"SELECT * FROM gameplay {where}", args)
+
+    def query_map_select(self, session_id=None, limit=50):
+        """Observability: map select grid navigation, short names, no overlap"""
+        where = "WHERE event_type LIKE 'MAP_%'"
+        args = []
+        if session_id is not None:
+            where += " AND session_id=?"
+            args.append(session_id)
+        where += f" ORDER BY id DESC LIMIT {limit}"
+        gameplay = self.query_sql(f"SELECT * FROM gameplay {where}", args)
+        events = self.query_sql(f"SELECT * FROM events WHERE tag='MAP' ORDER BY id DESC LIMIT {limit}")
+        return gameplay, events
+
     def prune_old_sessions(self, keep_last=20):
         """Keep only last N sessions to control DB size"""
         rows = self.query_sql("SELECT id FROM sessions ORDER BY id DESC LIMIT -1 OFFSET ?", (keep_last,))
@@ -618,7 +681,7 @@ def _cli():
     q = sub.add_parser("query", help="Query logs")
     q.add_argument("--session", type=int, help="Session ID (default: last)")
     q.add_argument("--last", action="store_true", help="Use last session")
-    q.add_argument("--tag", help="Filter by tag (e.g., STATE, BUG, CRASH, INPUT)")
+    q.add_argument("--tag", help="Filter by tag (e.g., STATE, BUG, CRASH, INPUT, NETWORK, MAP, PERF)")
     q.add_argument("--level", help="Filter by level (DEBUG, INFO, WARN, ERROR, FATAL)")
     q.add_argument("--search", help="Search message")
     q.add_argument("--state-changes", action="store_true", help="Show state changes")
@@ -627,6 +690,13 @@ def _cli():
     q.add_argument("--inputs", action="store_true", help="Show inputs")
     q.add_argument("--limit", type=int, default=50, help="Limit rows")
     q.add_argument("--breadcrumbs", action="store_true", help="Show crash breadcrumbs for last menu bounce")
+    # New observability queries for recent changes
+    q.add_argument("--network", action="store_true", help="Show network issues: broadcast fallback, No route, old client, discovery")
+    q.add_argument("--stuck", action="store_true", help="Show edge stuck, outside map, sliding, auto-unstuck")
+    q.add_argument("--steel", action="store_true", help="Show steel/concrete destruction (now harder than brick)")
+    q.add_argument("--weapons", action="store_true", help="Show weapon stacking: spread+homing both, PWR index")
+    q.add_argument("--perf", action="store_true", help="Show performance: startup time (was 5s), network startup")
+    q.add_argument("--maps", action="store_true", help="Show map select grid navigation and short names")
 
     s = sub.add_parser("sessions", help="List sessions")
     s.add_argument("--limit", type=int, default=20)
@@ -702,6 +772,55 @@ def _cli():
             print(f"\n=== Inputs for session {session_id} ===")
             for r in rows:
                 print(f"[F{r['frame']} {r['input_type']} {r['device']} {r['code']}={r['value']} -> {r['mapped_action']}] extra={r['extra_json']}")
+            return
+
+        # New observability queries
+        if args.network:
+            ev, gp = logger.query_network_issues(session_id=session_id, limit=args.limit)
+            print(f"\n=== Network issues for session {session_id} (broadcast fallback, No route, old client) ===")
+            print(f"-- Events (tag NETWORK) --")
+            for r in ev:
+                print(f"[F{r['frame']} {r['level']} {r['tag']}] {r['message']} extra={r['extra_json']}")
+            print(f"\n-- Gameplay NETWORK_* --")
+            for r in gp:
+                print(f"[F{r['frame']} {r['event_type']}] {r['data_json']}")
+            return
+
+        if args.stuck:
+            rows = logger.query_stuck_events(session_id=session_id, limit=args.limit)
+            print(f"\n=== Stuck/Edge/Outside events for session {session_id} ===")
+            for r in rows:
+                print(f"[F{r['frame']} {r['event_type']}] {r['data_json']}")
+            return
+
+        if args.steel:
+            rows = logger.query_steel_events(session_id=session_id, limit=args.limit)
+            print(f"\n=== Steel/Concrete destruction (harder than brick) for session {session_id} ===")
+            for r in rows:
+                print(f"[F{r['frame']} {r['event_type']}] {r['data_json']}")
+            return
+
+        if args.weapons:
+            rows = logger.query_weapon_stacking(session_id=session_id, limit=args.limit)
+            print(f"\n=== Weapon stacking (spread+homing both, PWR index) for session {session_id} ===")
+            for r in rows:
+                print(f"[F{r['frame']} {r['event_type']} p={r['player_id']}] {r['data_json']}")
+            return
+
+        if args.perf:
+            rows = logger.query_performance(session_id=session_id, limit=args.limit)
+            print(f"\n=== Performance (startup was 5s blocking, now 0.1s async) for session {session_id} ===")
+            for r in rows:
+                print(f"[F{r['frame']} {r['event_type']}] {r['data_json']}")
+            return
+
+        if args.maps:
+            gp, ev = logger.query_map_select(session_id=session_id, limit=args.limit)
+            print(f"\n=== Map select (grid nav, short names) for session {session_id} ===")
+            for r in gp:
+                print(f"[F{r['frame']} {r['event_type']}] {r['data_json']}")
+            for r in ev:
+                print(f"[F{r['frame']} {r['level']} {r['tag']}] {r['message']}")
             return
 
         # Default: events query

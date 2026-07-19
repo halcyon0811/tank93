@@ -160,6 +160,77 @@ def auto_diagnose(session_id=None):
     for ev in reversed(last_events):
         print(f"  F{ev['frame']} [{ev['level']} {ev['tag']}] {ev['message']}")
 
+    # --- New observability sections for recent changes ---
+    print(f"\n--- Network Issues (broadcast fallback, No route, old client) ---")
+    try:
+        net_events, net_gameplay = logger.query_network_issues(session_id=session_id, limit=20)
+        if net_events or net_gameplay:
+            for ev in net_events[:10]:
+                print(f"  F{ev['frame']} [{ev['tag']}] {ev['message']}")
+            for gp in net_gameplay[:10]:
+                print(f"  F{gp['frame']} {gp['event_type']} {gp['data_json']}")
+        else:
+            print("  No network issues logged")
+    except Exception as e:
+        print(f"  Error querying network: {e}")
+
+    print(f"\n--- Stuck / Edge / Outside Map (new fixes) ---")
+    try:
+        stuck = logger.query_stuck_events(session_id=session_id, limit=20)
+        if stuck:
+            for s in stuck[:10]:
+                print(f"  F{s['frame']} {s['event_type']} {s['data_json']}")
+        else:
+            print("  No stuck/edge events - good, no tank stuck at edge or outside")
+    except Exception as e:
+        print(f"  Error querying stuck: {e}")
+
+    print(f"\n--- Steel / Concrete Destruction (now destructible, harder than brick) ---")
+    try:
+        steel = logger.query_steel_events(session_id=session_id, limit=20)
+        if steel:
+            for s in steel[:10]:
+                print(f"  F{s['frame']} {s['event_type']} {s['data_json']}")
+        else:
+            print("  No steel destruction yet")
+    except Exception as e:
+        print(f"  Error querying steel: {e}")
+
+    print(f"\n--- Weapon Stacking (spread+homing both, PWR index) ---")
+    try:
+        weapons = logger.query_weapon_stacking(session_id=session_id, limit=20)
+        if weapons:
+            for w in weapons[:10]:
+                print(f"  F{w['frame']} {w['event_type']} p={w['player_id']} {w['data_json']}")
+        else:
+            print("  No weapon stacking yet")
+    except Exception as e:
+        print(f"  Error querying weapons: {e}")
+
+    print(f"\n--- Performance (startup was 5s blocking, now 0.1s async) ---")
+    try:
+        perf = logger.query_performance(session_id=session_id, limit=20)
+        if perf:
+            for p in perf[:10]:
+                print(f"  F{p['frame']} {p['event_type']} {p['data_json']}")
+        else:
+            print("  No perf metrics logged")
+    except Exception as e:
+        print(f"  Error querying perf: {e}")
+
+    print(f"\n--- Map Select (grid navigation, short names, no overlap) ---")
+    try:
+        map_gp, map_ev = logger.query_map_select(session_id=session_id, limit=20)
+        if map_gp or map_ev:
+            for m in map_gp[:10]:
+                print(f"  F{m['frame']} {m['event_type']} {m['data_json']}")
+            for m in map_ev[:10]:
+                print(f"  F{m['frame']} [{m['tag']}] {m['message']}")
+        else:
+            print("  No map select events")
+    except Exception as e:
+        print(f"  Error querying map: {e}")
+
     # Diagnosis summary
     print(f"\n{'='*100}")
     print("DIAGNOSIS SUMMARY")
@@ -188,6 +259,77 @@ def auto_diagnose(session_id=None):
         print(f"Exceptions found ({len(exceptions)}) but no bounce - may cause other bugs")
     else:
         print("No bounces, no exceptions - clean run or bug not captured? Check gameplay events for logic bugs")
+
+    # Additional auto-diagnosis for new features
+    print(f"\n--- Auto-diagnosis for recent changes ---")
+    try:
+        # Check for stuck events - distinguish PLAYER_STUCK (real bug) vs ENEMY_STUCK_PUSH (normal avoidance)
+        all_stuck = logger.query_stuck_events(session_id=session_id, limit=200)
+        player_stuck = [s for s in all_stuck if 'PLAYER_STUCK' in s['event_type'] or 'PLAYER_AUTO_UNSTUCK' in s['event_type']]
+        enemy_push = [s for s in all_stuck if 'ENEMY_STUCK_PUSH' in s['event_type']]
+        if len(player_stuck) > 3:
+            print(f"  ⚠ {len(player_stuck)} PLAYER stuck at edge - may still get stuck (threshold 3)")
+            for ps in player_stuck[:3]:
+                print(f"    F{ps['frame']} {ps['event_type']} {ps['data_json']}")
+            print(f"    Run: python -m game.debug_logger query --last --stuck")
+        else:
+            print(f"  ✓ No player stuck at edge ({len(player_stuck)} player events, {len(enemy_push)} enemy pushes which is normal)")
+
+        # Check for outside map - CLAMP_OUTSIDE is now expected to be fixed, should be 0
+        outside = logger.query_sql("SELECT * FROM gameplay WHERE session_id=? AND (event_type LIKE '%CLAMP_OUTSIDE%' OR data_json LIKE '%outside map%') ORDER BY id DESC LIMIT 10", (session_id,))
+        if outside:
+            print(f"  ⚠ {len(outside)} outside map clamps - enemy/player went outside playfield (should be 0 after fix)")
+            for o in outside[:3]:
+                print(f"    F{o['frame']} {o['event_type']} {o['data_json']}")
+        else:
+            print(f"  ✓ No outside map clamps (enemy outside bug fixed)")
+
+        # Check for spawn clamp (enemy outside bug)
+        spawn_clamp = logger.query_sql("SELECT * FROM gameplay WHERE session_id=? AND event_type LIKE '%SPAWN_CLAMP%' OR event_type LIKE '%EDGE_AUTO_CLAMP%' ORDER BY id DESC LIMIT 10", (session_id,))
+        if spawn_clamp:
+            print(f"  ℹ {len(spawn_clamp)} spawn/edge auto-clamps (fix for outside)")
+
+        # Check for broadcast fallback usage (Lida case)
+        broadcast = logger.query_sql("SELECT * FROM events WHERE session_id=? AND message LIKE '%BROADCAST FALLBACK%' ORDER BY id DESC LIMIT 5", (session_id,))
+        broadcast_gp = logger.query_sql("SELECT * FROM gameplay WHERE session_id=? AND event_type LIKE '%BROADCAST%' ORDER BY id DESC LIMIT 5", (session_id,))
+        if broadcast or broadcast_gp:
+            print(f"  ℹ Broadcast fallback active (Lida AP isolation workaround) - events:{len(broadcast)} gameplay:{len(broadcast_gp)}")
+        # Check network
+        net_events, net_gp = logger.query_network_issues(session_id=session_id, limit=20)
+        if len(net_events) > 5 or len(net_gp) > 5:
+            print(f"  ℹ {len(net_events)} network event logs, {len(net_gp)} gameplay network logs - check: python -m game.debug_logger query --last --network")
+
+        # Check steel
+        steel = logger.query_steel_events(session_id=session_id, limit=20)
+        if steel:
+            destroys = [s for s in steel if 'DESTROY' in s['event_type']]
+            print(f"  ℹ Steel: {len(destroys)} destroyed, {len(steel)-len(destroys)} chipped - new feature working (5 hits normal, 2 power)")
+
+        # Check weapon stacking
+        weapons = logger.query_weapon_stacking(session_id=session_id, limit=20)
+        if weapons:
+            combined = [w for w in weapons if 'COMBINED' in w['event_type']]
+            print(f"  ℹ Weapon stacking: {len(weapons)} total, {len(combined)} combined spread+homing (both active) - new feature: fire both")
+
+        # Check perf
+        perf = logger.query_performance(session_id=session_id, limit=10)
+        if perf:
+            for p in perf:
+                try:
+                    data = __import__('json').loads(p['data_json']) if p['data_json'] else {}
+                    print(f"  ℹ Perf {p['event_type']}: {data.get('value_ms',0):.1f}ms {data}")
+                except:
+                    print(f"  ℹ Perf {p['event_type']} {p['data_json']}")
+
+        # Check map select
+        map_gp, map_ev = logger.query_map_select(session_id=session_id, limit=10)
+        if map_gp or map_ev:
+            print(f"  ℹ Map select: {len(map_gp)} grid nav events - short names, no overlap, grid-aware UP/DOWN/LEFT/RIGHT")
+
+    except Exception as e:
+        print(f"  Error in auto-diagnosis recent changes: {e}")
+        import traceback
+        traceback.print_exc()
 
     print(f"\nFull DB: {DB_PATH}")
     print(f"Text log: {TXT_PATH} (last 20 lines below)")

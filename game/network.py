@@ -211,6 +211,11 @@ class NetworkHost:
                             self.client_last_seen = time.time()
                             if not was_connected:
                                 print(f"[Network] Remote P2 (Lida) connected via BROADCAST FALLBACK from {addr}! (AP isolation workaround)")
+                                try:
+                                    from .logger_integration import safe_log_network
+                                    safe_log_network("LIDA_CONNECTED_BROADCAST_FALLBACK", {"addr": str(addr), "reason": "AP isolation unicast blocked"})
+                                except:
+                                    pass
                         continue
                     if msg.get("type") == "discovery" and msg.get("player_id") == 2:
                         ip = get_local_ip()
@@ -471,6 +476,11 @@ class NetworkClient:
                         if not hasattr(self, '_logged_broadcast'):
                             self._logged_broadcast = True
                             print(f"[Network] Broadcast fallback active - input sent via broadcast, should reach host despite No route unicast block")
+                            try:
+                                from .logger_integration import safe_log_network
+                                safe_log_network("BROADCAST_FALLBACK_ACTIVE", {"host": self.host_ip, "reason": "No route AP isolation", "attempt": self._no_route_count})
+                            except:
+                                pass
                         return True  # Consider broadcast success as success, even if unicast failed
                     except Exception as be:
                         if self._no_route_count % 60 == 0:
