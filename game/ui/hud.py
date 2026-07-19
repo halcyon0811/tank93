@@ -471,16 +471,42 @@ class HUD:
                 coin_txt = coin_font.render("INSERT COIN C / 5  •  1 / 2 TO JOIN", True, (100, 100, 120))
                 screen.blit(coin_txt, coin_txt.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT-10)))
         elif mode == 'level':
-            header_font = pygame.font.Font(None, 30)
-            header = header_font.render(f"SELECT STAGE - {TOTAL_STAGES} ORIGINAL NES MAPS (Arrows:Move L/R:+5 PgUp/Dn:+10)", True, COLOR_WHITE)
-            screen.blit(header, header.get_rect(center=(SCREEN_WIDTH//2, 315)))
+            # Redesigned MAP SELECT - user feedback:
+            # 1) expansion map should not overlap selection matrix
+            # 2) too many text on each cell
+            # 3) name each map with short name, not just Stage N
+            # 4) this is map selection, not stage selection
+            # 5) UP/DOWN/LEFT/RIGHT should move according to arrangement
+            MAP_NAMES = [
+                "Outpost", "Bunkers", "Jungle", "Corridors", "Twins", "Bazaar", "Citadel",
+                "Lakeside", "Rapids", "Sanctuary", "Crossfire", "Ramparts", "Swamp", "Oasis",
+                "Stronghold", "Wasteland", "Ice Trap", "Forest", "Canyon", "Harbor",
+                "Labyrinth", "Floodgate", "High Ground", "Lowlands", "Armory", "Frostbite",
+                "Quagmire", "Redoubt", "Bastion", "Inlet", "Overgrowth", "Clearing", "Thicket",
+                "Causeway", "Final Stand"
+            ]
+
+            header_font = pygame.font.Font(None, 32)
+            header = header_font.render(f"SELECT MAP - {TOTAL_STAGES} MAPS", True, COLOR_WHITE)
+            screen.blit(header, header.get_rect(center=(SCREEN_WIDTH//2, 40)))
+            sub_font = pygame.font.Font(None, 18)
+            sub = sub_font.render("Arrows: Move  •  ENTER: Play  •  ESC: Back  •  Short names for each map", True, (160,160,160))
+            screen.blit(sub, sub.get_rect(center=(SCREEN_WIDTH//2, 62)))
 
             cols = 7
-            cell_w, cell_h = 104, 38
-            gap_x, gap_y = 10, 8
+            rows = 5
+            # Smaller cells to avoid overlap, no enemy text inside
+            cell_w, cell_h = 84, 52
+            gap_x, gap_y = 8, 10
             grid_w = cols*cell_w + (cols-1)*gap_x
-            start_x = SCREEN_WIDTH//2 - grid_w//2
-            start_y = 340
+            grid_h = rows*cell_h + (rows-1)*gap_y
+            # Center grid left of preview, with gap to avoid overlap
+            # Preview will be on right side, 160px wide + margin
+            preview_w = 160
+            preview_margin = 20
+            total_needed = grid_w + preview_margin + preview_w
+            start_x = SCREEN_WIDTH//2 - total_needed//2
+            start_y = 85
 
             for idx in range(TOTAL_STAGES):
                 c = idx % cols
@@ -488,42 +514,70 @@ class HUD:
                 x = start_x + c*(cell_w+gap_x)
                 y = start_y + r*(cell_h+gap_y)
                 is_sel = (selected == idx)
-                bg_col = (60,60,90) if not is_sel else COLOR_YELLOW
-                border_col = COLOR_WHITE if not is_sel else COLOR_BLACK
-                pygame.draw.rect(screen, bg_col, (x, y, cell_w, cell_h), border_radius=6)
-                pygame.draw.rect(screen, border_col, (x, y, cell_w, cell_h), 2, border_radius=6)
+                # Colors - selected yellow, normal dark blue
+                if is_sel:
+                    bg_col = COLOR_YELLOW
+                    border_col = COLOR_WHITE
+                else:
+                    bg_col = (45,50,75) if (r+c)%2==0 else (55,60,85)
+                    border_col = (70,75,100)
+                pygame.draw.rect(screen, bg_col, (x, y, cell_w, cell_h), border_radius=8)
+                pygame.draw.rect(screen, border_col, (x, y, cell_w, cell_h), 2, border_radius=8)
                 txt_color = COLOR_BLACK if is_sel else COLOR_WHITE
-                f = pygame.font.Font(None, 26) if is_sel else pygame.font.Font(None, 22)
-                label = f"STAGE {idx+1}"
-                txt_surf = f.render(label, True, txt_color)
-                screen.blit(txt_surf, txt_surf.get_rect(center=(x+cell_w//2, y+cell_h//2 - 6)))
-                if BOTS_RAW_ALL and idx < len(BOTS_RAW_ALL):
-                    raw = BOTS_RAW_ALL[idx]
-                    tiny = self.font_small.render(" ".join(raw), True, (200,200,100) if not is_sel else (40,40,20))
-                    screen.blit(tiny, (x+6, y+cell_h-14))
+                # Map number small top
+                num_font = pygame.font.Font(None, 16)
+                num_txt = num_font.render(f"{idx+1}", True, (180,180,200) if not is_sel else (60,60,60))
+                screen.blit(num_txt, (x+6, y+3))
+                # Short name - concise, centered
+                name = MAP_NAMES[idx] if idx < len(MAP_NAMES) else f"Map {idx+1}"
+                # Truncate if too long for cell
+                if len(name) > 10:
+                    name = name[:10]
+                name_font = pygame.font.Font(None, 18) if not is_sel else pygame.font.Font(None, 20)
+                # Wrap if needed into two lines? Keep one line for now, smaller font
+                name_surf = name_font.render(name, True, txt_color)
+                # Center name in lower part of cell
+                screen.blit(name_surf, name_surf.get_rect(center=(x+cell_w//2, y+cell_h//2 + 8)))
 
+                if is_sel:
+                    # Selection glow
+                    glow = pygame.Surface((cell_w+10, cell_h+10), pygame.SRCALPHA)
+                    pygame.draw.rect(glow, (255,220,0,30), (0,0,cell_w+10,cell_h+10), border_radius=10)
+                    screen.blit(glow, (x-5, y-5))
+
+            # BACK button - centered below grid
             back_idx = TOTAL_STAGES
             is_back_sel = (selected == back_idx)
-            back_y = start_y + 5*(cell_h+gap_y) + 12
-            back_x = SCREEN_WIDTH//2 - cell_w//2
-            pygame.draw.rect(screen, (90,40,40) if not is_back_sel else COLOR_YELLOW, (back_x, back_y, cell_w, cell_h), border_radius=6)
-            pygame.draw.rect(screen, (200,100,100) if not is_back_sel else COLOR_BLACK, (back_x, back_y, cell_w, cell_h), 2, border_radius=6)
+            back_w, back_h = 100, 36
+            back_x = SCREEN_WIDTH//2 - back_w//2
+            back_y = start_y + grid_h + 18
+            pygame.draw.rect(screen, (90,40,40) if not is_back_sel else COLOR_YELLOW, (back_x, back_y, back_w, back_h), border_radius=8)
+            pygame.draw.rect(screen, (200,100,100) if not is_back_sel else COLOR_WHITE, (back_x, back_y, back_w, back_h), 2, border_radius=8)
             back_col = COLOR_WHITE if not is_back_sel else COLOR_BLACK
-            back_txt = pygame.font.Font(None, 24).render("BACK", True, back_col)
-            screen.blit(back_txt, back_txt.get_rect(center=(back_x+cell_w//2, back_y+cell_h//2)))
+            back_txt = pygame.font.Font(None, 22).render("BACK", True, back_col)
+            screen.blit(back_txt, back_txt.get_rect(center=(back_x+back_w//2, back_y+back_h//2)))
             if is_back_sel:
-                arrow = pygame.font.Font(None, 28).render(">", True, COLOR_YELLOW)
-                screen.blit(arrow, (back_x-20, back_y+8))
+                arrow = pygame.font.Font(None, 22).render(">", True, COLOR_YELLOW)
+                screen.blit(arrow, (back_x-16, back_y+8))
 
+            # Preview - on right, not overlapping grid
             if selected < TOTAL_STAGES and LVLS_13_PREVIEW and selected < len(LVLS_13_PREVIEW):
                 preview = LVLS_13_PREVIEW[selected]
-                p_tile = 10
+                p_tile = 11
                 p_w = 13 * p_tile
                 p_h = 13 * p_tile
-                p_x = SCREEN_WIDTH - p_w - 30
+                p_x = start_x + grid_w + preview_margin
                 p_y = start_y
-                pygame.draw.rect(screen, (10,10,10), (p_x-4, p_y-4, p_w+8, p_h+8))
-                pygame.draw.rect(screen, (100,100,120), (p_x-4, p_y-4, p_w+8, p_h+8), 2)
+                # Background panel for preview
+                panel_rect = pygame.Rect(p_x-8, p_y-8, p_w+16, p_h+90)
+                pygame.draw.rect(screen, (20,20,30), panel_rect, border_radius=10)
+                pygame.draw.rect(screen, (80,80,100), panel_rect, 2, border_radius=10)
+                # Title with short name
+                sel_name = MAP_NAMES[selected] if selected < len(MAP_NAMES) else f"Map {selected+1}"
+                title_font = pygame.font.Font(None, 20)
+                title_surf = title_font.render(f"{selected+1}. {sel_name}", True, COLOR_YELLOW)
+                screen.blit(title_surf, (p_x, p_y-22))
+                # Map preview tiles
                 for ry in range(13):
                     for rx in range(13):
                         t = preview[ry][rx]
@@ -541,21 +595,26 @@ class HUD:
                             pygame.draw.rect(screen, COLOR_GRASS, (tx, ty, p_tile, p_tile))
                         elif t == 5:
                             pygame.draw.rect(screen, COLOR_ICE, (tx, ty, p_tile, p_tile))
+                # No enemy text spam - just short legend below preview
+                legend_font = pygame.font.Font(None, 16)
                 if BOTS_RAW_ALL and selected < len(BOTS_RAW_ALL):
-                    bot_text = "Enemies: " + " ".join(BOTS_RAW_ALL[selected])
-                    bt = self.font_small.render(bot_text, True, (200,200,200))
-                    screen.blit(bt, (p_x - 20, p_y + p_h + 8))
-                    legend = self.font_small.render("B=Brick S=Steel ~=Water F=Forest I=Ice", True, (160,160,160))
-                    screen.blit(legend, (p_x - 20, p_y + p_h + 26))
+                    # Show enemy count only, not full list
+                    raw = BOTS_RAW_ALL[selected]
+                    total_enemies = len(raw)
+                    leg = legend_font.render(f"{total_enemies} enemies", True, (180,180,180))
+                    screen.blit(leg, (p_x, p_y + p_h + 6))
+                leg2 = legend_font.render("B:Brick S:Steel W:Water", True, (120,120,140))
+                screen.blit(leg2, (p_x, p_y + p_h + 22))
+                leg3 = legend_font.render("F:Forest I:Ice", True, (120,120,140))
+                screen.blit(leg3, (p_x, p_y + p_h + 36))
 
-                sel_label = pygame.font.Font(None, 26).render(f"> SELECTED: STAGE {selected+1} <", True, COLOR_YELLOW)
-                screen.blit(sel_label, sel_label.get_rect(center=(SCREEN_WIDTH//2, back_y + 40)))
+                # Selected label at bottom of screen, not overlapping
+                sel_label = pygame.font.Font(None, 22).render(f"> {sel_name} <  (Map {selected+1}/{TOTAL_STAGES})", True, COLOR_YELLOW)
+                screen.blit(sel_label, sel_label.get_rect(center=(SCREEN_WIDTH//2, back_y + 50)))
 
-        footer = pygame.font.Font(None, 18).render("35 Original NES Maps + Authentic NES SFX (feichao93 pack) - Bricks/Water/Forest/Steel/Ice + Tank Move Engine + Explosions + Powerups", True, (100,100,120))
-        screen.blit(footer, footer.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT-30)))
-
-        footer2 = pygame.font.Font(None, 16).render("Stage 1: 18*basic 2*fast ... Stage 35: 4*power 6*fast 10*armor (700 enemies total) - Authentic Battle City 1985", True, (80,80,100))
-        screen.blit(footer2, footer2.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT-14)))
+        # Minimal footer - single line
+        footer = pygame.font.Font(None, 16).render("35 Maps - Arrow keys move by grid layout, short names, preview on right no overlap", True, (90,90,110))
+        screen.blit(footer, footer.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT-12)))
 
         if mode == 'howto':
             overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT-100), pygame.SRCALPHA)

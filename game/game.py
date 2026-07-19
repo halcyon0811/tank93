@@ -1197,11 +1197,41 @@ class Game:
                                     self.menu_selected = (self.menu_selected + 1) % opts
                                     self.menu_hat_cooldown = 12
                                     print(f"Menu DOWN via hat -> {self.menu_selected}")
-                            if self.menu_mode == 'level' and hx != 0:
-                                if hx == -1:
-                                    self.menu_selected = (self.menu_selected - 1) % (len(LEVELS)+1)
-                                else:
-                                    self.menu_selected = (self.menu_selected + 1) % (len(LEVELS)+1)
+                            if self.menu_mode == 'level':
+                                # Grid-aware hat navigation for map select
+                                cols = 7
+                                sel = self.menu_selected
+                                opts = len(LEVELS)+1
+                                if hx == -1:  # LEFT
+                                    if sel != opts-1:
+                                        r = sel // cols
+                                        c = sel % cols
+                                        if c > 0:
+                                            self.menu_selected = r*cols + (c-1)
+                                elif hx == 1:  # RIGHT
+                                    if sel != opts-1:
+                                        r = sel // cols
+                                        c = sel % cols
+                                        if c < cols-1 and sel+1 < len(LEVELS):
+                                            self.menu_selected = r*cols + (c+1)
+                                if hy == 1:  # UP (hat y inverted? but check)
+                                    if sel == opts-1:
+                                        self.menu_selected = 31
+                                    else:
+                                        r = sel // cols
+                                        c = sel % cols
+                                        if r > 0:
+                                            self.menu_selected = (r-1)*cols + c
+                                elif hy == -1:  # DOWN
+                                    if sel == opts-1:
+                                        self.menu_selected = 0
+                                    else:
+                                        r = sel // cols
+                                        c = sel % cols
+                                        if r < 4:
+                                            self.menu_selected = (r+1)*cols + c
+                                        else:
+                                            self.menu_selected = opts-1
                                 self.menu_hat_cooldown = 8
                             # Reset stuck timer on intentional hat move
                             self.menu_stuck_timer = 0
@@ -1408,15 +1438,45 @@ class Game:
                             sys.exit()
                     elif self.menu_mode == 'level':
                         opts = len(LEVELS) + 1  # 35 + BACK
-                        # paging with left/right for 35 stages (7 pages of 5 etc.)
+                        cols = 7  # 7 columns x5 rows = 35 maps
+                        rows = 5
+                        sel = self.menu_selected
                         if event.key == pygame.K_UP:
-                            self.menu_selected = (self.menu_selected - 1) % opts
+                            if sel == opts-1:  # BACK -> last row middle
+                                self.menu_selected = 31  # row 4 col 3 center
+                            else:
+                                r = sel // cols
+                                c = sel % cols
+                                if r > 0:
+                                    self.menu_selected = (r-1)*cols + c
+                                # else stay at top row
                         elif event.key == pygame.K_DOWN:
-                            self.menu_selected = (self.menu_selected + 1) % opts
+                            if sel == opts-1:
+                                self.menu_selected = 0  # BACK down goes to first map
+                            else:
+                                r = sel // cols
+                                c = sel % cols
+                                if r < rows-1:
+                                    self.menu_selected = (r+1)*cols + c
+                                else:
+                                    # last row down -> BACK
+                                    self.menu_selected = opts-1
                         elif event.key == pygame.K_LEFT:
-                            self.menu_selected = (self.menu_selected - 5) % opts
+                            if sel == opts-1:
+                                pass  # BACK left does nothing
+                            else:
+                                r = sel // cols
+                                c = sel % cols
+                                if c > 0:
+                                    self.menu_selected = r*cols + (c-1)
                         elif event.key == pygame.K_RIGHT:
-                            self.menu_selected = (self.menu_selected + 5) % opts
+                            if sel == opts-1:
+                                pass
+                            else:
+                                r = sel // cols
+                                c = sel % cols
+                                if c < cols-1 and sel+1 < len(LEVELS):
+                                    self.menu_selected = r*cols + (c+1)
                         elif event.key == pygame.K_PAGEUP:
                             self.menu_selected = max(0, self.menu_selected - 10) % opts
                         elif event.key == pygame.K_PAGEDOWN:
