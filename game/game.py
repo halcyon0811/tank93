@@ -775,35 +775,63 @@ class Game:
             tries+=1
 
     def release_monster_boss(self):
-        """Called when monster base is hit - releases monster as enemy boss tank"""
+        """Called when monster base is hit - releases monster as enemy boss tank
+           New behavior (user request):
+           - Boss initially trapped in base cage
+           - Boss can escape once surrounding wall is partially destroyed (boss can crush bricks and steel)
+           - Tracking missile can track and hit boss once escaped (homing prioritizes boss)
+        """
         if self.boss_released:
             return  # already released
-        print("[BOSS] Monster released! Spawning boss tank!")
+        print("[BOSS] Monster released! Spawning boss tank! Boss can crush walls to escape")
         self.boss_released = True
-        self.boss_fight_timer = 15 * FPS  # 15 seconds to kill boss before game over? Or just track
-        # Spawn boss at base position (center for mega)
+        self._boss_escaped_logged = False
+        self.boss_fight_timer = 15 * FPS
         bx, by = self.tilemap.base_pos
-        self.tilemap.clear_area(bx-1, by-1, 4, 4)
+        # NEW: Only clear base itself (2x2), NOT surrounding walls
+        # This makes boss trapped initially and needs to crush walls to escape (user request)
+        # Previously cleared 4x4 which removed all walls and gave immediate escape
+        # Now clear only base area, leave walls intact for boss to break through
+        self.tilemap.clear_area(bx, by, 2, 2)
+        # Log that walls remain for escape challenge
+        try:
+            _log_gameplay("BOSS_RELEASE_TRAPPED", level_idx=self.current_level, data={"base_x": bx, "base_y": by, "wall_intact": True, "boss_can_crush": True})
+        except:
+            pass
+
         from .entities.enemy import EnemyTank
         boss = EnemyTank(bx, by, 'monster_boss', is_mega=self.is_mega)
-        # Make boss extra strong and at base center
         boss.set_position(bx, by)
-        # Give it some initial protection but less
         boss.spawn_protection = 30
         boss.invulnerable_timer = 30
+        # Boss can crush walls to escape
         self.enemies.append(boss)
         self.boss_enemy = boss
         self.particles.add_spawn(boss.rect.centerx, boss.rect.centery)
         self.particles.add_explosion(boss.rect.centerx, boss.rect.centery, (100,255,100), 30)
-        # Sound
         try:
             from .sound_manager import sound_manager
             sound_manager.play_explosion(big=True)
             sound_manager.play_powerup_appear()
         except:
             pass
-        # Also break base walls to show release
-        self.tilemap.clear_area(bx-1, by-1, 4, 4)
+        # Create small opening in one direction to give boss a hint to escape, but not fully clear
+        # Destroy one random wall segment to give partial opening (boss will crush rest)
+        import random
+        # Possible wall positions around base (8 surrounding + outer)
+        wall_candidates = [
+            (bx-1, by-1), (bx, by-1), (bx+1, by-1), (bx+2, by-1),
+            (bx-1, by), (bx+2, by),
+            (bx-1, by+1), (bx+2, by+1),
+            (bx-1, by+2), (bx, by+2), (bx+1, by+2), (bx+2, by+2),
+        ]
+        # Clear one random wall to give boss a partial escape route (user: once surrounding wall partially destroyed, boss can pass)
+        if wall_candidates:
+            rx, ry = random.choice(wall_candidates)
+            if 0 <= rx < self.tilemap.grid_w and 0 <= ry < self.tilemap.grid_h:
+                self.tilemap.tiles[ry][rx] = TILE_EMPTY
+                self.tilemap.brick_health.pop((rx,ry), None)
+                print(f"[BOSS] Created partial opening at {rx},{ry} for escape")
 
         # === NEW: After boss gets out, randomly assign items to current enemies ====
         # User request: "after boss gets out, randomly assign items to current enemy"
@@ -1908,6 +1936,27 @@ class Game:
                     # Decrement boss fight timer
                     if self.boss_fight_timer > 0:
                         self.boss_fight_timer -= 1
+                    # NEW: Boss escape detection - once surrounding wall partially destroyed, boss can pass through
+                    # Boss initially trapped in base cage, needs to crush walls to escape
+                    # When boss moves away from base (>3 tiles), it has escaped - log and make homing missiles track it
+                    try:
+                        bx, by = self.tilemap.base_pos
+                        base_px = PLAYFIELD_X + bx * self.tilemap.tile_size + self.tilemap.tile_size
+                        base_py = PLAYFIELD_Y + by * self.tilemap.tile_size + self.tilemap.tile_size
+                        dist_from_base = math.hypot(self.boss_enemy.x - base_px, self.boss_enemy.y - base_py)
+                        # Check if boss has escaped (distance > 3 tiles)
+                        if dist_from_base > self.tilemap.tile_size * 3:
+                            if not getattr(self, '_boss_escaped_logged', False):
+                                print(f"[BOSS] Boss has escaped the base cage! Distance {dist_from_base:.0f}px")
+                                _trace_log("BOSS", f"Boss escaped cage! dist={dist_from_base:.0f} pos={self.boss_enemy.x:.0f},{self.boss_enemy.y:.0f}", level="WARN")
+                                try:
+                                    _log_gameplay("BOSS_ESCAPED", level_idx=self.current_level, data={"x": self.boss_enemy.x, "y": self.boss_enemy.y, "dist": dist_from_base, "base_x": base_px, "base_y": base_py})
+                                except:
+                                    pass
+                                self._boss_escaped_logged = True
+                                # Once escaped, boss is more vulnerable to homing missiles (already prioritized in bullet.py)
+                    except Exception as ex:
+                        pass
                     # If timer expires and boss still alive, game over (monster escaped)
                     # For now, allow unlimited time, just continue
                     pass
@@ -1930,6 +1979,7 @@ class Game:
                     self.boss_enemy = None
                     self.boss_fight_timer = 0
                     self.boss_released = False  # allow next boss release on next base hit
+                    self._boss_escaped_logged = False
                     self.monster_boss_defeated = True  # track at least one defeat
                     # Continue game
                     self.particles.add_explosion(self.base.rect.centerx, self.base.rect.centery, (100,255,100), 40)

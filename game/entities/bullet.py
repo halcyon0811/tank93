@@ -212,20 +212,38 @@ class Bullet:
             self.trail_max = 6
 
     def _find_nearest_target(self, tanks):
-        """Find nearest enemy for homing missile within detection range"""
+        """Find nearest enemy for homing missile within detection range
+           Boss prioritized after escape (user request: tracking missile should track and hit boss once escaped)
+        """
         if not self.homing:
             return None
         candidates = []
+        boss_candidates = []
         if self.owner.startswith('player'):
             for t in tanks:
                 if t.alive and not getattr(t, 'is_player', False):
-                    # ignore if far
                     dist = math.hypot(t.x - self.x, t.y - self.y)
-                    if dist <= HOMING_DETECTION_RANGE:
-                        candidates.append((dist, t))
-                    elif not candidates:
-                        # if none within range, still consider far one if it's the only one
-                        candidates.append((dist, t))
+                    # Boss (released monster) should be prioritized for tracking missile after escape
+                    is_boss = getattr(t, 'is_boss', False)
+                    if is_boss:
+                        # Boss is high priority - effective distance halved so it appears closer
+                        # This ensures homing missile will track and hit boss once escaped
+                        effective_dist = dist * 0.5
+                        if dist <= HOMING_DETECTION_RANGE * 1.2:  # slightly larger range for boss
+                            boss_candidates.append((effective_dist, dist, t))
+                        elif not candidates and not boss_candidates:
+                            boss_candidates.append((effective_dist, dist, t))
+                    else:
+                        if dist <= HOMING_DETECTION_RANGE:
+                            candidates.append((dist, t))
+                        elif not candidates and not boss_candidates:
+                            candidates.append((dist, t))
+            # Prioritize boss if exists
+            if boss_candidates:
+                boss_candidates.sort(key=lambda x: x[0])
+                # If boss within 1.5x detection range, always target boss
+                # This satisfies user request: tracking missile should track boss after escape
+                return boss_candidates[0][2]
         else:
             for t in tanks:
                 if t.alive and getattr(t, 'is_player', False):
@@ -236,8 +254,6 @@ class Bullet:
             return None
         # sort by dist
         candidates.sort(key=lambda x: x[0])
-        # prefer those with LOS clear? Slight boost
-        # pick first with LOS if any within 1.5x
         best = candidates[0][1]
         return best
 

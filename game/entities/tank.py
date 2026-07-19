@@ -301,9 +301,16 @@ class Tank:
         crushed_bricks = []
         for ttype, gx, gy, trect in tiles:
             if tile_check_rect.colliderect(trect):
-                if ttype == TILE_BRICK and can_crush_brick:
-                    crushed_bricks.append((gx, gy))
-                    continue
+                if can_crush_brick:
+                    # Giant and boss can crush brick, boss can also crush steel for escape (user request)
+                    if ttype == TILE_BRICK:
+                        crushed_bricks.append((gx, gy))
+                        continue
+                    elif ttype == TILE_STEEL and is_boss:
+                        # Boss can crush steel walls to escape once surrounding wall partially destroyed
+                        # Takes more effort, but allowed
+                        crushed_bricks.append((gx, gy))
+                        continue
                 if is_turn and (abs(snap_x - self.x) > 0.1 or abs(snap_y - self.y) > 0.1):
                     # Try without snap (original position + movement only) to allow turning near walls without clipping
                     new_rect2 = self.rect.copy()

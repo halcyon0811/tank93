@@ -47,6 +47,14 @@ class PlayerTank(Tank):
         self.homing_active = False
         self.spread_active = False
         self.rapid_active = False
+        # Stacking system: more items = stronger (user request)
+        self.total_items_collected = 0
+        self.homing_level = 0
+        self.spread_level = 0
+        self.rapid_level = 0
+        self.star_extra_count = 0  # stars beyond max level
+        self.bullet_damage_bonus = 0.0  # additive bonus from stacking
+        self.speed_bonus = 0.0  # additive speed bonus from stacking
         self.update_bullet_power()
 
     def add_lives(self, n=COIN_LIVES):
@@ -64,39 +72,48 @@ class PlayerTank(Tank):
         return not self.alive and self.lives < 0
 
     def update_bullet_power(self):
-        # Don't override speed if shrink/giant active - they manage speed themselves via base_speed
+        # Stacking: base speed includes speed_bonus from total items collected
+        # This makes you stronger the more you get, as requested
+        stacking_speed_factor = 1.0 + self.speed_bonus * 0.12 + self.star_extra_count * 0.05
+        # Don't override speed completely if shrink/giant active - they manage speed themselves via base_speed
+        # But still apply stacking bonus on top
         if self.shrink_timer > 0 or self.giant_timer > 0:
-            # size effects manage speed
+            # size effects manage speed, but include stacking bonus
             if self.star_level == 0:
-                self.bullet_power = 1
-                MAX_BULLETS['player'] = 1
+                self.bullet_power = 1 + int(self.bullet_damage_bonus // 2)  # stacking can increase power even at low star
+                MAX_BULLETS['player'] = 1 + self.rapid_level
             elif self.star_level == 1:
-                self.bullet_power = 1
-                MAX_BULLETS['player'] = 2
+                self.bullet_power = 1 + int(self.bullet_damage_bonus // 3)
+                MAX_BULLETS['player'] = 2 + self.rapid_level
             elif self.star_level == 2:
-                self.bullet_power = 1
+                self.bullet_power = 1 + int(self.bullet_damage_bonus // 2)
             elif self.star_level >= 3:
-                self.bullet_power = 2
+                self.bullet_power = 2 + int(self.bullet_damage_bonus // 2)
+            # Apply stacking speed bonus even in shrink/giant (giant overrides but we keep bonus)
+            # base_speed already includes some bonus, speed will be set by update_size_state with bonus
             return
 
         if self.star_level == 0:
-            self.bullet_power = 1
-            self.speed = TANK_SPEED['player']
-            self.base_speed = TANK_SPEED['player']
-            MAX_BULLETS['player'] = 1
+            self.bullet_power = 1 + int(self.bullet_damage_bonus // 3)
+            self.speed = TANK_SPEED['player'] * stacking_speed_factor
+            self.base_speed = TANK_SPEED['player'] * stacking_speed_factor
+            MAX_BULLETS['player'] = 1 + self.rapid_level
         elif self.star_level == 1:
-            self.bullet_power = 1
-            self.base_speed = TANK_SPEED['player']
-            self.speed = TANK_SPEED['player']
-            MAX_BULLETS['player'] = 2
+            self.bullet_power = 1 + int(self.bullet_damage_bonus // 2)
+            self.base_speed = TANK_SPEED['player'] * stacking_speed_factor
+            self.speed = self.base_speed
+            MAX_BULLETS['player'] = 2 + self.rapid_level
         elif self.star_level == 2:
-            self.bullet_power = 1
-            self.base_speed = TANK_SPEED['player'] * 1.3
+            self.bullet_power = 1 + int(self.bullet_damage_bonus // 2)
+            self.base_speed = TANK_SPEED['player'] * 1.3 * stacking_speed_factor
             self.speed = self.base_speed
         elif self.star_level >= 3:
-            self.bullet_power = 2
-            self.base_speed = TANK_SPEED['player'] * 1.3
+            self.bullet_power = 2 + int(self.bullet_damage_bonus // 2) + self.star_extra_count // 2
+            self.base_speed = TANK_SPEED['player'] * 1.3 * stacking_speed_factor
             self.speed = self.base_speed
+            # More bullets with rapid stacking
+            if self.rapid_active:
+                MAX_BULLETS['player'] = 2 + self.rapid_level + self.star_extra_count // 2
 
     def handle_input(self, keys, joystick=None, tilemap=None, other_tanks=None, num_players=1):
         if not self.alive:
@@ -623,20 +640,39 @@ class PlayerTank(Tank):
                 if is_homing:
                     import random as _rnd
                     bullet.replan_timer = _rnd.randint(0, 25)
+                    # Stacking: homing_level increases speed and agility
+                    level = getattr(self, 'homing_level', 1)
+                    if level > 1:
+                        bullet.speed *= (1.0 + (level-1)*0.08)  # +8% per extra homing level
+                        if hasattr(bullet, 'turn_speed'):
+                            bullet.turn_speed *= (1.0 + (level-1)*0.12)
                     if power_synergy:
                         bullet.speed *= 1.3  # powerful missile faster
-                        bullet.turn_speed = getattr(bullet, 'turn_speed', 0.068) * 1.2  # more agile
+                        bullet.turn_speed = getattr(bullet, 'turn_speed', 0.068) * (1.2 + (level-1)*0.1)
+                        # Power homing also gets damage bonus from bullet_damage_bonus
+                        bullet.power = bullet_power + self.bullet_damage_bonus * 0.3
                 if self.rapid_active and not is_homing:
-                    bullet.speed *= 1.2
-                elif self.rapid_active and is_homing and power_synergy:
-                    bullet.speed *= 1.35  # rapid + power homing super fast
+                    # Rapid level increases speed
+                    r_level = getattr(self, 'rapid_level', 1)
+                    bullet.speed *= (1.2 + (r_level-1)*0.15)
+                elif self.rapid_active and is_homing:
+                    r_level = getattr(self, 'rapid_level', 1)
+                    if power_synergy:
+                        bullet.speed *= (1.35 + (r_level-1)*0.1)
+                    else:
+                        bullet.speed *= (1.2 + (r_level-1)*0.08)
+                # Apply general damage bonus
+                bullet.power = bullet_power + self.bullet_damage_bonus * 0.2
                 self.bullets.append(bullet)
                 bullets_created.append(bullet)
             base_cd = 25
-            # Power synergy reduces cooldown slightly (more powerful but balanced)
+            # Power synergy and stacking reduces cooldown
             if power_synergy:
-                base_cd = max(5, base_cd - 3)
-            self.cooldown = max(3, base_cd // 3) if self.rapid_active else base_cd
+                base_cd = max(5, base_cd - 3 - self.homing_level)
+            # Rapid level reduces cooldown further
+            if self.rapid_active:
+                base_cd = max(3, base_cd - self.rapid_level*2)
+            self.cooldown = max(2, base_cd // 3) if self.rapid_active else max(3, base_cd)
         else:
             sx, sy = self.get_bullet_spawn()
             is_homing = self.homing_active
@@ -655,18 +691,31 @@ class PlayerTank(Tank):
             b_type = get_bullet_type_for_player()
             bullet_power = self.bullet_power
             if power_synergy:
-                bullet_power = 2
+                bullet_power = 2 + self.star_extra_count // 2
 
             bullet = Bullet(sx, sy, self.direction, f"player{self.player_id}", power=bullet_power, color=col, homing=is_homing, bullet_type=b_type)
-            if is_homing and power_synergy:
-                bullet.speed *= 1.3
-                # Make turn more agile for power homing
-                if hasattr(bullet, 'turn_speed'):
-                    bullet.turn_speed *= 1.2
+            if is_homing:
+                level = getattr(self, 'homing_level', 1)
+                if power_synergy:
+                    bullet.speed *= (1.3 + (level-1)*0.08)
+                    if hasattr(bullet, 'turn_speed'):
+                        bullet.turn_speed *= (1.2 + (level-1)*0.12)
+                else:
+                    if level > 1:
+                        bullet.speed *= (1.0 + (level-1)*0.08)
+                        if hasattr(bullet, 'turn_speed'):
+                            bullet.turn_speed *= (1.0 + (level-1)*0.12)
             if self.rapid_active and not is_homing:
-                bullet.speed *= 1.2
-            elif self.rapid_active and is_homing and has_power:
-                bullet.speed *= 1.35
+                r_level = getattr(self, 'rapid_level', 1)
+                bullet.speed *= (1.2 + (r_level-1)*0.15)
+            elif self.rapid_active and is_homing:
+                r_level = getattr(self, 'rapid_level', 1)
+                if has_power:
+                    bullet.speed *= (1.35 + (r_level-1)*0.1)
+                else:
+                    bullet.speed *= (1.2 + (r_level-1)*0.08)
+            # General damage bonus from stacking
+            bullet.power = bullet_power + self.bullet_damage_bonus * 0.25
             self.bullets.append(bullet)
             bullets_created.append(bullet)
             base_cd = 15 if self.star_level >= 1 else 20
@@ -780,6 +829,14 @@ class PlayerTank(Tank):
         self.current_scale = 1.0
         self.speed = TANK_SPEED['player']
         self.base_speed = TANK_SPEED['player']
+        # Reset stacking counters on death
+        self.total_items_collected = 0
+        self.homing_level = 0
+        self.spread_level = 0
+        self.rapid_level = 0
+        self.star_extra_count = 0
+        self.bullet_damage_bonus = 0.0
+        self.speed_bonus = 0.0
         self.venom_timer = 0
         self.venom_level = 0
         self.armor = ARMOR_INITIAL_PLAYER
@@ -787,6 +844,11 @@ class PlayerTank(Tank):
         self.armor_flash_timer = 0
         self._update_rect_size()
         self.update_bullet_power()
+        try:
+            from ..logger_integration import safe_log_gameplay
+            safe_log_gameplay("PLAYER_DIE_RESET_STACK", data={"player_id": self.player_id, "lives_left": self.lives})
+        except:
+            pass
 
     def respawn(self, grid_x, grid_y):
         self.set_position(grid_x, grid_y)
@@ -806,38 +868,94 @@ class PlayerTank(Tank):
         # self.homing_timer and spread remain as is
 
     def apply_powerup(self, type_name, game=None):
+        # Stacking: every item makes you stronger
+        self.total_items_collected += 1
+        # Base stacking bonuses: + speed and damage per item
+        self.speed_bonus += 0.12  # each item +0.12 speed
+        self.bullet_damage_bonus += 0.15  # each item +0.15 damage
+        # Log stacking
+        try:
+            from ..logger_integration import safe_log_gameplay
+            safe_log_gameplay("POWERUP_STACK", data={"type": type_name, "player_id": self.player_id, "total_items": self.total_items_collected, "speed_bonus": self.speed_bonus, "damage_bonus": self.bullet_damage_bonus, "x": getattr(self, 'x', 0), "y": getattr(self, 'y', 0)})
+        except:
+            pass
+
         if type_name == 'helmet':
             self.helmet_timer = POWERUP_DURATION.get('helmet', 10 * FPS)
             self.invulnerable_timer = POWERUP_DURATION.get('helmet', 10 * FPS)
-            self.add_armor(30)  # helmet also gives armor
+            self.add_armor(30)
+            # Stacking: extra helmet extends duration and adds more armor per stack
+            self.add_armor(10 + self.total_items_collected * 2)
         elif type_name == 'star':
-            self.star_level = min(self.star_level + 1, STAR_LEVELS-1)
+            if self.star_level < STAR_LEVELS-1:
+                self.star_level += 1
+            else:
+                # Beyond max: extra count for stacking
+                self.star_extra_count += 1
+                # Each extra star beyond max gives more speed and damage and armor
+                self.speed_bonus += 0.20
+                self.bullet_damage_bonus += 0.30
+                self.add_armor(20 + self.star_extra_count * 5)
+                print(f"[STACKING] Chad/Lida star beyond max: extra_count={self.star_extra_count} speed_bonus={self.speed_bonus:.2f} dmg_bonus={self.bullet_damage_bonus:.2f}")
             self.update_bullet_power()
-            # Star upgrades armor as well
             self.add_armor(ARMOR_UPGRADE_STAR)
             self.max_armor = min(ARMOR_MAX_PLAYER, self.max_armor + 15)
         elif type_name == 'tank':
             self.lives += 1
             self.score += 500
             self.add_armor(ARMOR_UPGRADE_TANK)
+            # Stacking: extra life item also gives speed and damage
+            self.speed_bonus += 0.05
+            self.bullet_damage_bonus += 0.05
         elif type_name == 'gun':
             self.bullet_power = 2
             self.add_armor(ARMOR_UPGRADE_GUN)
+            # Gun now also gives stacking bonus for weapon enforcement synergy
+            self.bullet_damage_bonus += 0.25
+            self.speed_bonus += 0.05
         elif type_name == 'shovel':
             if game:
                 game.tilemap.activate_shovel()
             self.add_armor(20)
+            self.bullet_damage_bonus += 0.05
         elif type_name == 'homing':
+            # Stacking for homing: each extra homing increases level, turn speed, range, damage
+            if self.homing_active:
+                self.homing_level += 1
+                self.bullet_damage_bonus += 0.25
+                self.speed_bonus += 0.08
+                print(f"[STACKING] Homing level up to {self.homing_level}: faster turn, more range, damage")
+                try:
+                    from ..logger_integration import safe_log_gameplay
+                    safe_log_gameplay("HOMING_LEVEL_UP", data={"player_id": self.player_id, "level": self.homing_level, "total_items": self.total_items_collected})
+                except:
+                    pass
+            else:
+                self.homing_level = 1
             self.homing_timer = -1
             self.homing_active = True
             self.score += 200
             self.add_armor(20)
         elif type_name == 'spread':
+            if self.spread_active:
+                self.spread_level += 1
+                self.bullet_damage_bonus += 0.20
+                self.speed_bonus += 0.05
+                print(f"[STACKING] Spread level up to {self.spread_level}: more bullets or damage")
+            else:
+                self.spread_level = 1
             self.spread_timer = -1
             self.spread_active = True
             self.score += 200
             self.add_armor(20)
         elif type_name == 'rapid':
+            if self.rapid_active:
+                self.rapid_level += 1
+                self.bullet_damage_bonus += 0.15
+                self.speed_bonus += 0.10
+                print(f"[STACKING] Rapid level up to {self.rapid_level}: faster shooting, more bullets")
+            else:
+                self.rapid_level = 1
             self.rapid_timer = -1
             self.rapid_active = True
             self.score += 200
