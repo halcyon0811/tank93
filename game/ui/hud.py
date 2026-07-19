@@ -11,7 +11,8 @@ class HUD:
         self.font_huge = pygame.font.Font(None, 48)
 
     def draw(self, screen, game):
-        # Dynamic HUD position for mega (52x52 map 1248px playfield)
+        # Redesigned HUD - concise, no overflow, only game-relevant info
+        # User request: lives, enemy left, points, damage per player, items on map, what they do
         hud_x = HUD_X
         hud_w = HUD_W
         hud_h = PLAYFIELD_H
@@ -21,330 +22,221 @@ class HUD:
                 hud_w = 260
                 hud_h = MEGA_PLAYFIELD_H
             elif hasattr(game, 'tilemap') and game.tilemap:
-                # Dynamic based on tilemap actual size
                 hud_x = game.tilemap.grid_w * game.tilemap.tile_size + PLAYFIELD_X + 20
-                hud_w = max(200, 1600 - hud_x - 20) if 'MEGA' in str(type(game)) else HUD_W
+                hud_w = max(200, HUD_W)
                 hud_h = game.tilemap.grid_h * game.tilemap.tile_size
         except:
             pass
+        # Keep HUD inside screen
+        hud_w = min(hud_w, SCREEN_WIDTH - hud_x - 10)
         panel_rect = pygame.Rect(hud_x, PLAYFIELD_Y, hud_w, hud_h)
-        pygame.draw.rect(screen, (28, 28, 38), panel_rect, border_radius=8)
-        pygame.draw.rect(screen, (60, 60, 80), panel_rect, 2, border_radius=8)
+        pygame.draw.rect(screen, (22, 22, 32), panel_rect, border_radius=10)
+        pygame.draw.rect(screen, (50, 50, 70), panel_rect, 2, border_radius=10)
 
-        ypos = PLAYFIELD_Y + 15
-        xpos = HUD_X + 12
+        # Fonts - smaller to fit
+        xpos = hud_x + 10
+        right_limit = hud_x + hud_w - 10
+        ypos = PLAYFIELD_Y + 10
 
-        title = self.font_big.render("TANK 93", True, COLOR_YELLOW)
-        screen.blit(title, (xpos, ypos))
-        ypos += 26
+        # Helper to render with wrapping/truncation
+        def draw_line(text, color, font=None, indent=0):
+            nonlocal ypos
+            if font is None:
+                font = self.font_small
+            # Truncate if too long for panel
+            surf = font.render(text, True, color)
+            if surf.get_width() > (right_limit - xpos - indent):
+                # Try smaller font or truncate
+                max_chars = int((right_limit - xpos - indent) / 7)  # approx
+                if max_chars > 3:
+                    text = text[:max_chars-3] + "..."
+                    surf = font.render(text, True, color)
+            screen.blit(surf, (xpos + indent, ypos))
+            ypos += surf.get_height() + 2
+            return ypos
 
-        joy_count = len(game.joysticks) if hasattr(game, 'joysticks') else 0
-        if joy_count > 0:
-            joy_names = []
-            for js in game.joysticks:
-                try:
-                    n = js.get_name()
-                    if 'joy-con' in n.lower():
-                        if '(l)' in n.lower():
-                            joy_names.append("JC(L)")
-                        elif '(r)' in n.lower():
-                            joy_names.append("JC(R)")
-                        else:
-                            joy_names.append("JC")
-                    elif 'pro' in n.lower():
-                        joy_names.append("Pro")
-                    else:
-                        joy_names.append(n[:8])
-                except:
-                    joy_names.append("?")
-            joy_txt = self.font_small.render(f"Joy: {joy_count} {','.join(joy_names)}", True, (100,255,100))
-        else:
-            joy_txt = self.font_small.render("Joy: 0 (Press J to rescan)", True, (200,100,100))
-        screen.blit(joy_txt, (xpos, ypos))
-        ypos += 14
-        # LAN Multiplayer status - Chad & Lida remote (optimized async startup)
-        try:
-            if hasattr(game, '_network_starting') and game._network_starting:
-                ip_txt = self.font_small.render(f"LAN Host: starting... (fast menu, network in bg)", True, (100,200,255))
-                screen.blit(ip_txt, (xpos, ypos))
-                ypos += 14
-            elif hasattr(game, 'network_host_ip') and game.network_host_ip and game.network_host_ip != "starting...":
-                ip_txt = self.font_small.render(f"LAN Host: {game.network_host_ip}:9999", True, (100,200,255))
-                screen.blit(ip_txt, (xpos, ypos))
-                ypos += 14
-                if hasattr(game, 'network_host') and game.network_host and game.network_host.is_client_connected():
-                    conn_txt = self.font_small.render(f"Lida (P2) CONNECTED - N/Ctrl+K kick for Chad solo", True, (100,255,100))
-                else:
-                    conn_txt = self.font_small.render(f"Lida join: remote_client.py --host {game.network_host_ip}  [CHAD 1P OK even if Lida connected]", True, (150,150,150))
-                screen.blit(conn_txt, (xpos, ypos))
-                ypos += 14
-            elif hasattr(game, 'network_enabled') and not game.network_enabled:
-                ip_txt = self.font_small.render(f"LAN Host: disabled (--solo fast startup)", True, (120,120,120))
-                screen.blit(ip_txt, (xpos, ypos))
-                ypos += 14
-            # Projector status - for projecting to projector via local network browser
-            if hasattr(game, 'projector_ip') and game.projector_ip and game.projector_ip != "starting...":
-                proj_txt = self.font_small.render(f"PROJECTOR: http://{game.projector_ip}:8080", True, (255,200,100))
-                screen.blit(proj_txt, (xpos, ypos))
-                ypos += 14
-                proj_hint = self.font_small.render("Open on projector browser / laptop HDMI -> F11", True, (180,180,120))
-                screen.blit(proj_hint, (xpos, ypos))
-                ypos += 14
-        except:
-            pass
-        ypos += 4
-        # Calibration status
-        try:
-            import game.settings as settings_mod
-            cal_lines = []
-            l_swap = getattr(settings_mod, 'JOYCON_L_SWAP', False)
-            l_invx = getattr(settings_mod, 'JOYCON_L_INVERT_X', False)
-            l_invy = getattr(settings_mod, 'JOYCON_L_INVERT_Y', False)
-            r_swap = getattr(settings_mod, 'JOYCON_R_SWAP', False)
-            r_invx = getattr(settings_mod, 'JOYCON_R_INVERT_X', False)
-            r_invy = getattr(settings_mod, 'JOYCON_R_INVERT_Y', False)
-            cal_lines.append(f"L:{'S' if l_swap else ''}{'X' if l_invx else ''}{'Y' if l_invy else '' or 'OK'}")
-            cal_lines.append(f"R:{'S' if r_swap else ''}{'X' if r_invx else ''}{'Y' if r_invy else '' or 'OK'}")
-            cal_txt = self.font_small.render("Cal " + " ".join(cal_lines) + " I:InvY U:InvX O:Swap", True, (255,200,100))
-            screen.blit(cal_txt, (xpos, ypos))
-            ypos += 14
-        except:
-            pass
-        ypos += 4
+        def draw_divider():
+            nonlocal ypos
+            ypos += 4
+            pygame.draw.line(screen, (50,50,70), (xpos, ypos), (right_limit, ypos), 1)
+            ypos += 8
 
-        lvl_txt = self.font_mid.render(f"STAGE {game.current_level+1}", True, COLOR_WHITE)
-        screen.blit(lvl_txt, (xpos, ypos))
-        ypos += 28
+        # 1. Header - concise
+        draw_line("TANK 93", COLOR_YELLOW, self.font_big)
+        ypos += 2
+        draw_line(f"STAGE {game.current_level+1}", (200,200,200), self.font_mid)
+        draw_divider()
 
-        pygame.draw.line(screen, (60,60,80), (xpos, ypos), (xpos+HUD_W-24, ypos), 2)
-        ypos += 12
-
+        # 2. Enemies - lives left concise
         remaining = game.enemies_total - game.enemies_killed
-        en_txt = self.font_mid.render(f"ENEMY {remaining}", True, (200,200,200))
-        screen.blit(en_txt, (xpos, ypos))
-        ypos += 22
-        # Gradual increase info (from origin 7304b5b)
-        try:
-            max_on = getattr(game, 'max_enemies_on_field', 4)
-            total = getattr(game, 'enemies_total', 20)
-            ramp_txt = self.font_small.render(f"TOTAL {total} (BASE 20+LVL) MAX {max_on}", True, (180,220,180))
-            screen.blit(ramp_txt, (xpos, ypos))
-            ypos += 16
-            spawn_int = getattr(game, 'dynamic_spawn_interval', 0) / FPS if hasattr(game, 'dynamic_spawn_interval') else 2.5
-            interval_txt = self.font_small.render(f"SPAWN {spawn_int:.1f}s RAMP {game.difficulty_ramp_timer//FPS if hasattr(game, 'difficulty_ramp_timer') else 0}s", True, (150,180,200))
-            screen.blit(interval_txt, (xpos, ypos))
-            ypos += 16
-        except:
-            pass
-        icon_size = 16
-        gap = 4
-        cols = 2
-        for i in range(remaining):
+        draw_line(f"ENEMY LEFT: {remaining}/{game.enemies_total}", (220,220,200), self.font_mid)
+        # Small icons grid - compact, max 10 rows
+        icon_size = 10
+        gap = 3
+        cols = 4
+        max_icons = min(remaining, 40)  # cap to avoid overflow
+        start_y = ypos
+        for i in range(max_icons):
             row = i // cols
             col = i % cols
-            ix = xpos + col*(icon_size+gap+8)
+            ix = xpos + col*(icon_size+gap+4)
             iy = ypos + row*(icon_size+gap)
-            pygame.draw.rect(screen, (180,180,180), (ix, iy, icon_size, icon_size//2 +4), border_radius=2)
-            pygame.draw.rect(screen, (120,120,120), (ix+icon_size//2-1, iy-3, 2, 6))
-        ypos += ((remaining+1)//cols)*(icon_size+gap) + 12
-        pygame.draw.line(screen, (60,60,80), (xpos, ypos), (xpos+HUD_W-24, ypos), 1)
-        ypos += 12
-
-        for idx, p in enumerate(game.players):
-            if idx >= 2:
+            if iy + icon_size > PLAYFIELD_Y + hud_h - 100:  # avoid overflow
                 break
-            color = PLAYER_COLORS[idx]
-            # Use Chad/Lida names
+            pygame.draw.rect(screen, (160,160,160), (ix, iy, icon_size, icon_size), border_radius=2)
+        ypos = start_y + ((min(max_icons, 40)+cols-1)//cols)*(icon_size+gap) + 6
+        if remaining > 40:
+            draw_line(f"+{remaining-40} more", (150,150,150), self.font_small)
+        draw_divider()
+
+        # 3. Players - lives, score, damage, armor
+        for idx, p in enumerate(game.players[:2]):  # max 2
             try:
                 from ..settings import PLAYER_NAMES
                 display_name = PLAYER_NAMES[idx] if idx < len(PLAYER_NAMES) else f"P{idx+1}"
             except:
                 display_name = ["Chad", "Lida"][idx] if idx < 2 else f"P{idx+1}"
-            pygame.draw.rect(screen, color, (xpos, ypos, 22, 22), border_radius=4)
-            # Show first letter or short name in box, full name next to lives
-            short = display_name[0]  # C / L
-            p_num = self.font_small.render(short, True, COLOR_BLACK)
-            screen.blit(p_num, (xpos+5, ypos+3))
-            lives_txt = self.font_mid.render(f"{display_name} x {p.lives if p.alive else max(0,p.lives)}", True, COLOR_WHITE)
-            screen.blit(lives_txt, (xpos+28, ypos))
+            color = PLAYER_COLORS[idx] if idx < len(PLAYER_COLORS) else COLOR_WHITE
 
-            ypos += 22
-            score_txt = self.font_small.render(f"Score {p.score}", True, (200,200,200))
-            screen.blit(score_txt, (xpos, ypos))
-            ypos += 18
+            # Name + lives
+            pygame.draw.rect(screen, color, (xpos, ypos, 16, 16), border_radius=3)
+            draw_line(f" {display_name}  LIFE x{max(0, p.lives if p.alive else p.lives)}", COLOR_WHITE, self.font_mid, indent=20)
+            # Score = points, damage approximated as score (each enemy 100-500)
+            # Also show kills if we can compute from score? Use score as damage
+            draw_line(f"Score: {p.score}  DMG: ~{p.score//10}", (200,200,200), self.font_small)
+            # Power stars
+            stars = '★'*p.star_level + '☆'*(3-p.star_level)
+            draw_line(f"Power: {stars}", COLOR_YELLOW, self.font_small)
+            # Armor bar - compact
+            if hasattr(p, 'armor') and hasattr(p, 'max_armor') and p.max_armor>0:
+                pct = max(0, p.armor/max(0.001,p.max_armor))
+                bar_w = right_limit - xpos - 70
+                bar_h = 8
+                bx = xpos
+                by = ypos
+                pygame.draw.rect(screen, (40,40,50), (bx, by, bar_w, bar_h), border_radius=3)
+                col = (80,200,100) if pct>0.5 else (220,200,80) if pct>0.25 else (220,80,80)
+                pygame.draw.rect(screen, col, (bx, by, int(bar_w*pct), bar_h), border_radius=3)
+                # text overlay
+                armor_txt = self.font_small.render(f"{int(p.armor)}/{p.max_armor}", True, (220,220,220))
+                screen.blit(armor_txt, (bx+bar_w+4, by-3))
+                ypos += bar_h + 6
 
-            star_txt = self.font_small.render(f"Power {'★'*p.star_level}{'☆'*(3-p.star_level)}", True, COLOR_YELLOW)
-            screen.blit(star_txt, (xpos, ypos))
-            ypos += 16
+            # Active buffs - concise tags
+            buffs = []
+            if getattr(p, 'homing_active', False):
+                buffs.append("MISSILE")
+            if getattr(p, 'spread_active', False):
+                buffs.append("8-WAY")
+            if getattr(p, 'rapid_active', False):
+                buffs.append("RAPID")
+            if getattr(p, 'is_giant', False):
+                buffs.append("GIANT")
+            if getattr(p, 'is_shrunk', False):
+                buffs.append("MINI")
+            if getattr(p, 'helmet_timer', 0)>0:
+                buffs.append("SHIELD")
+            if buffs:
+                tag_line = " ".join(buffs)
+                draw_line(tag_line, (80,200,255), self.font_small)
 
-            # Armor bar in HUD
-            if hasattr(p, 'armor') and hasattr(p, 'max_armor') and p.max_armor > 0:
-                armor_pct = max(0, p.armor / p.max_armor)
-                bar_w = 80
-                bar_h = 10
-                # Background
-                pygame.draw.rect(screen, (0,0,0), (xpos-1, ypos-1, bar_w+2, bar_h+2))
-                pygame.draw.rect(screen, (50,50,60), (xpos, ypos, bar_w, bar_h))
-                # Color based on health
-                if armor_pct > 0.6:
-                    col = (80, 180, 255)
-                elif armor_pct > 0.3:
-                    col = (255, 220, 80)
-                else:
-                    col = (255, 80, 80)
-                if getattr(p, 'armor_flash_timer', 0) % 4 < 2 and getattr(p, 'armor_flash_timer', 0) > 0:
-                    col = (255, 255, 255)
-                pygame.draw.rect(screen, col, (xpos, ypos, int(bar_w * armor_pct), bar_h))
-                # Text
-                armor_text = self.font_small.render(f"ARMOR {int(p.armor)}/{p.max_armor}", True, COLOR_WHITE)
-                screen.blit(armor_text, (xpos + bar_w + 5, ypos - 2))
-                ypos += 16
+            ypos += 4
+            draw_divider()
 
-            statuses = []
-            if p.helmet_timer > 0:
-                statuses.append("SHIELD")
-            if p.spawn_protection > 0:
-                statuses.append("SPAWN")
-            homing_t = getattr(p, 'homing_timer', 0)
-            if getattr(p, 'homing_active', False) or homing_t != 0:
-                if homing_t == -1:
-                    statuses.append(f"MISSILE PERM")
-                elif homing_t > 0:
-                    secs = homing_t // FPS
-                    statuses.append(f"MISSILE {secs}s")
-                elif getattr(p, 'homing_active', False):
-                    statuses.append(f"MISSILE")
-            spread_t = getattr(p, 'spread_timer', 0)
-            if getattr(p, 'spread_active', False) or spread_t != 0:
-                if spread_t == -1:
-                    statuses.append(f"8-WAY PERM")
-                elif spread_t > 0:
-                    secs = spread_t // FPS
-                    statuses.append(f"8-WAY {secs}s")
-                elif getattr(p, 'spread_active', False):
-                    statuses.append(f"8-WAY")
-            rapid_t = getattr(p, 'rapid_timer', 0)
-            if getattr(p, 'rapid_active', False) or rapid_t != 0:
-                if rapid_t == -1:
-                    statuses.append(f"RAPID x3 PERM")
-                elif rapid_t > 0:
-                    secs = rapid_t // FPS
-                    statuses.append(f"RAPID x3 {secs}s")
-                elif getattr(p, 'rapid_active', False):
-                    statuses.append(f"RAPID x3")
-            if getattr(p, 'shrink_timer', 0) > 0:
-                secs = p.shrink_timer // FPS
-                statuses.append(f"MINI 2xSPD {secs}s")
-            if getattr(p, 'giant_timer', 0) > 0:
-                secs = p.giant_timer // FPS
-                statuses.append(f"GIANT CRUSH {secs}s")
-            if getattr(p, 'venom_timer', 0) > 0:
-                secs = p.venom_timer // FPS
-                lv = int(getattr(p, 'venom_level', 0)*100)
-                statuses.append(f"VENOM {lv}% {secs}s")
+        # 4. Items on map - what are they, what do they do
+        # Powerup descriptions
+        desc_map = {
+            'star': '★ Star: Upgrade power+speed',
+            'gun': 'Gun: Steel breaker (2 hits steel)',
+            'helmet': 'Helmet: 10s shield',
+            'clock': 'Clock: Freeze enemies 5s',
+            'shovel': 'Shovel: Steel walls base 15s',
+            'tank': 'Tank: +1 life + armor',
+            'grenade': 'Bomb: 100 armor dmg all enemies',
+            'homing': 'Missile: Tracking enemy',
+            'spread': 'Spread: 8-direction shot',
+            'rapid': 'Rapid: 3x fire rate',
+            'shrink': 'Shrink: Half size 2x speed',
+            'giant': 'Giant: Crush bricks/enemies',
+        }
+        # Current powerups on map
+        try:
+            powerups = getattr(game, 'powerups', [])
+            if powerups:
+                draw_line(f"ITEMS ON MAP ({len(powerups)}):", (180,220,255), self.font_mid)
+                for pu in powerups[:6]:  # show max 6 to avoid overflow, top 6 nearest?
+                    t = getattr(pu, 'type', 'unknown')
+                    # short icon
+                    icon = {
+                        'star': '★', 'gun': 'G', 'helmet': 'H', 'clock': 'C', 'shovel': 'S',
+                        'tank': 'T', 'grenade': 'B', 'homing': 'M', 'spread': '8', 'rapid': 'R',
+                        'shrink': 'm', 'giant': 'G!'
+                    }.get(t, '?')
+                    short_desc = desc_map.get(t, f"{t}: powerup")
+                    # truncate to fit
+                    line = f"{icon} {short_desc}"
+                    draw_line(line, (200,200,160), self.font_small)
+                if len(powerups) > 6:
+                    draw_line(f"+{len(powerups)-6} more", (150,150,150), self.font_small)
+            else:
+                draw_line("No items on map", (120,120,120), self.font_small)
+        except:
+            pass
+        draw_divider()
 
-            if statuses:
-                for st in statuses:
-                    if "MISSILE" in st:
-                        col = (255,140,0)
-                    elif "8-WAY" in st:
-                        col = (160,80,255)
-                    elif "RAPID" in st:
-                        col = (255,50,150)
-                    elif "MINI" in st:
-                        col = (80,220,255)
-                    elif "GIANT" in st:
-                        col = (255,80,80)
-                    elif "VENOM" in st:
-                        col = (80,220,80)
-                    else:
-                        col = (80,200,255)
-                    stat = self.font_small.render(st, True, col)
-                    screen.blit(stat, (xpos, ypos))
-                    ypos += 16
-            ypos += 12
+        # 5. Coins - minimal
+        draw_line(f"COINS: {game.coins} (C/5 = +10 lives)", COLOR_YELLOW, self.font_small)
 
-            pygame.draw.line(screen, (60,60,80), (xpos, ypos), (xpos+HUD_W-24, ypos), 1)
-            ypos += 12
+        # 6. Network status - very minimal, no long URLs (was cut off)
+        try:
+            if hasattr(game, '_network_starting') and game._network_starting:
+                draw_line("LAN: starting...", (100,200,255), self.font_small)
+            elif hasattr(game, 'network_host') and game.network_host and game.network_host.is_client_connected():
+                draw_line("Lida: CONNECTED (N kick)", (100,255,100), self.font_small)
+            elif hasattr(game, 'network_host_ip') and game.network_host_ip and game.network_host_ip != "starting...":
+                # Only show IP, not full command (was cut off)
+                draw_line(f"LAN: {game.network_host_ip}:9999", (100,200,255), self.font_small)
+                draw_line("P2: remote_client.py --host IP", (150,150,150), self.font_small)
+        except:
+            pass
 
-        coin_txt = self.font_mid.render(f"COINS: {game.coins}", True, COLOR_YELLOW)
-        screen.blit(coin_txt, (xpos, ypos))
-        ypos += 18
-        coin_hint = self.font_small.render(f"Each coin = {COIN_LIVES} lives", True, (200,200,100))
-        screen.blit(coin_hint, (xpos, ypos))
-        ypos += 18
-        for p in game.players:
-            if not p.alive and p.lives < 0:
-                try:
-                    from ..settings import get_player_display_name
-                    dname = get_player_display_name(p.player_id)
-                except:
-                    dname = f"P{p.player_id}"
-                need_txt = self.font_small.render(f"{dname} NEED COIN! Press C/5", True, COLOR_RED)
-                screen.blit(need_txt, (xpos, ypos))
-                ypos += 16
+        # 7. Boss if active
+        try:
+            if getattr(game, 'boss_released', False) and getattr(game, 'boss_enemy', None) and game.boss_enemy.alive:
+                boss = game.boss_enemy
+                hp_pct = getattr(boss, 'health', 0) / 18.0 if hasattr(boss, 'health') else 0
+                draw_line(f"BOSS HP {getattr(boss, 'health', '?')}/18", (255,80,80), self.font_mid)
+                bar_w = right_limit - xpos - 10
+                bar_h = 8
+                pygame.draw.rect(screen, (60,0,0), (xpos, ypos, bar_w, bar_h), border_radius=3)
+                pygame.draw.rect(screen, (80,255,80) if hp_pct>0.5 else (255,220,80) if hp_pct>0.25 else (255,80,80), (xpos, ypos, int(bar_w*hp_pct), bar_h), border_radius=3)
+                ypos += bar_h + 6
+        except:
+            pass
 
-        ypos += 6
-        pygame.draw.line(screen, (60,60,80), (xpos, ypos), (xpos+HUD_W-24, ypos), 1)
-        ypos += 10
+        # 8. Needs coin warning - compact
+        try:
+            need = [p for p in game.players if not p.alive and p.lives < 0]
+            if need:
+                draw_line("NEED COIN! C/5", COLOR_RED, self.font_mid)
+        except:
+            pass
 
-        hints = [
-            "Chad: WASD+SPACE",
-            "Lida: ARROWS+ENTER",
-            "C/5: Coin 1/2: Join",
-            "P: Pause ESC: Menu",
-            "F11: Full | Cmd+F Mac",
-            "Fn+F11 Mac | F10 Win",
-            "Joy: -:Coin +=Start",
-            "J:Rescan I:InvY U:InvX",
-        ]
-        for h in hints:
-            txt = self.font_small.render(h, True, (140,140,160))
-            screen.blit(txt, (xpos, ypos))
-            ypos += 16
-
-        if game.tilemap and game.tilemap.shovel_timer > 0:
-            secs = game.tilemap.shovel_timer // FPS
-            sh_txt = self.font_mid.render(f"BASE STEEL {secs}s", True, (255,220,80))
-            screen.blit(sh_txt, (xpos, PLAYFIELD_Y+PLAYFIELD_H-70))
-
-        if game.freeze_timer > 0:
-            secs = game.freeze_timer // FPS
-            f_txt = self.font_mid.render(f"FREEZE {secs}s", True, (150,200,255))
-            screen.blit(f_txt, (xpos, PLAYFIELD_Y+PLAYFIELD_H-50))
-
-        if getattr(game, 'boss_released', False) and getattr(game, 'boss_enemy', None) and game.boss_enemy.alive:
-            boss = game.boss_enemy
-            b_txt = self.font_mid.render(f"BOSS HP {boss.health}/18", True, (255,50,50))
-            screen.blit(b_txt, (xpos, PLAYFIELD_Y+PLAYFIELD_H-90))
-            bar_w = 80
-            bar_h = 10
-            bx = xpos
-            by = PLAYFIELD_Y+PLAYFIELD_H-70
-            pygame.draw.rect(screen, (0,0,0), (bx-1, by-1, bar_w+2, bar_h+2))
-            pygame.draw.rect(screen, (60,0,0), (bx, by, bar_w, bar_h))
-            frac = boss.health / 18.0
-            pygame.draw.rect(screen, (0,255,0) if frac>0.5 else (255,255,0) if frac>0.25 else (255,0,0), (bx, by, int(bar_w*frac), bar_h))
-
-        if any(not p.alive and p.lives < 0 for p in game.players):
-            urgent = self.font_mid.render("INSERT COIN!", True, COLOR_RED)
-            screen.blit(urgent, (xpos, PLAYFIELD_Y+PLAYFIELD_H-30))
-
-        if game.players:
-            p1_score = game.players[0].score if len(game.players)>0 else 0
-            p2_score = game.players[1].score if len(game.players)>1 else 0
-            # Use Chad/Lida names in score display
-            try:
+        # 9. Top bar - score concise
+        try:
+            if game.players:
+                p1 = game.players[0].score if len(game.players)>0 else 0
+                p2 = game.players[1].score if len(game.players)>1 else 0
                 from ..settings import PLAYER_NAMES
-                n1 = PLAYER_NAMES[0]
-                n2 = PLAYER_NAMES[1]
-            except:
-                n1, n2 = "Chad", "Lida"
-            top_text = f"SCORE {n1}:{p1_score} {n2}:{p2_score} HI:{game.high_score} COINS:{game.coins}"
-        else:
-            top_text = f"HI:{game.high_score} COINS:{game.coins}"
-        top_surf = self.font_small.render(top_text, True, (180,180,200))
-        screen.blit(top_surf, (PLAYFIELD_X, PLAYFIELD_Y-28))
+                n1 = PLAYER_NAMES[0] if len(PLAYER_NAMES)>0 else "Chad"
+                n2 = PLAYER_NAMES[1] if len(PLAYER_NAMES)>1 else "Lida"
+                top_text = f"{n1}:{p1} {n2}:{p2} HI:{game.high_score} C:{game.coins}"
+            else:
+                top_text = f"HI:{game.high_score} C:{game.coins}"
+            top_surf = self.font_small.render(top_text, True, (180,180,200))
+            screen.blit(top_surf, (PLAYFIELD_X, PLAYFIELD_Y-24))
+        except:
+            pass
 
     def draw_pause(self, screen, game=None):
         overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
