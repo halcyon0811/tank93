@@ -19,7 +19,11 @@ Second user can see host screen via screen sharing, TV, or same room - simple LA
 
 Extended: Could also implement full state sync where client runs its own game and receives state
 from host. For now, we do input-only forwarding for second player joining remotely.
+
+Added: Auto-discovery via broadcast on port 9998 for easier join without IP.
+Added: Comprehensive debug logging for Lida remote control issue (detailed logs in debug.db)
 """
+
 import socket
 import json
 import threading
@@ -30,9 +34,7 @@ DEFAULT_PORT = 9999
 DEFAULT_BROADCAST_PORT = 9998
 
 def get_local_ip():
-    """Get local IP for display, works on Mac/Linux/Win"""
     try:
-        # Try to get IP that would be used to connect to internet
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(("8.8.8.8", 80))
         ip = s.getsockname()[0]
@@ -40,11 +42,9 @@ def get_local_ip():
         return ip
     except:
         try:
-            # Fallback: gethostname
             hostname = socket.gethostname()
             ip = socket.gethostbyname(hostname)
             if ip.startswith("127."):
-                # Try en0 on Mac
                 import subprocess
                 try:
                     result = subprocess.check_output(["ifconfig", "en0"], text=True)
@@ -59,14 +59,13 @@ def get_local_ip():
             return "127.0.0.1"
 
 class NetworkHost:
-    """Host that receives remote P2 input"""
     def __init__(self, port=DEFAULT_PORT):
         self.port = port
         self.running = False
         self.thread = None
+        self.discovery_thread = None
         self.sock = None
         self.discovery_sock = None
-        self.discovery_thread = None
         self.remote_p2_input = {"dir": None, "shoot": False, "timestamp": 0}
         self.last_client_addr = None
         self.client_connected = False
@@ -81,21 +80,21 @@ class NetworkHost:
             self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             self.sock.bind(("0.0.0.0", self.port))
             self.sock.settimeout(0.5)
-            self.running = True
-            self.thread = threading.Thread(target=self._listen_loop, daemon=True)
-            self.thread.start()
-            # Also start discovery responder on broadcast port
             try:
                 self.discovery_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
                 self.discovery_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 self.discovery_sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
                 self.discovery_sock.bind(("0.0.0.0", DEFAULT_BROADCAST_PORT))
                 self.discovery_sock.settimeout(0.5)
+            except Exception as e:
+                print(f"[Network] Discovery socket failed: {e} (non-critical)")
+                self.discovery_sock = None
+            self.running = True
+            self.thread = threading.Thread(target=self._listen_loop, daemon=True)
+            self.thread.start()
+            if self.discovery_sock:
                 self.discovery_thread = threading.Thread(target=self._discovery_loop, daemon=True)
                 self.discovery_thread.start()
-                print(f"[Network] Discovery responder listening on 0.0.0.0:{DEFAULT_BROADCAST_PORT}")
-            except Exception as e:
-                print(f"[Network] Discovery responder failed to start (optional): {e}")
             ip = get_local_ip()
             print(f"[Network] Host listening on {ip}:{self.port} for remote P2")
             print(f"[Network] Remote player can join with: python3 remote_client.py --host {ip}")
@@ -109,27 +108,32 @@ class NetworkHost:
             return None
 
     def _discovery_loop(self):
-        """Respond to broadcast discovery requests from clients on same WiFi"""
         while self.running:
             try:
+                if not self.discovery_sock:
+                    time.sleep(0.5)
+                    continue
                 data, addr = self.discovery_sock.recvfrom(1024)
                 try:
                     msg = json.loads(data.decode('utf-8'))
                     if msg.get("type") == "discovery" and msg.get("player_id") == 2:
-                        # Reply with host info
                         ip = get_local_ip()
                         reply = {
                             "type": "host_info",
                             "ip": ip,
                             "port": self.port,
                             "game": "Tank93",
-                            "players": 1,  # could add current players
+                            "players": 1,
                             "timestamp": time.time()
                         }
                         self.discovery_sock.sendto(json.dumps(reply).encode('utf-8'), addr)
                         print(f"[Network] Discovery request from {addr}, replied with {ip}:{self.port}")
+                        try:
+                            from .logger_integration import safe_log_event
+                            safe_log_event("NETWORK", f"Discovery request from {addr} replied {ip}:{self.port}", level="INFO")
+                        except:
+                            pass
                 except json.JSONDecodeError:
-                    # Ignore non-JSON
                     pass
                 except Exception as e:
                     print(f"[Network] Discovery handling error: {e}")
@@ -141,14 +145,21 @@ class NetworkHost:
                 time.sleep(0.1)
 
     def _listen_loop(self):
+        try:
+            from .logger_integration import safe_log_gameplay, safe_log_event
+            HAS_DEBUG = True
+        except:
+            HAS_DEBUG = False
+            def safe_log_gameplay(*a, **kw): pass
+            def safe_log_event(*a, **kw): pass
+        packet_count = 0
         while self.running:
             try:
                 data, addr = self.sock.recvfrom(1024)
+                packet_count += 1
                 try:
                     msg = json.loads(data.decode('utf-8'))
-                    # Validate
                     if isinstance(msg, dict) and "player_id" in msg:
-                        # Also handle discovery via main port
                         if msg.get("type") == "discovery":
                             ip = get_local_ip()
                             reply = {
@@ -160,53 +171,73 @@ class NetworkHost:
                             }
                             self.sock.sendto(json.dumps(reply).encode('utf-8'), addr)
                             print(f"[Network] Discovery via main port from {addr}, replied")
+                            if HAS_DEBUG:
+                                safe_log_event("NETWORK", f"Discovery via main port from {addr}", level="INFO")
                             continue
                         with self.lock:
                             if msg.get("player_id") == 2:
+                                is_new = not self.client_connected
                                 self.remote_p2_input = {
                                     "dir": msg.get("dir"),
                                     "shoot": bool(msg.get("shoot", False)),
                                     "timestamp": time.time()
                                 }
                                 self.last_client_addr = addr
-                                if not self.client_connected:
-                                    print(f"[Network] Remote P2 connected from {addr}!")
+                                was_connected = self.client_connected
                                 self.client_connected = True
                                 self.client_last_seen = time.time()
-                        # Send ack
+                                if not was_connected:
+                                    print(f"[Network] Remote P2 (Lida) connected from {addr}!")
+                                if HAS_DEBUG:
+                                    if is_new or not was_connected:
+                                        safe_log_gameplay("NETWORK_LIDA_CONNECTED", data={"addr": str(addr), "packet_count": packet_count, "dir": msg.get("dir"), "shoot": msg.get("shoot")})
+                                        safe_log_event("NETWORK", f"Lida CONNECTED from {addr} dir={msg.get('dir')} shoot={msg.get('shoot')} pkt={packet_count}", level="INFO", extra={"addr": str(addr)}, with_stack=False)
+                                    elif packet_count % 60 == 0:
+                                        safe_log_gameplay("NETWORK_LIDA_INPUT", data={"addr": str(addr), "dir": msg.get("dir"), "shoot": msg.get("shoot"), "packet_count": packet_count})
                         try:
                             ack = json.dumps({"status": "ok", "received": msg.get("dir")}).encode()
                             self.sock.sendto(ack, addr)
                         except:
                             pass
                 except json.JSONDecodeError:
+                    if HAS_DEBUG:
+                        safe_log_event("NETWORK", f"JSON decode error from {addr}", level="WARN")
                     continue
             except socket.timeout:
-                # Check if client timed out
                 with self.lock:
                     if self.client_connected and time.time() - self.client_last_seen > 10:
                         print("[Network] Remote P2 disconnected (timeout)")
+                        if HAS_DEBUG:
+                            safe_log_gameplay("NETWORK_LIDA_DISCONNECT", data={"last_addr": str(self.last_client_addr), "packet_count": packet_count, "reason": "timeout 10s"})
+                            safe_log_event("NETWORK", f"Lida disconnected timeout after {packet_count} packets", level="WARN")
                         self.client_connected = False
                 continue
             except Exception as e:
                 if self.running:
                     print(f"[Network] Listen error: {e}")
+                    if HAS_DEBUG:
+                        safe_log_event("NETWORK", f"Listen error: {e}", level="ERROR", with_stack=True)
                 time.sleep(0.1)
 
     def get_remote_p2_input(self):
-        """Get latest remote P2 input, with timeout"""
         with self.lock:
-            # If no recent input (within 2 sec), treat as no input
-            if time.time() - self.remote_p2_input.get("timestamp", 0) > 2.0:
-                return {"dir": None, "shoot": False}
+            if time.time() - self.remote_p2_input.get("timestamp", 0) > 5.0:
+                return {"dir": None, "shoot": False, "timestamp": self.remote_p2_input.get("timestamp", 0)}
             return dict(self.remote_p2_input)
 
     def is_client_connected(self):
         with self.lock:
-            return self.client_connected and (time.time() - self.client_last_seen < 5)
+            return self.client_connected and (time.time() - self.client_last_seen < 10)
+
+    def get_last_seen(self):
+        with self.lock:
+            return self.client_last_seen
+
+    def get_client_addr(self):
+        with self.lock:
+            return self.last_client_addr
 
     def disconnect_client(self):
-        """Force disconnect remote P2 (Lida) - for host to allow 1P restart"""
         with self.lock:
             was_connected = self.client_connected
             self.client_connected = False
@@ -215,6 +246,12 @@ class NetworkHost:
             self.last_client_addr = None
         if was_connected:
             print("[Network] Remote P2 (Lida) manually disconnected by host")
+            try:
+                from .logger_integration import safe_log_gameplay, safe_log_event
+                safe_log_gameplay("NETWORK_LIDA_KICK", data={"reason": "manual disconnect by host"})
+                safe_log_event("NETWORK", "Lida manually disconnected by host", level="WARN")
+            except:
+                pass
         return was_connected
 
     def stop(self):
@@ -241,7 +278,6 @@ class NetworkHost:
                 pass
 
 class NetworkClient:
-    """Client that sends P2 input to host"""
     def __init__(self, host_ip, port=DEFAULT_PORT):
         self.host_ip = host_ip
         self.port = port
@@ -251,6 +287,7 @@ class NetworkClient:
     def start(self):
         try:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
             self.sock.settimeout(1.0)
             self.running = True
             print(f"[Network] Client will send P2 input to {self.host_ip}:{self.port}")
@@ -260,7 +297,6 @@ class NetworkClient:
             return False
 
     def send_input(self, direction, shoot):
-        """Send P2 input to host"""
         if not self.running or not self.sock:
             return False
         try:
@@ -284,3 +320,31 @@ class NetworkClient:
                 self.sock.close()
             except:
                 pass
+
+def discover_hosts(timeout=3.0):
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        sock.settimeout(timeout)
+        msg = json.dumps({"type": "discovery", "player_id": 2, "timestamp": time.time()}).encode('utf-8')
+        sock.sendto(msg, ('<broadcast>', DEFAULT_BROADCAST_PORT))
+        sock.sendto(msg, ('<broadcast>', DEFAULT_PORT))
+        print(f"[Discovery] Broadcasting for hosts on ports {DEFAULT_PORT} and {DEFAULT_BROADCAST_PORT}...")
+        hosts = []
+        start = time.time()
+        while time.time() - start < timeout:
+            try:
+                data, addr = sock.recvfrom(1024)
+                reply = json.loads(data.decode('utf-8'))
+                if reply.get("type") == "host_info":
+                    hosts.append((reply.get("ip"), reply.get("port", DEFAULT_PORT), addr))
+                    print(f"[Discovery] Found host at {reply.get('ip')}:{reply.get('port')} from {addr}")
+            except socket.timeout:
+                break
+            except Exception:
+                continue
+        sock.close()
+        return hosts
+    except Exception as e:
+        print(f"[Discovery] Failed: {e}")
+        return []
