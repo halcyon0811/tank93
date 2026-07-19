@@ -101,26 +101,46 @@ class HUD:
             # Name + lives
             pygame.draw.rect(screen, color, (xpos, ypos, 16, 16), border_radius=3)
             draw_line(f" {display_name}  LIFE x{max(0, p.lives if p.alive else p.lives)}", COLOR_WHITE, self.font_mid, indent=20)
-            # Score = points, damage approximated as score (each enemy 100-500)
-            # Also show kills if we can compute from score? Use score as damage
-            draw_line(f"Score: {p.score}  DMG: ~{p.score//10}", (200,200,200), self.font_small)
-            # Power stars
-            stars = '★'*p.star_level + '☆'*(3-p.star_level)
-            draw_line(f"Power: {stars}", COLOR_YELLOW, self.font_small)
-            # Armor bar - compact
+            # Score
+            draw_line(f"Score: {p.score}", (200,200,200), self.font_small)
+
+            # HP bar - renamed from ARMOR to HP (todo #1: power was actually life value which should be HP)
             if hasattr(p, 'armor') and hasattr(p, 'max_armor') and p.max_armor>0:
                 pct = max(0, p.armor/max(0.001,p.max_armor))
-                bar_w = right_limit - xpos - 70
-                bar_h = 8
+                bar_w = right_limit - xpos - 65
+                bar_h = 9
                 bx = xpos
                 by = ypos
+                # Label HP
+                hp_label = self.font_small.render("HP", True, (80,255,120))
+                screen.blit(hp_label, (bx, by-2))
+                bx += 22
+                bar_w -= 22
                 pygame.draw.rect(screen, (40,40,50), (bx, by, bar_w, bar_h), border_radius=3)
                 col = (80,200,100) if pct>0.5 else (220,200,80) if pct>0.25 else (220,80,80)
                 pygame.draw.rect(screen, col, (bx, by, int(bar_w*pct), bar_h), border_radius=3)
-                # text overlay
                 armor_txt = self.font_small.render(f"{int(p.armor)}/{p.max_armor}", True, (220,220,220))
                 screen.blit(armor_txt, (bx+bar_w+4, by-3))
                 ypos += bar_h + 6
+
+            # PWR - weapon damage index (todo #2: show power representing current weapon damage, more items = greater damage)
+            # Calculate power index: bullet_power + damage_bonus + star levels
+            try:
+                bp = getattr(p, 'bullet_power', 1)
+                bonus = getattr(p, 'bullet_damage_bonus', 0.0)
+                stars = p.star_level
+                extra = getattr(p, 'star_extra_count', 0)
+                # Power index formula: base bullet power + bonus + stars*0.5 + extra*0.5
+                pwr_index = bp + bonus + stars*0.5 + extra*0.3
+                # Also factor in rapid/homing/spread levels
+                pwr_index += getattr(p, 'homing_level', 0)*0.3 + getattr(p, 'spread_level', 0)*0.2 + getattr(p, 'rapid_level', 0)*0.2
+                star_visual = '★'*min(3,p.star_level) + '☆'*(3-min(3,p.star_level))
+                # Show PWR with one decimal and stars
+                draw_line(f"PWR: {pwr_index:.1f} {star_visual} (DMG x{pwr_index:.1f})", (255,220,80), self.font_small)
+            except:
+                # Fallback old power stars
+                stars = '★'*p.star_level + '☆'*(3-p.star_level)
+                draw_line(f"PWR: {stars}", COLOR_YELLOW, self.font_small)
 
             # Active buffs - concise tags
             buffs = []
