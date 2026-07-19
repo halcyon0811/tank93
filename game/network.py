@@ -33,30 +33,72 @@ import os
 DEFAULT_PORT = 9999
 DEFAULT_BROADCAST_PORT = 9998
 
-def get_local_ip():
+def get_all_local_ips():
+    """Get all local IPv4 addresses for display, for Lida join diagnostics"""
+    ips = []
     try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))
-        ip = s.getsockname()[0]
-        s.close()
-        return ip
-    except:
+        # Try via netifaces-like via socket gethostbyname_ex
+        import socket as _sock
+        hostname = _sock.gethostname()
         try:
-            hostname = socket.gethostname()
-            ip = socket.gethostbyname(hostname)
-            if ip.startswith("127."):
-                import subprocess
-                try:
-                    result = subprocess.check_output(["ifconfig", "en0"], text=True)
-                    for line in result.split("\n"):
-                        if "inet " in line and "127.0.0.1" not in line:
-                            ip = line.split()[1]
-                            break
-                except:
-                    pass
-            return ip
+            _, _, ip_list = _sock.gethostbyname_ex(hostname)
+            for ip in ip_list:
+                if not ip.startswith("127.") and "." in ip:
+                    if ip not in ips:
+                        ips.append(ip)
         except:
-            return "127.0.0.1"
+            pass
+        # Primary via 8.8.8.8 trick
+        try:
+            s = _sock.socket(_sock.AF_INET, _sock.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+            s.close()
+            if ip not in ips:
+                ips.insert(0, ip)
+        except:
+            pass
+        # Parse ifconfig for en0-en9
+        try:
+            import subprocess
+            for iface in ["en0", "en1", "en2", "en3", "wlan0", "eth0"]:
+                try:
+                    result = subprocess.check_output(["ifconfig", iface], text=True, stderr=subprocess.DEVNULL, timeout=1)
+                    for line in result.split("\n"):
+                        line=line.strip()
+                        if line.startswith("inet ") and "127.0.0.1" not in line:
+                            parts=line.split()
+                            # second token is ip
+                            ip = parts[1] if len(parts)>1 else None
+                            if ip and "." in ip and ip not in ips and not ip.startswith("169.254"):
+                                ips.append(ip)
+                except:
+                    continue
+        except:
+            pass
+    except:
+        pass
+    if not ips:
+        ips = ["127.0.0.1"]
+    return ips
+
+def get_local_ip():
+    ips = get_all_local_ips()
+    # Prefer 192.168.x or 10.x over others
+    for ip in ips:
+        if ip.startswith("192.168.") or ip.startswith("10."):
+            return ip
+    return ips[0] if ips else "127.0.0.1"
+
+def get_ip_subnet(ip):
+    """Return /24 subnet string e.g. 192.168.0.* -> 192.168.0."""
+    try:
+        parts = ip.split(".")
+        if len(parts)==4:
+            return ".".join(parts[:3]) + "."
+    except:
+        pass
+    return None
 
 class NetworkHost:
     def __init__(self, port=DEFAULT_PORT):
@@ -96,9 +138,20 @@ class NetworkHost:
                 self.discovery_thread = threading.Thread(target=self._discovery_loop, daemon=True)
                 self.discovery_thread.start()
             ip = get_local_ip()
-            print(f"[Network] Host listening on {ip}:{self.port} for remote P2")
-            print(f"[Network] Remote player can join with: python3 remote_client.py --host {ip}")
+            all_ips = get_all_local_ips()
+            print(f"[Network] Host listening on {ip}:{self.port} for remote P2 (all interfaces 0.0.0.0:{self.port})")
+            if len(all_ips)>1:
+                print(f"[Network] All local IPs: {', '.join(all_ips)}")
+                for aip in all_ips:
+                    print(f"  -> python3 remote_client.py --host {aip}")
+            else:
+                print(f"[Network] Remote player can join with: python3 remote_client.py --host {ip}")
             print(f"[Network] Or auto-discover: python3 remote_client.py (no --host)")
+            print(f"[Network] If Lida gets 'No route to host', check:")
+            print(f"  - Both on same WiFi (same SSID), not guest network with AP isolation")
+            print(f"  - macOS Firewall: System Settings -> Network -> Firewall -> allow Python")
+            print(f"  - Try ping from Lida: ping {ip}")
+            print(f"  - Host IP may change (DHCP), current: {ip}, all: {all_ips}")
             return ip
         except Exception as e:
             print(f"[Network] Failed to start host: {e}")
@@ -309,8 +362,24 @@ class NetworkClient:
                 "timestamp": time.time()
             }
             data = json.dumps(msg).encode('utf-8')
-            self.sock.sendto(data, (self.host_ip, self.port))
-            return True
+            # Use try to detect No route, but don't crash
+            try:
+                self.sock.sendto(data, (self.host_ip, self.port))
+                return True
+            except OSError as oe:
+                # Errno 65 No route to host - common when host IP changed or AP isolation
+                # Return False but don't spam every frame, caller handles counting
+                # For Lida case: 192.168.0.131 -> 192.168.0.194 No route
+                if "65" in str(oe) or "No route" in str(oe) or "Unreachable" in str(oe):
+                    # Only print first few times to avoid spam, but still return False
+                    if not hasattr(self, '_no_route_count'):
+                        self._no_route_count = 0
+                    self._no_route_count += 1
+                    if self._no_route_count <= 3 or self._no_route_count % 60 == 0:
+                        print(f"[Network] Send failed (No route to {self.host_ip}): {oe} (attempt {self._no_route_count})")
+                        if self._no_route_count == 3:
+                            print(f"  -> Lida checklist: same WiFi? firewall? host IP changed? Try discovery")
+                return False
         except Exception as e:
             print(f"[Network] Send failed: {e}")
             return False
@@ -323,30 +392,155 @@ class NetworkClient:
             except:
                 pass
 
-def discover_hosts(timeout=3.0):
+def discover_hosts(timeout=3.0, verbose=True):
+    """Broadcast discovery + subnet scan fallback for when broadcast blocked (Lida No route case)"""
+    hosts = []
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         sock.settimeout(timeout)
         msg = json.dumps({"type": "discovery", "player_id": 2, "timestamp": time.time()}).encode('utf-8')
-        sock.sendto(msg, ('<broadcast>', DEFAULT_BROADCAST_PORT))
-        sock.sendto(msg, ('<broadcast>', DEFAULT_PORT))
-        print(f"[Discovery] Broadcasting for hosts on ports {DEFAULT_PORT} and {DEFAULT_BROADCAST_PORT}...")
-        hosts = []
+        # Broadcast list - try all common subnets
+        bcasts = ['<broadcast>', '255.255.255.255', '192.168.0.255', '192.168.1.255', '10.0.0.255', '172.20.10.15']
+        # Also add subnet bcast based on own IP
+        my_ip = get_local_ip()
+        subnet = get_ip_subnet(my_ip)
+        if subnet:
+            bcasts.append(subnet + "255")
+        for bc in set(bcasts):
+            try:
+                sock.sendto(msg, (bc, DEFAULT_BROADCAST_PORT))
+                sock.sendto(msg, (bc, DEFAULT_PORT))
+            except:
+                pass
+        if verbose:
+            print(f"[Discovery] Broadcasting for hosts on ports {DEFAULT_PORT} and {DEFAULT_BROADCAST_PORT}... from {my_ip}")
         start = time.time()
         while time.time() - start < timeout:
             try:
                 data, addr = sock.recvfrom(1024)
-                reply = json.loads(data.decode('utf-8'))
-                if reply.get("type") == "host_info":
-                    hosts.append((reply.get("ip"), reply.get("port", DEFAULT_PORT), addr))
-                    print(f"[Discovery] Found host at {reply.get('ip')}:{reply.get('port')} from {addr}")
+                try:
+                    reply = json.loads(data.decode('utf-8', errors='replace'))
+                    if reply.get("type") == "host_info":
+                        ip = reply.get("ip") or addr[0]
+                        port = reply.get("port", DEFAULT_PORT)
+                        # deduplicate
+                        if (ip, port) not in [(h[0], h[1]) for h in hosts]:
+                            hosts.append((ip, port, addr))
+                            if verbose:
+                                print(f"[Discovery] Found host at {ip}:{port} from {addr} reply={reply}")
+                except:
+                    continue
             except socket.timeout:
                 break
             except Exception:
                 continue
         sock.close()
-        return hosts
     except Exception as e:
-        print(f"[Discovery] Failed: {e}")
-        return []
+        print(f"[Discovery] Broadcast failed: {e}")
+
+    # If broadcast found nothing, try subnet scan (fixes No route when broadcast blocked but unicast works)
+    if not hosts:
+        if verbose:
+            print(f"[Discovery] Broadcast found nothing, trying subnet scan fallback for Lida...")
+        my_ip = get_local_ip()
+        subnet = get_ip_subnet(my_ip)
+        if subnet:
+            hosts = scan_subnet_for_hosts(subnet, timeout_per_host=0.15, max_hosts=30, verbose=verbose)
+    return hosts
+
+def scan_subnet_for_hosts(subnet_prefix, timeout_per_host=0.2, max_hosts=40, verbose=True):
+    """Scan subnet (e.g. 192.168.0.) for hosts listening on 9999 via unicast discovery.
+    This bypasses broadcast blocking and AP isolation partial blocks. Used for Lida No route fix."""
+    found = []
+    my_ip = get_local_ip()
+    # Build list of IPs to try: .1 to .254 excluding self
+    # Prioritize .194 (previous host), .131 (client), and common .1, .100 etc
+    candidates = []
+    # First try likely host IPs from ARP table
+    try:
+        import subprocess
+        arp_ips = []
+        try:
+            out = subprocess.check_output(["arp", "-a"], text=True, timeout=2, stderr=subprocess.DEVNULL)
+            # parse lines like: ? (192.168.0.194) at ...
+            import re
+            for m in re.finditer(r"\((\d+\.\d+\.\d+\.\d+)\)", out):
+                ip = m.group(1)
+                if ip.startswith(subnet_prefix) and ip != my_ip:
+                    arp_ips.append(ip)
+        except:
+            pass
+        # Prioritize ARP ips first
+        for ip in arp_ips:
+            if ip not in candidates:
+                candidates.append(ip)
+    except:
+        pass
+    # Common router + typical host range near client
+    try:
+        base = int(my_ip.split(".")[-1])
+        # check nearby 10 around client
+        for offset in range(-10, 11):
+            ip_num = base + offset
+            if 1 <= ip_num <= 254:
+                ip = f"{subnet_prefix}{ip_num}"
+                if ip != my_ip and ip not in candidates:
+                    candidates.append(ip)
+    except:
+        pass
+    # Then fill rest 1-254 but limited to max_hosts
+    for i in range(1, 255):
+        ip = f"{subnet_prefix}{i}"
+        if ip == my_ip or ip in candidates:
+            continue
+        if len(candidates) >= max_hosts:
+            break
+        candidates.append(ip)
+
+    if verbose:
+        print(f"[Discovery] Subnet scan {subnet_prefix}0/24 (my IP {my_ip}), checking {len(candidates)} hosts via unicast discovery...")
+
+    # Use thread pool for fast scan
+    import threading
+    lock = threading.Lock()
+
+    def try_host(target_ip):
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            s.settimeout(timeout_per_host)
+            msg = json.dumps({"type": "discovery", "player_id": 2, "timestamp": time.time()}).encode()
+            s.sendto(msg, (target_ip, DEFAULT_PORT))
+            s.sendto(msg, (target_ip, DEFAULT_BROADCAST_PORT))
+            try:
+                data, addr = s.recvfrom(1024)
+                reply = json.loads(data.decode('utf-8', errors='replace'))
+                if reply.get("type") == "host_info":
+                    with lock:
+                        ip = reply.get("ip") or addr[0]
+                        port = reply.get("port", DEFAULT_PORT)
+                        if (ip, port) not in [(h[0], h[1]) for h in found]:
+                            found.append((ip, port, addr))
+                            if verbose:
+                                print(f"[Discovery] Subnet scan FOUND host at {ip}:{port} (via {target_ip}) from {addr}")
+            except socket.timeout:
+                pass
+            except:
+                pass
+            s.close()
+        except:
+            pass
+
+    threads = []
+    for t_ip in candidates[:max_hosts]:
+        th = threading.Thread(target=try_host, args=(t_ip,), daemon=True)
+        th.start()
+        threads.append(th)
+        # Small stagger to avoid flood
+        time.sleep(0.005)
+
+    for th in threads:
+        th.join(timeout=1.0)
+
+    return found
