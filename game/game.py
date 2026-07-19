@@ -1108,19 +1108,44 @@ class Game:
                     pass
 
             if event.type in (pygame.MOUSEBUTTONDOWN, pygame.MOUSEBUTTONUP):
-                if self.state == 'menu' and event.type == pygame.MOUSEBUTTONDOWN:
-                    # Ignore mouse clicks in first 60 frames (avoid accidental trackpad)
-                    if getattr(self, 'menu_stuck_timer', 0) > 60:
-                        print(f"Mouse click to start menu {self.menu_selected}")
-                        self.handle_menu_select()
-                    else:
-                        print(f"Ignoring early mouse click at frame {self.menu_stuck_timer}")
-                elif self.state == 'paused' and event.type == pygame.MOUSEBUTTONDOWN:
-                    # Robust pause: mouse click also resumes
-                    _trace_log("INPUT", f"Mouse click in PAUSED -> resume", level="INFO")
-                    old = self.state
-                    self.state = 'playing'
-                    _trace_state_change(old, 'playing', "MOUSE resume from pause")
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    # Check HUD explicit shortcut buttons first (P Pause, C Coin) - work in any state
+                    try:
+                        mx, my = event.pos
+                        if hasattr(self, '_hud_pause_rect') and self._hud_pause_rect.collidepoint(mx, my):
+                            # P = Pause/Resume toggle
+                            if self.state == 'playing':
+                                old = self.state
+                                self.state = 'paused'
+                                _trace_log("INPUT", f"HUD PAUSE button clicked -> paused", level="INFO")
+                                _trace_state_change(old, 'paused', "HUD PAUSE button")
+                            elif self.state == 'paused':
+                                old = self.state
+                                self.state = 'playing'
+                                _trace_log("INPUT", f"HUD RESUME button clicked -> playing", level="INFO")
+                                _trace_state_change(old, 'playing', "HUD RESUME button")
+                            continue
+                        if hasattr(self, '_hud_coin_rect') and self._hud_coin_rect.collidepoint(mx, my):
+                            # C = Coin
+                            print(f"[HUD] Coin button clicked")
+                            self.insert_coin()
+                            continue
+                    except:
+                        pass
+
+                    if self.state == 'menu':
+                        # Ignore mouse clicks in first 60 frames (avoid accidental trackpad)
+                        if getattr(self, 'menu_stuck_timer', 0) > 60:
+                            print(f"Mouse click to start menu {self.menu_selected}")
+                            self.handle_menu_select()
+                        else:
+                            print(f"Ignoring early mouse click at frame {self.menu_stuck_timer}")
+                    elif self.state == 'paused':
+                        # Robust pause: mouse click also resumes
+                        _trace_log("INPUT", f"Mouse click in PAUSED -> resume", level="INFO")
+                        old = self.state
+                        self.state = 'playing'
+                        _trace_state_change(old, 'playing', "MOUSE resume from pause")
 
             if event.type == pygame.JOYHATMOTION:
                 try:

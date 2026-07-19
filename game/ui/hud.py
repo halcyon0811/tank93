@@ -184,8 +184,11 @@ class HUD:
             pass
         draw_divider()
 
-        # 5. Coins - minimal
-        draw_line(f"COINS: {game.coins} (C/5 = +10 lives)", COLOR_YELLOW, self.font_small)
+        # 5. Coins - explicit, no more C/5 jargon
+        draw_line(f"COINS: {game.coins}", COLOR_YELLOW, self.font_mid)
+        draw_line(f"[C] = Insert Coin (+10 lives)", (200,200,120), self.font_small)
+        draw_line(f"[P] = Pause / Resume", (150,200,255), self.font_small)
+        draw_line(f"[1] [2] = Join as Chad/Lida", (160,160,160), self.font_small)
 
         # 6. Network status - very minimal, no long URLs (was cut off)
         try:
@@ -214,13 +217,42 @@ class HUD:
         except:
             pass
 
-        # 8. Needs coin warning - compact
+        # 8. Needs coin warning - explicit
         try:
             need = [p for p in game.players if not p.alive and p.lives < 0]
             if need:
-                draw_line("NEED COIN! C/5", COLOR_RED, self.font_mid)
+                draw_line("NEED COIN! Press [C]", COLOR_RED, self.font_mid)
+                draw_line("C = letter C key", (255,200,200), self.font_small)
         except:
             pass
+
+        # 9. Explicit shortcuts section - user requested clear P and C buttons
+        draw_divider()
+        ypos += 2
+        # Draw as clickable-looking buttons
+        btn_w = (right_limit - xpos - 6) // 2
+        btn_h = 26
+        # P button
+        p_rect = pygame.Rect(xpos, ypos, btn_w, btn_h)
+        pygame.draw.rect(screen, (40,80,120), p_rect, border_radius=6)
+        pygame.draw.rect(screen, (80,160,220), p_rect, 2, border_radius=6)
+        p_txt = self.font_mid.render("P = PAUSE", True, (200,230,255))
+        screen.blit(p_txt, p_txt.get_rect(center=p_rect.center))
+        # C button
+        c_rect = pygame.Rect(xpos+btn_w+6, ypos, btn_w, btn_h)
+        pygame.draw.rect(screen, (100,90,20), c_rect, border_radius=6)
+        pygame.draw.rect(screen, (220,200,80), c_rect, 2, border_radius=6)
+        c_txt = self.font_mid.render("C = COIN", True, (255,240,180))
+        screen.blit(c_txt, c_txt.get_rect(center=c_rect.center))
+        # Store rects for click handling
+        try:
+            game._hud_pause_rect = p_rect
+            game._hud_coin_rect = c_rect
+        except:
+            pass
+        ypos += btn_h + 8
+        # Small hint below buttons
+        draw_line("Click buttons or press keys", (120,120,120), self.font_small)
 
         # 9. Top bar - score concise
         try:
@@ -585,7 +617,8 @@ class HUD:
                     f"Continue Timer: {secs}s",
                     "",
                     "CONTROLS:",
-                    "  Press C or 5 = Insert Coin (+10 Lives)",
+                    "  Press [C] (letter C) = Insert Coin (+10 Lives)  - also 5 key",
+                    "  Press [P] = Pause / Resume",
                     "  Press 1 = Chad Join / Continue  |  Press 2 = Lida Join",
                     "  Joy-Con: Minus (-) = Coin  |  Plus (+) = Start/Join",
                     "",
@@ -607,7 +640,7 @@ class HUD:
                     except:
                         dname = ["Chad", "Lida"][p.player_id-1] if 1 <= p.player_id <= 2 else f"P{p.player_id}"
                     if p.lives < 0 and not p.alive:
-                        status = f"{dname} DEAD - Press C/5 for {COIN_LIVES} Lives or {p.player_id} to Join"
+                        status = f"{dname} DEAD - Press [C] for {COIN_LIVES} Lives or {p.player_id} to Join (C = letter C key)"
                         c = COLOR_RED
                     else:
                         status = f"{dname} Lives: {p.lives}"
