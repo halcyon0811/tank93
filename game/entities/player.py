@@ -532,15 +532,40 @@ class PlayerTank(Tank):
         return cx + dx * offset, cy + dy * offset
 
     def shoot(self):
-        # Check if we can shoot at all (considers max bullets)
-        # For spread and rapid, we need to allow more bullets
+        # Check if we can shoot at all (considers max bullets) - UPDATED for stacked firing
+        # User request: spread + homing should fire BOTH, not replace
         max_b = MAX_BULLETS['player'] if isinstance(MAX_BULLETS['player'], int) else 2
         alive = len([b for b in self.bullets if b.alive])
 
-        if self.spread_active:
+        # Calculate how many bullets we will fire this shot
+        will_fire = 1
+        if self.spread_active and self.homing_active:
+            # 8 spread + homing missiles
+            h_level = getattr(self, 'homing_level', 1)
+            num_h = 1 if h_level == 1 else min(3, 1 + (h_level // 2))
+            will_fire = 8 + num_h
+        elif self.spread_active:
+            will_fire = 8
+        elif self.homing_active:
+            h_level = getattr(self, 'homing_level', 1)
+            will_fire = 1 if h_level == 1 else min(3, 1 + (h_level // 2))
+
+        if self.spread_active and self.homing_active:
+            # Both: allow up to max*8 (spread 8 + homing 3 + buffer)
+            limit = max_b * 8
+            if self.rapid_active:
+                limit = max_b * 10
+            if alive >= limit:
+                return None
+        elif self.spread_active:
             # For spread, need at least 1 slot free, but allow up to max*4
             # If rapid also active, allow even more (max*6) for 3x attack
             limit = max_b * 6 if self.rapid_active else max_b * 4
+            if alive >= limit:
+                return None
+        elif self.homing_active:
+            # Homing: allow 3x for stacking
+            limit = max_b * 4 if self.rapid_active else max_b * 3
             if alive >= limit:
                 return None
         elif self.rapid_active:
@@ -560,45 +585,43 @@ class PlayerTank(Tank):
             # Mix base color with rapid pink
             base_color = (min(255, base_color[0]+30), base_color[1], min(255, base_color[2]+30)) if isinstance(base_color, tuple) else base_color
 
-        # Determine bullet type with synergy support
-        # Synergy: weapon enforcement (bullet_power>=2 / star_level>=3 / gun) + homing = powerful missile
-        # Small + giant already handled in update_size_state above
+        # Determine bullet type with synergy support - NEW: spread and homing stack, don't replace each other (user request)
+        # Previously spread+homing merged into 8 homing missiles, replacing spread. Now fire BOTH: 8 dir bullets + homing missile(s)
         has_power = self.bullet_power >= 2 or self.star_level >= 3
         has_homing = self.homing_active
         has_spread = self.spread_active
         has_rapid = self.rapid_active
 
-        def get_bullet_type_for_player():
-            # Synergy takes precedence
-            if has_homing and has_power and has_spread:
-                return 'power_homing_spread'  # ultimate: 8 powerful homing missiles
-            elif has_homing and has_power:
-                return 'power_homing'  # powerful tracking missile
-            elif has_homing and has_spread:
-                return 'homing'  # 8 homing (not necessarily power)
-            elif has_homing:
-                return 'homing'
-            elif has_spread and has_power and has_rapid:
+        def get_spread_bullet_type():
+            # Spread type without homing component - for when we fire spread separately
+            if has_power and has_rapid:
                 return 'power_spread_rapid'
-            elif has_spread and has_power:
+            elif has_power:
                 return 'power_spread'
-            elif has_spread and has_rapid:
-                return 'spread'
-            elif has_spread:
-                return 'spread'
-            elif has_rapid and has_power:
-                return 'power_rapid'
             elif has_rapid:
-                return 'rapid'
+                return 'spread'
+            else:
+                return 'spread'
+
+        def get_homing_bullet_type():
+            if has_power:
+                return 'power_homing'
+            else:
+                return 'homing'
+
+        def get_normal_bullet_type():
+            if has_power and has_rapid:
+                return 'power_rapid'
             elif has_power:
                 return 'power'
+            elif has_rapid:
+                return 'rapid'
             else:
                 return 'normal'
 
-        # Power synergy bonuses
+        # Power synergy bonuses (for logging)
         power_synergy = has_power and has_homing
         if power_synergy:
-            # Log synergy activation occasionally (not every shot to avoid spam)
             try:
                 if not hasattr(self, '_synergy_log_timer'):
                     self._synergy_log_timer = 0
@@ -609,129 +632,144 @@ class PlayerTank(Tank):
             except:
                 pass
 
-        if self.spread_active:
-            # Fire 8 directions at once - with synergy for power missiles
+        # NEW LOGIC: fire spread and homing separately so they don't replace each other
+        # If both active, you get 8 spread bullets + homing missiles (9+ total) - user request
+        if has_spread:
+            # Fire 8 directions at once - NON-HOMING spread (so homing doesn't replace it)
+            # Spread bullets are normal/spread type, not homing
             for d in EIGHT_DIRS:
                 sx, sy = self.get_bullet_spawn_for(d)
-                is_homing = self.homing_active
-                # Color synergy: power+homing = bright yellow-white powerful missile
-                if power_synergy and is_homing:
-                    col = (255, 240, 100)  # power homing = bright gold
-                elif is_homing:
-                    col = (255, 140, 0)  # normal homing orange
-                else:
-                    if self.rapid_active and not is_homing:
-                        col = (255, 100, 150)  # rapid pink (fix: was referencing undefined col)
-                    else:
-                        col = base_color
-                        if has_power:
-                            col = (255, 224, 64)  # power = yellow
-
-                b_type = get_bullet_type_for_player()
-                # Adjust power for synergy
-                bullet_power = self.bullet_power
-                if power_synergy:
-                    bullet_power = 2  # power homing is always power 2
-                    # Even more: if star level 3 + homing + spread, power 2 still but extra effects via type
-                if is_homing and has_power:
-                    b_type = 'power_homing' if 'power_homing' not in b_type else b_type
-
-                bullet = Bullet(sx, sy, d, f"player{self.player_id}", power=bullet_power, color=col, homing=is_homing, bullet_type=b_type)
-                if is_homing:
-                    import random as _rnd
-                    bullet.replan_timer = _rnd.randint(0, 25)
-                    # Stacking: homing_level increases speed and agility
-                    level = getattr(self, 'homing_level', 1)
-                    if level > 1:
-                        bullet.speed *= (1.0 + (level-1)*0.08)  # +8% per extra homing level
-                        if hasattr(bullet, 'turn_speed'):
-                            bullet.turn_speed *= (1.0 + (level-1)*0.12)
-                    if power_synergy:
-                        bullet.speed *= 1.3  # powerful missile faster
-                        bullet.turn_speed = getattr(bullet, 'turn_speed', 0.068) * (1.2 + (level-1)*0.1)
-                        # Power homing also gets damage bonus from bullet_damage_bonus
-                        bullet.power = bullet_power + self.bullet_damage_bonus * 0.3
-                if self.rapid_active and not is_homing:
-                    # Rapid level increases speed
-                    r_level = getattr(self, 'rapid_level', 1)
-                    bullet.speed *= (1.2 + (r_level-1)*0.15)
-                elif self.rapid_active and is_homing:
-                    r_level = getattr(self, 'rapid_level', 1)
-                    if power_synergy:
-                        bullet.speed *= (1.35 + (r_level-1)*0.1)
-                    else:
-                        bullet.speed *= (1.2 + (r_level-1)*0.08)
-                # Apply general damage bonus
-                bullet.power = bullet_power + self.bullet_damage_bonus * 0.2
-                self.bullets.append(bullet)
-                bullets_created.append(bullet)
-            base_cd = 25
-            # Power synergy and stacking reduces cooldown
-            if power_synergy:
-                base_cd = max(5, base_cd - 3 - self.homing_level)
-            # Rapid level reduces cooldown further
-            if self.rapid_active:
-                base_cd = max(3, base_cd - self.rapid_level*2)
-            self.cooldown = max(2, base_cd // 3) if self.rapid_active else max(3, base_cd)
-        else:
-            sx, sy = self.get_bullet_spawn()
-            is_homing = self.homing_active
-            if power_synergy and is_homing:
-                col = (255, 240, 100)  # power homing gold
-            elif is_homing:
-                col = (255, 140, 0)
-            else:
-                if self.rapid_active and not is_homing:
-                    col = (255, 50, 150)
+                # Spread never homing in new logic - homing is separate missile
+                is_homing = False
+                if has_rapid:
+                    col = (255, 100, 150)  # rapid pink
                 else:
                     col = base_color
                     if has_power:
-                        col = (255, 224, 64)
+                        col = (255, 224, 64)  # power yellow
 
-            b_type = get_bullet_type_for_player()
-            bullet_power = self.bullet_power
-            if power_synergy:
-                bullet_power = 2 + self.star_extra_count // 2
+                b_type = get_spread_bullet_type()
+                bullet_power = self.bullet_power
+                if has_power:
+                    bullet_power = max(2, bullet_power) if b_type.startswith('power') else bullet_power
 
-            bullet = Bullet(sx, sy, self.direction, f"player{self.player_id}", power=bullet_power, color=col, homing=is_homing, bullet_type=b_type)
-            if is_homing:
-                level = getattr(self, 'homing_level', 1)
+                bullet = Bullet(sx, sy, d, f"player{self.player_id}", power=bullet_power, color=col, homing=False, bullet_type=b_type)
+                if self.rapid_active:
+                    r_level = getattr(self, 'rapid_level', 1)
+                    bullet.speed *= (1.2 + (r_level-1)*0.15)
+                bullet.power = bullet_power + self.bullet_damage_bonus * 0.2
+                self.bullets.append(bullet)
+                bullets_created.append(bullet)
+
+        if has_homing:
+            # Fire homing missile(s) in facing direction - separate from spread
+            # Number of homing missiles scales with homing_level (1 + level//2) to reward stacking
+            h_level = getattr(self, 'homing_level', 1)
+            num_missiles = 1 if h_level == 1 else min(3, 1 + (h_level // 2))  # level 1:1, 2:2, 3:2, 4:3 etc
+            # If spread also active, we still fire homing in facing direction in addition to spread 8-dir
+            # Slight spread for multiple homing missiles
+            for mi in range(num_missiles):
+                sx, sy = self.get_bullet_spawn()
+                # Offset multiple missiles slightly
+                if num_missiles > 1:
+                    offset = (mi - (num_missiles-1)/2) * 8
+                    # perpendicular offset
+                    import math as _m
+                    dx, dy = DIRS.get(self.direction, (0,-1))
+                    # perp
+                    sx += -dy * offset
+                    sy += dx * offset
+
                 if power_synergy:
-                    bullet.speed *= (1.3 + (level-1)*0.08)
-                    if hasattr(bullet, 'turn_speed'):
-                        bullet.turn_speed *= (1.2 + (level-1)*0.12)
+                    col = (255, 240, 100)  # power homing gold
                 else:
-                    if level > 1:
-                        bullet.speed *= (1.0 + (level-1)*0.08)
-                        if hasattr(bullet, 'turn_speed'):
-                            bullet.turn_speed *= (1.0 + (level-1)*0.12)
-            if self.rapid_active and not is_homing:
+                    col = (255, 140, 0)  # orange missile
+
+                b_type = get_homing_bullet_type()
+                bullet_power = self.bullet_power
+                if power_synergy:
+                    bullet_power = 2 + self.star_extra_count // 2
+
+                bullet = Bullet(sx, sy, self.direction, f"player{self.player_id}", power=bullet_power, color=col, homing=True, bullet_type=b_type)
+                import random as _rnd
+                bullet.replan_timer = _rnd.randint(0, 25)
+                level = h_level
+                if level > 1:
+                    bullet.speed *= (1.0 + (level-1)*0.08)
+                    if hasattr(bullet, 'turn_speed'):
+                        bullet.turn_speed *= (1.0 + (level-1)*0.12)
+                if power_synergy:
+                    bullet.speed *= 1.3
+                    if hasattr(bullet, 'turn_speed'):
+                        bullet.turn_speed *= (1.2 + (level-1)*0.1)
+                if has_rapid:
+                    r_level = getattr(self, 'rapid_level', 1)
+                    if has_power:
+                        bullet.speed *= (1.35 + (r_level-1)*0.1)
+                    else:
+                        bullet.speed *= (1.2 + (r_level-1)*0.08)
+                bullet.power = bullet_power + self.bullet_damage_bonus * (0.3 if power_synergy else 0.25)
+                self.bullets.append(bullet)
+                bullets_created.append(bullet)
+
+        if not has_spread and not has_homing:
+            # Normal single shot (with rapid/power)
+            sx, sy = self.get_bullet_spawn()
+            is_homing = False
+            if has_rapid:
+                col = (255, 50, 150)
+            else:
+                col = base_color
+                if has_power:
+                    col = (255, 224, 64)
+
+            b_type = get_normal_bullet_type()
+            bullet_power = self.bullet_power
+            if has_power and b_type.startswith('power'):
+                bullet_power = max(2, bullet_power + self.star_extra_count // 2)
+
+            bullet = Bullet(sx, sy, self.direction, f"player{self.player_id}", power=bullet_power, color=col, homing=False, bullet_type=b_type)
+            if has_rapid:
                 r_level = getattr(self, 'rapid_level', 1)
                 bullet.speed *= (1.2 + (r_level-1)*0.15)
-            elif self.rapid_active and is_homing:
-                r_level = getattr(self, 'rapid_level', 1)
-                if has_power:
-                    bullet.speed *= (1.35 + (r_level-1)*0.1)
-                else:
-                    bullet.speed *= (1.2 + (r_level-1)*0.08)
-            # General damage bonus from stacking
             bullet.power = bullet_power + self.bullet_damage_bonus * 0.25
             self.bullets.append(bullet)
             bullets_created.append(bullet)
-            base_cd = 15 if self.star_level >= 1 else 20
-            if power_synergy:
-                base_cd = max(4, base_cd - 2)
-            self.cooldown = max(3, base_cd // 3) if self.rapid_active else base_cd
 
-        # Better shooting sounds - choose type based on synergy
+        # Cooldown handling - adjusted for combined firing (spread+homing fires more bullets, needs slightly higher cd)
+        if has_spread and has_homing:
+            # Both: spread 8 + homing 1-3 = 9-11 bullets, use average cooldown
+            base_cd = 28
+            if has_power:
+                base_cd = max(6, base_cd - 3 - self.homing_level)
+            if has_rapid:
+                base_cd = max(4, base_cd - self.rapid_level*2)
+            self.cooldown = max(3, base_cd // 3) if has_rapid else max(4, base_cd)
+        elif has_spread:
+            base_cd = 25
+            if power_synergy:
+                base_cd = max(5, base_cd - 3 - self.homing_level)
+            if has_rapid:
+                base_cd = max(3, base_cd - self.rapid_level*2)
+            self.cooldown = max(2, base_cd // 3) if has_rapid else max(3, base_cd)
+        else:
+            # homing only or normal
+            base_cd = 15 if self.star_level >= 1 else 20
+            if has_homing and power_synergy:
+                base_cd = max(4, base_cd - 2)
+            self.cooldown = max(3, base_cd // 3) if has_rapid else base_cd
+
+        # Better shooting sounds - updated for stacked firing (both spread+homing fire together)
         try:
             from ..sound_manager import sound_manager
-            if has_homing and has_power and has_spread:
-                shoot_type = 'power'  # ultimate - power sound
+            if has_spread and has_homing:
+                # Both active: play power if power else combined sound - use power for ultimate feel
+                if has_power:
+                    shoot_type = 'power'
+                else:
+                    shoot_type = 'spread'  # spread sound dominates when both, homing has its own trail
             elif has_homing and has_power:
-                shoot_type = 'power'  # powerful missile uses power sound for impact
-            elif has_homing and has_spread:
-                shoot_type = 'homing'
+                shoot_type = 'power'
             elif has_homing:
                 shoot_type = 'homing'
             elif has_spread and has_rapid:
