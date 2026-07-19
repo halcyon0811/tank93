@@ -29,8 +29,12 @@ class Tank:
         self.grid_y = grid_y
         self.is_mega = is_mega if is_mega is not None else MEGA_ENABLED
         self.tile_size = MEGA_TILE_SIZE if self.is_mega else TILE_SIZE
-        self.x = PLAYFIELD_X + grid_x * self.tile_size + self.tile_size//2
-        self.y = PLAYFIELD_Y + grid_y * self.tile_size + self.tile_size//2
+        raw_x = PLAYFIELD_X + grid_x * self.tile_size + self.tile_size//2
+        raw_y = PLAYFIELD_Y + grid_y * self.tile_size + self.tile_size//2
+        # Clamp spawn to fully inside playfield (fix enemy outside map bug when spawning at 0,0)
+        # Previously grid 0 gave center 60, left 44 which is outside PLAYFIELD_X 48
+        self.x = max(PLAYFIELD_X + TANK_SIZE//2, min(PLAYFIELD_X + PLAYFIELD_W - TANK_SIZE//2, raw_x))
+        self.y = max(PLAYFIELD_Y + TANK_SIZE//2, min(PLAYFIELD_Y + PLAYFIELD_H - TANK_SIZE//2, raw_y))
         # Use full TANK_SIZE for collision to avoid visual overlapping with bricks
         self.base_size = TANK_SIZE
         self.current_scale = 1.0
@@ -155,8 +159,11 @@ class Tank:
     def set_position(self, grid_x, grid_y):
         self.grid_x = grid_x
         self.grid_y = grid_y
-        self.x = PLAYFIELD_X + grid_x * self.tile_size + self.tile_size//2
-        self.y = PLAYFIELD_Y + grid_y * self.tile_size + self.tile_size//2
+        raw_x = PLAYFIELD_X + grid_x * self.tile_size + self.tile_size//2
+        raw_y = PLAYFIELD_Y + grid_y * self.tile_size + self.tile_size//2
+        # Clamp to fully inside (fix outside map bug)
+        self.x = max(PLAYFIELD_X + TANK_SIZE//2, min(PLAYFIELD_X + PLAYFIELD_W - TANK_SIZE//2, raw_x))
+        self.y = max(PLAYFIELD_Y + TANK_SIZE//2, min(PLAYFIELD_Y + PLAYFIELD_H - TANK_SIZE//2, raw_y))
         self.rect.center = (self.x, self.y)
 
     def get_bullet_spawn(self):
@@ -236,24 +243,23 @@ class Tank:
         new_rect = self.rect.copy()
         new_rect.center = (new_x, new_y)
 
-        # bounds - FIXED edge stuck bug (user reports tank stuck attached to edge)
-        # Previous fix with tolerance helped but still allowed tank to drift outside then get permanently blocked
-        # New robust fix:
-        # 1) Always clamp current position if already outside (prevent permanent stuck)
-        # 2) For movement, check if new position would go further outside than current - only block that axis
-        # 3) Allow sliding: if moving diagonally and X blocked but Y not, allow Y movement (slide along edge)
-        # 4) Clamp new position to playfield bounds + small tolerance
-        edge_tolerance = 14
-        # If current position already outside tolerance, pull back in immediately (auto-correct)
-        if self.rect.left < PLAYFIELD_X - edge_tolerance*2 or self.rect.right > PLAYFIELD_X + PLAYFIELD_W + edge_tolerance*2 or \
-           self.rect.top < PLAYFIELD_Y - edge_tolerance*2 or self.rect.bottom > PLAYFIELD_Y + PLAYFIELD_H + edge_tolerance*2:
-            # Emergency clamp
+        # bounds - FIXED edge stuck + enemy outside map bug (user reports enemy tank outside boundary)
+        # Previous tolerance=14 allowed tank to be 14px outside playfield, looking like outside map
+        # New: strict inside bounds, no outside tolerance for final position, but allow sliding
+        # 1) Emergency clamp if already outside (prevent permanent outside)
+        # 2) Block movement that would go outside playfield
+        # 3) Allow sliding: if moving diagonally, allow the axis that stays inside
+        edge_tolerance = 2  # minimal tolerance for smooth sliding, not 14 which allowed outside
+        # If current position already outside (enemy outside bug), pull back in immediately
+        if self.rect.left < PLAYFIELD_X - edge_tolerance or self.rect.right > PLAYFIELD_X + PLAYFIELD_W + edge_tolerance or \
+           self.rect.top < PLAYFIELD_Y - edge_tolerance or self.rect.bottom > PLAYFIELD_Y + PLAYFIELD_H + edge_tolerance:
+            # Emergency clamp fully inside (no tolerance for final pos)
             cx = max(PLAYFIELD_X + TANK_SIZE//2, min(PLAYFIELD_X + PLAYFIELD_W - TANK_SIZE//2, self.x))
             cy = max(PLAYFIELD_Y + TANK_SIZE//2, min(PLAYFIELD_Y + PLAYFIELD_H - TANK_SIZE//2, self.y))
-            if abs(cx - self.x) > 1 or abs(cy - self.y) > 1:
+            if abs(cx - self.x) > 0.5 or abs(cy - self.y) > 0.5:
                 try:
                     from .logger_integration import safe_log_gameplay
-                    safe_log_gameplay("EDGE_AUTO_CLAMP", data={"old_x": self.x, "old_y": self.y, "new_x": cx, "new_y": cy})
+                    safe_log_gameplay("EDGE_AUTO_CLAMP", data={"old_x": self.x, "old_y": self.y, "new_x": cx, "new_y": cy, "reason": "outside map"})
                 except:
                     pass
             self.x = cx
@@ -264,33 +270,35 @@ class Tank:
             new_rect = self.rect.copy()
             new_rect.center = (new_x, new_y)
 
-        # Check X bounds
+        # Check X bounds - strict: tank must stay fully inside playfield
         x_blocked = False
-        if new_rect.left < PLAYFIELD_X - edge_tolerance:
-            # Moving left further outside? Block only if dx<0
+        if new_rect.left < PLAYFIELD_X:
             if dx < 0:
                 x_blocked = True
+                new_x = max(new_x, PLAYFIELD_X + new_rect.width//2)
             else:
-                # Clamp to edge, allow Y movement
-                new_x = max(new_x, PLAYFIELD_X + new_rect.width//2 - edge_tolerance)
-        if new_rect.right > PLAYFIELD_X + PLAYFIELD_W + edge_tolerance:
+                new_x = max(new_x, PLAYFIELD_X + new_rect.width//2)
+        if new_rect.right > PLAYFIELD_X + PLAYFIELD_W:
             if dx > 0:
                 x_blocked = True
+                new_x = min(new_x, PLAYFIELD_X + PLAYFIELD_W - new_rect.width//2)
             else:
-                new_x = min(new_x, PLAYFIELD_X + PLAYFIELD_W - new_rect.width//2 + edge_tolerance)
+                new_x = min(new_x, PLAYFIELD_X + PLAYFIELD_W - new_rect.width//2)
 
-        # Check Y bounds
+        # Check Y bounds - strict
         y_blocked = False
-        if new_rect.top < PLAYFIELD_Y - edge_tolerance:
+        if new_rect.top < PLAYFIELD_Y:
             if dy < 0:
                 y_blocked = True
+                new_y = max(new_y, PLAYFIELD_Y + new_rect.height//2)
             else:
-                new_y = max(new_y, PLAYFIELD_Y + new_rect.height//2 - edge_tolerance)
-        if new_rect.bottom > PLAYFIELD_Y + PLAYFIELD_H + edge_tolerance:
+                new_y = max(new_y, PLAYFIELD_Y + new_rect.height//2)
+        if new_rect.bottom > PLAYFIELD_Y + PLAYFIELD_H:
             if dy > 0:
                 y_blocked = True
+                new_y = min(new_y, PLAYFIELD_Y + PLAYFIELD_H - new_rect.height//2)
             else:
-                new_y = min(new_y, PLAYFIELD_Y + PLAYFIELD_H - new_rect.height//2 + edge_tolerance)
+                new_y = min(new_y, PLAYFIELD_Y + PLAYFIELD_H - new_rect.height//2)
 
         # If both axes blocked, fully blocked
         if x_blocked and y_blocked:
@@ -487,7 +495,10 @@ class Tank:
                 self._log_stuck_if_needed(dir_name)
                 return False
 
-        # Move successful - apply snap if any
+        # Move successful - apply snap + final clamp to ensure never outside map (fix enemy outside bug)
+        # Clamp to fully inside playfield (no tolerance for final position)
+        new_x = max(PLAYFIELD_X + TANK_SIZE//2, min(PLAYFIELD_X + PLAYFIELD_W - TANK_SIZE//2, new_x))
+        new_y = max(PLAYFIELD_Y + TANK_SIZE//2, min(PLAYFIELD_Y + PLAYFIELD_H - TANK_SIZE//2, new_y))
         self.x = new_x
         self.y = new_y
         self.rect.center = (self.x, self.y)
@@ -553,6 +564,19 @@ class Tank:
             self.spawn_protection -= 1
         if self.armor_flash_timer > 0:
             self.armor_flash_timer -= 1
+
+        # Safety clamp: ensure tank never outside playfield (fix enemy outside map bug)
+        # Even if try_move allowed slight outside for sliding, update brings back inside fully
+        if self.rect.left < PLAYFIELD_X or self.rect.right > PLAYFIELD_X + PLAYFIELD_W or \
+           self.rect.top < PLAYFIELD_Y or self.rect.bottom > PLAYFIELD_Y + PLAYFIELD_H:
+            self.x = max(PLAYFIELD_X + self.rect.width//2, min(PLAYFIELD_X + PLAYFIELD_W - self.rect.width//2, self.x))
+            self.y = max(PLAYFIELD_Y + self.rect.height//2, min(PLAYFIELD_Y + PLAYFIELD_H - self.rect.height//2, self.y))
+            self.rect.center = (self.x, self.y)
+            try:
+                from .logger_integration import safe_log_gameplay
+                safe_log_gameplay("CLAMP_OUTSIDE", data={"x": self.x, "y": self.y, "is_player": self.is_player})
+            except:
+                pass
 
         # size effects
         self.update_size_state()
