@@ -782,6 +782,11 @@ class EnemyTank extends Tank {
 
         this.spawn_protection=60; this.invulnerable_timer=60;
         this.state='wander';
+        this.path=[];
+        this.path_timer=0;
+        this.path_target=null;
+        this.target_player_id=null;
+        this.base_attack_cooldown=0;
     }
 
     canMoveDir(dir, tilemap, otherTanks) {
@@ -879,21 +884,209 @@ class EnemyTank extends Tank {
         return null;
     }
 
+    // A* on 13x13 big tile grid for authentic but smart base rush - exact same as Python EnemyTank
+    static isBlockedBig(tilemap, bx, by) {
+        if(!(bx>=0 && bx<13 && by>=0 && by<13)) return [true, 999];
+        let brickCount=0, waterCount=0;
+        for(let dy=0; dy<2; dy++) for(let dx=0; dx<2; dx++) {
+            let sx=bx*2+dx, sy=by*2+dy;
+            if(sx>=0&&sx<GRID_W&&sy>=0&&sy<GRID_H) {
+                let t=tilemap.tiles[sy][sx];
+                if(t===TILE_STEEL) return [true,999];
+                if(t===TILE_BRICK) brickCount++;
+                if(t===TILE_WATER) waterCount++;
+            }
+        }
+        let cost=1+brickCount*1.5;
+        if(waterCount>=2) return [true,999];
+        return [false,cost];
+    }
+
+    static aStarBigTile(tilemap, startBx, startBy, targetBx, targetBy) {
+        // Returns path as list of [bx,by] or null
+        // Same logic as Python a_star_big_tile with max 200 nodes
+        let openSet=[];
+        let cameFrom=new Map();
+        let gScore=new Map();
+        let closed=new Set();
+        let key = (bx,by)=>`${bx},${by}`;
+
+        openSet.push({f:0,g:0,bx:startBx,by:startBy,parent:null});
+        gScore.set(key(startBx,startBy),0);
+        let nodes=0;
+        const maxNodes=200;
+
+        while(openSet.length>0 && nodes<maxNodes) {
+            // Find node with lowest f
+            openSet.sort((a,b)=>a.f-b.f);
+            let current=openSet.shift();
+            let curKey=key(current.bx,current.by);
+            if(closed.has(curKey)) continue;
+            cameFrom.set(curKey, current.parent);
+            closed.add(curKey);
+            nodes++;
+
+            if(current.bx===targetBx && current.by===targetBy) {
+                // Reconstruct path
+                let path=[];
+                let cur=curKey;
+                let curPos=[current.bx,current.by];
+                while(curPos) {
+                    path.push([curPos[0],curPos[1]]);
+                    let parentKey = cameFrom.get(key(curPos[0],curPos[1]));
+                    if(!parentKey) break;
+                    // parentKey is [bx,by] or null?
+                    // In our cameFrom we store parent key string? Let's store parent as [bx,by]
+                    // Actually we stored parent as [bx,by] in openSet? We stored parent as null or [bx,by] for simplicity
+                    // Let's adjust: cameFrom stores parent key, but we need parent pos
+                    // We'll store parent as key string, need to parse
+                    if(typeof parentKey === 'string') {
+                        let parts=parentKey.split(',');
+                        curPos=[parseInt(parts[0]),parseInt(parts[1])];
+                        cur=parentKey;
+                    } else if(Array.isArray(parentKey)) {
+                        curPos=parentKey;
+                        cur=key(parentKey[0],parentKey[1]);
+                    } else {
+                        break;
+                    }
+                }
+                path.reverse();
+                return path;
+            }
+
+            for(let [dx,dy] of [[0,1],[0,-1],[1,0],[-1,0]]) {
+                let nbx=current.bx+dx, nby=current.by+dy;
+                if(!(nbx>=0&&nbx<13&&nby>=0&&nby<13)) continue;
+                let nKey=key(nbx,nby);
+                if(closed.has(nKey)) continue;
+                let [blocked,cost]=EnemyTank.isBlockedBig(tilemap,nbx,nby);
+                if(blocked) continue;
+                let newG=current.g+cost;
+                let h=Math.abs(nbx-targetBx)+Math.abs(nby-targetBy);
+                let newF=newG+h;
+                let existingG=gScore.get(nKey);
+                if(existingG===undefined || newG<existingG) {
+                    gScore.set(nKey,newG);
+                    openSet.push({f:newF,g:newG,bx:nbx,by:nby,parent:[current.bx,current.by]});
+                    // Also store parent for cameFrom
+                    cameFrom.set(nKey, key(current.bx,current.by));
+                }
+            }
+        }
+        return null;
+    }
+
+    static directionFromBigPath(startBx, startBy, nextBx, nextBy) {
+        if(nextBx>startBx) return 'RIGHT';
+        if(nextBx<startBx) return 'LEFT';
+        if(nextBy>startBy) return 'DOWN';
+        if(nextBy<startBy) return 'UP';
+        return null;
+    }
+
     chooseNewDirection(players, tilemap, base) {
+        // Exact same logic as Python EnemyTank.choose_new_direction with A* base rush
         let possible = ['UP','DOWN','LEFT','RIGHT'];
+        let opposite = {'UP':'DOWN','DOWN':'UP','LEFT':'RIGHT','RIGHT':'LEFT'};
+
+        if(this.direction in opposite && this.stuck_timer < 15) {
+            let rev=opposite[this.direction];
+            if(possible.includes(rev) && Math.random()<0.85) {
+                possible=possible.filter(d=>d!==rev);
+            }
+        }
+
+        let targetX, targetY, targetBx, targetBy;
         let alivePlayers = players.filter(p=>p.alive);
-        let targetX, targetY;
+        let useBase = true;
+        let distToBase = 9999;
+
         if(base && base.alive) {
-            targetX=base.x; targetY=base.y;
-        } else if(alivePlayers.length>0) {
-            let closest = alivePlayers.reduce((a,b)=> Math.hypot(a.x-this.x,a.y-this.y) < Math.hypot(b.x-this.x,b.y-this.y) ? a : b);
-            targetX=closest.x; targetY=closest.y;
+            let base_cx=base.x, base_cy=base.y;
+            distToBase=Math.hypot(base_cx-this.x, base_cy-this.y);
+            if(alivePlayers.length>0) {
+                let closestP=alivePlayers.reduce((a,b)=> Math.hypot(a.x-this.x,a.y-this.y) < Math.hypot(b.x-this.x,b.y-this.y) ? a : b);
+                let distToPlayer=Math.hypot(closestP.x-this.x, closestP.y-this.y);
+                if(distToPlayer < 4*TILE_SIZE) useBase = Math.random()<0.4;
+                else if(distToPlayer < 8*TILE_SIZE) useBase = Math.random()<0.65;
+                else useBase = Math.random()<0.75;
+            }
+            if(distToBase < 5*TILE_SIZE) {
+                useBase=true;
+                this.state='attack_base';
+            } else if(distToBase > 12*TILE_SIZE) {
+                this.state = Math.random()<0.5 ? 'wander' : 'chase_base';
+            }
         } else {
-            this.direction = possible[Math.floor(Math.random()*possible.length)];
+            useBase=false;
+        }
+
+        if(useBase && base && base.alive) {
+            targetX=base.x; targetY=base.y;
+            targetBx=Math.floor((targetX-PLAYFIELD_X)/TILE_SIZE/2);
+            targetBy=Math.floor((targetY-PLAYFIELD_Y)/TILE_SIZE/2);
+            this.state='chase_base';
+            if(distToBase < 5*TILE_SIZE) this.state='attack_base';
+        } else if(alivePlayers.length>0) {
+            let closest=alivePlayers.reduce((a,b)=> Math.hypot(a.x-this.x,a.y-this.y) < Math.hypot(b.x-this.x,b.y-this.y) ? a : b);
+            targetX=closest.x; targetY=closest.y;
+            targetBx=Math.floor((targetX-PLAYFIELD_X)/TILE_SIZE/2);
+            targetBy=Math.floor((targetY-PLAYFIELD_Y)/TILE_SIZE/2);
+            this.state='chase_player';
+        } else {
+            this.state='wander';
+            this.direction=possible[Math.floor(Math.random()*possible.length)];
             return;
         }
-        let dx = targetX - this.x, dy = targetY - this.y;
-        let preferred = [];
+
+        // A* Pathfinding - same as Python
+        if(this.path_timer===undefined) this.path_timer=0;
+        if(this.path===undefined) this.path=[];
+        if(this.path_target===undefined) this.path_target=null;
+
+        this.path_timer--;
+        let startBx=Math.floor((this.x-PLAYFIELD_X)/TILE_SIZE/2);
+        let startBy=Math.floor((this.y-PLAYFIELD_Y)/TILE_SIZE/2);
+        let needNewPath=false;
+        if(this.path_timer<=0 || !this.path || this.path.length===0 || (this.path_target && (this.path_target[0]!==targetBx || this.path_target[1]!==targetBy))) needNewPath=true;
+        else if(this.stuck_timer>20) needNewPath=true;
+
+        if(needNewPath && targetBx!==undefined && base && ['chase_base','attack_base','chase_player'].includes(this.state)) {
+            let path=EnemyTank.aStarBigTile(tilemap, startBx, startBy, targetBx, targetBy);
+            if(path && path.length>=2) {
+                this.path=path;
+                this.path_target=[targetBx,targetBy];
+                this.path_timer=Math.floor(Math.random()*30)+30;
+                let [nextBx,nextBy]=path[1];
+                let dirFromPath=EnemyTank.directionFromBigPath(startBx,startBy,nextBx,nextBy);
+                if(dirFromPath && possible.includes(dirFromPath) && this.canMoveDir(dirFromPath, tilemap, players)) {
+                    this.direction=dirFromPath;
+                    return;
+                }
+            } else {
+                this.path=[];
+                this.path_timer=Math.floor(Math.random()*20)+20;
+            }
+        } else if(this.path && this.path.length>=2 && this.path_timer>0) {
+            try {
+                for(let i=0;i<this.path.length;i++) {
+                    let [bx,by]=this.path[i];
+                    if(bx===startBx && by===startBy && i+1<this.path.length) {
+                        let [nextBx,nextBy]=this.path[i+1];
+                        let dirFromPath=EnemyTank.directionFromBigPath(startBx,startBy,nextBx,nextBy);
+                        if(dirFromPath && possible.includes(dirFromPath) && this.canMoveDir(dirFromPath, tilemap, players)) {
+                            this.direction=dirFromPath;
+                            return;
+                        }
+                    }
+                }
+            } catch(e) {}
+        }
+
+        // Fallback to greedy dx/dy preferred order - same as Python
+        let dx=targetX-this.x, dy=targetY-this.y;
+        let preferred=[];
         if(Math.abs(dx) > Math.abs(dy)) {
             preferred.push(dx>0?'RIGHT':'LEFT');
             preferred.push(dy>0?'DOWN':'UP');
@@ -901,11 +1094,36 @@ class EnemyTank extends Tank {
             preferred.push(dy>0?'DOWN':'UP');
             preferred.push(dx>0?'RIGHT':'LEFT');
         }
-        for(let d of possible) if(!preferred.includes(d)) preferred.push(d);
+        for(let d of ['UP','DOWN','LEFT','RIGHT']) if(!preferred.includes(d)) preferred.push(d);
+
+        let forceChance = this.state==='attack_base' ? 1.0 : 0.82;
+        let secondChance = this.state==='attack_base' ? 0.0 : 0.15;
+
         for(let d of preferred) {
-            if(this.canMoveDir(d, tilemap, players)) { this.direction=d; return; }
+            if(!possible.includes(d)) continue;
+            if(this.canMoveDir(d, tilemap, players)) {
+                if(preferred.slice(0,2).includes(d) && Math.random()<forceChance) { this.direction=d; return; }
+                else if(!preferred.slice(0,2).includes(d) && Math.random()<secondChance) { this.direction=d; return; }
+            }
         }
-        this.direction = possible[Math.floor(Math.random()*possible.length)];
+
+        // Attack base special handling
+        if(this.state==='attack_base') {
+            let forbidden=[];
+            if(dy>0) forbidden.push('UP'); else forbidden.push('DOWN');
+            if(dx>0) forbidden.push('LEFT'); else forbidden.push('RIGHT');
+            let valid=possible.filter(d=>!forbidden.includes(d) && this.canMoveDir(d, tilemap, players));
+            if(valid.length>0) { this.direction=valid[Math.floor(Math.random()*valid.length)]; return; }
+            valid=possible.filter(d=>this.canMoveDir(d, tilemap, players));
+            if(valid.length>0) { this.direction=valid[Math.floor(Math.random()*valid.length)]; return; }
+        } else {
+            let valid=possible.filter(d=>this.canMoveDir(d, tilemap, players));
+            if(valid.length>0) { this.direction=valid[Math.floor(Math.random()*valid.length)]; return; }
+        }
+
+        let valid=possible.filter(d=>this.canMoveDir(d, tilemap, players));
+        if(valid.length>0) this.direction=valid[Math.floor(Math.random()*valid.length)];
+        else this.direction=opposite[this.direction]||possible[Math.floor(Math.random()*possible.length)];
     }
 
     shoot() {
