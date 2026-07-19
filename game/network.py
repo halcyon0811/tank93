@@ -208,20 +208,38 @@ class NetworkHost:
         packet_count = 0
         # For Lida debug: track last time we saw packet from .131
         last_lida_log = 0
+        lida_discovery_count = 0
+        lida_last_dir_packet = 0
+        lida_warn_old_client_shown = False
         while self.running:
             try:
                 data, addr = self.sock.recvfrom(1024)
                 packet_count += 1
                 # Lida specific debug: log any packet from 192.168.0.131 even if not JSON, to diagnose No route vs no send
                 is_lida = '192.168.0.131' in str(addr) or str(addr).startswith("('192.168.0.13")
-                if is_lida and time.time() - last_lida_log > 1.0:
-                    # Log raw bytes length for diagnosis (discovery vs input)
+                if is_lida:
+                    # Count discovery vs dir packets
                     try:
                         preview = data[:200].decode('utf-8', errors='replace')
                     except:
                         preview = repr(data[:100])
-                    print(f"[Network] Packet from Lida {addr} len={len(data)} preview={preview[:120]}")
-                    last_lida_log = time.time()
+                    is_discovery = '"discovery"' in preview or "'discovery'" in preview
+                    if is_discovery:
+                        lida_discovery_count += 1
+                    else:
+                        lida_last_dir_packet = time.time()
+                    if time.time() - last_lida_log > 1.0:
+                        print(f"[Network] Packet from Lida {addr} len={len(data)} preview={preview[:120]}")
+                        last_lida_log = time.time()
+                    # Warn if we see many discovery but no dir packets for 10+ seconds = old client version stuck in pre-game discovery
+                    if not lida_warn_old_client_shown and lida_discovery_count > 10 and (time.time() - lida_last_dir_packet) > 10:
+                        # Check if never received dir packet
+                        if lida_last_dir_packet == 0:
+                            print(f"[Network] ⚠ Lida ({addr[0]}) is sending ONLY discovery for 10+ sec, no dir input packets!")
+                            print(f"    -> Lida has OLD version of remote_client.py (before 96709f3)")
+                            print(f"    -> Tell Lida: git pull origin main, then python3 remote_client.py --host {get_local_ip()}")
+                            print(f"    -> Old version blocked 15 sec in discovery before game loop, new version starts game loop immediately")
+                            lida_warn_old_client_shown = True
                 try:
                     # Robust decode: ignore stray binary packets (e.g., 0xd0 byte crash reported)
                     text = data.decode('utf-8', errors='replace')
