@@ -195,10 +195,20 @@ class EnemyTank(Tank):
         new_rect = self.rect.copy()
         new_rect.center = (test_x, test_y)
 
-        if new_rect.left < PLAYFIELD_X - 6 or new_rect.right > PLAYFIELD_X + PLAYFIELD_W + 6:
-            return False
-        if new_rect.top < PLAYFIELD_Y - 6 or new_rect.bottom > PLAYFIELD_Y + PLAYFIELD_H + 6:
-            return False
+        edge_tolerance = 12
+        # Axis-specific edge check to allow sliding along edge (fix player stuck at edge)
+        if dx != 0:
+            if new_rect.left < PLAYFIELD_X - edge_tolerance or new_rect.right > PLAYFIELD_X + PLAYFIELD_W + edge_tolerance:
+                return False
+        else:
+            if new_rect.left < PLAYFIELD_X - edge_tolerance*2 or new_rect.right > PLAYFIELD_X + PLAYFIELD_W + edge_tolerance*2:
+                return False
+        if dy != 0:
+            if new_rect.top < PLAYFIELD_Y - edge_tolerance or new_rect.bottom > PLAYFIELD_Y + PLAYFIELD_H + edge_tolerance:
+                return False
+        else:
+            if new_rect.top < PLAYFIELD_Y - edge_tolerance*2 or new_rect.bottom > PLAYFIELD_Y + PLAYFIELD_H + edge_tolerance*2:
+                return False
 
         # Fixed: tank 32 vs tile 24 - use 24x24 collision for tiles so single destroyed brick is passable
         # Same fix as player tank: inflate -8 for normal tanks
@@ -284,9 +294,7 @@ class EnemyTank(Tank):
         self.last_pos = (self.x, self.y)
 
         # --- Fix for enemy stuck bug: detect overlapping tanks and force separation ---
-        # When two enemies spawn too close or get stuck overlapping each other (same position),
-        # their normal can_move_dir check will block all directions because they overlap.
-        # This causes them to stay forever in original location. We force separation.
+        # Enhanced for 2 bugs: edge stuck and spawn stuck
         overlapping_tanks = []
         for other in (other_tanks + players):
             if other is self or not other.alive:
@@ -297,35 +305,113 @@ class EnemyTank(Tank):
 
         if overlapping_tanks:
             # Find nearest overlapping
-            nearest, _ = min(overlapping_tanks, key=lambda x: x[1])
+            nearest, nearest_dist = min(overlapping_tanks, key=lambda x: x[1])
             dx = self.x - nearest.x
             dy = self.y - nearest.y
-            # Choose direction away from nearest
-            if abs(dx) > abs(dy):
-                dir_away = 'RIGHT' if dx > 0 else 'LEFT'
+            # Handle exact overlap (dx=0, dy=0) - pick random direction
+            if abs(dx) < 1 and abs(dy) < 1:
+                # Exact overlap, pick random away direction
+                dir_away = random.choice(['UP', 'DOWN', 'LEFT', 'RIGHT'])
+                dx = random.uniform(-1, 1)
+                dy = random.uniform(-1, 1)
             else:
-                dir_away = 'DOWN' if dy > 0 else 'UP'
+                # Choose direction away from nearest
+                if abs(dx) > abs(dy):
+                    dir_away = 'RIGHT' if dx > 0 else 'LEFT'
+                else:
+                    dir_away = 'DOWN' if dy > 0 else 'UP'
             self.direction = dir_away
-            self.target_dir_timer = 15
-            # Try to move ignoring other tanks for separation (only tile collision)
-            # We directly call base try_move with empty other list to allow separation
-            moved_sep = super().try_move(dir_away, tilemap, [])
+            self.target_dir_timer = 20
+            # During spawn protection, allow moving through other tanks (ignore collision) to unstick from spawn point
+            # This fixes bug where enemy just spawned stays there not moving because blocked by other tank
+            ignore_tanks = self.spawn_protection > 0 or nearest_dist < TANK_SIZE * 0.5
+            move_other_tanks = [] if ignore_tanks else []
+            moved_sep = super().try_move(dir_away, tilemap, move_other_tanks)
             if not moved_sep:
                 # If still blocked by tile, try perpendicular away directions
                 perp = {'UP': ['LEFT','RIGHT'], 'DOWN': ['LEFT','RIGHT'], 'LEFT': ['UP','DOWN'], 'RIGHT': ['UP','DOWN']}
                 for pd in perp.get(dir_away, []):
-                    if super().try_move(pd, tilemap, []):
+                    if super().try_move(pd, tilemap, move_other_tanks):
                         self.direction = pd
                         moved_sep = True
                         break
-            # If still overlapping heavily, give a small push to unstick (teleport slightly)
-            if math.hypot(self.x - nearest.x, self.y - nearest.y) < TANK_SIZE * 0.8:
-                # push 2px away
-                push_dx = (dx / (math.hypot(dx, dy) or 1)) * 2.5
-                push_dy = (dy / (math.hypot(dx, dy) or 1)) * 2.5
+            # If still overlapping heavily, give stronger push to unstick
+            current_dist = math.hypot(self.x - nearest.x, self.y - nearest.y)
+            if current_dist < TANK_SIZE * 0.8:
+                # Push more aggressively for stuck case (5px instead of 2.5)
+                # For exact overlap, push random 8px
+                if current_dist < 1:
+                    push_dx = random.uniform(-8, 8)
+                    push_dy = random.uniform(-8, 8)
+                else:
+                    push_dx = (dx / (max(current_dist, 1))) * 5.0
+                    push_dy = (dy / (max(current_dist, 1))) * 5.0
                 self.x += push_dx
                 self.y += push_dy
                 self.rect.center = (self.x, self.y)
+                # Log stuck event for debug DB
+                try:
+                    from ..logger_integration import safe_log_gameplay
+                    safe_log_gameplay("ENEMY_STUCK_PUSH", data={"enemy_type": self.enemy_type, "dist": current_dist, "push": (push_dx, push_dy), "dir": dir_away, "x": self.x, "y": self.y})
+                except:
+                    pass
+
+        # Enhanced stuck detection with logging for debug DB
+        if self.stuck_timer > 40:
+            try:
+                from ..logger_integration import safe_log_gameplay
+                safe_log_gameplay("ENEMY_STUCK", data={"enemy_type": self.enemy_type, "stuck_timer": self.stuck_timer, "x": self.x, "y": self.y, "dir": self.direction, "is_boss": getattr(self, 'is_boss', False)})
+            except:
+                pass
+            # If stuck for long (>60 frames ~1 sec), try emergency unstuck: destroy brick in front or teleport
+            if self.stuck_timer > 60:
+                # Try to shoot brick in front
+                if self.can_shoot():
+                    # Force shoot to clear path
+                    try:
+                        nb = self.shoot()
+                        if nb:
+                            if isinstance(nb, list):
+                                bullets_list.extend(nb)
+                            else:
+                                bullets_list.append(nb)
+                    except:
+                        pass
+                # If still stuck >90 frames, teleport to nearby free spawn point
+                if self.stuck_timer > 90:
+                    # Try to find nearby free position (search in 3-tile radius)
+                    for _ in range(10):
+                        try:
+                            tx = self.x + random.randint(-48, 48)
+                            ty = self.y + random.randint(-48, 48)
+                            test_rect = self.rect.copy()
+                            test_rect.center = (tx, ty)
+                            # Check bounds
+                            if test_rect.left < PLAYFIELD_X - 12 or test_rect.right > PLAYFIELD_X + PLAYFIELD_W + 12:
+                                continue
+                            if test_rect.top < PLAYFIELD_Y - 12 or test_rect.bottom > PLAYFIELD_Y + PLAYFIELD_H + 12:
+                                continue
+                            # Check tile collision with smaller rect
+                            check_r = test_rect.inflate(-8, -8)
+                            blocked = False
+                            for _, _, _, trect in tilemap.get_tiles_in_rect(check_r):
+                                if check_r.colliderect(trect):
+                                    blocked = True
+                                    break
+                            if not blocked:
+                                self.x = tx
+                                self.y = ty
+                                self.rect.center = (tx, ty)
+                                self.stuck_timer = 0
+                                self.target_dir_timer = 5
+                                try:
+                                    from ..logger_integration import safe_log_gameplay
+                                    safe_log_gameplay("ENEMY_TELEPORT_UNSTUCK", data={"enemy_type": self.enemy_type, "new_x": tx, "new_y": ty})
+                                except:
+                                    pass
+                                break
+                        except:
+                            pass
 
         if self.target_dir_timer <= 0 or self.stuck_timer > 25:
             # For boss, pass other_tanks so it can target enemies too
