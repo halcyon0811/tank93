@@ -33,62 +33,89 @@ import os
 DEFAULT_PORT = 9999
 DEFAULT_BROADCAST_PORT = 9998
 
-def get_all_local_ips():
-    """Get all local IPv4 addresses for display, for Lida join diagnostics"""
+_cached_ips = None
+_cached_ips_time = 0
+_cached_ip = None
+
+def get_all_local_ips(force_refresh=False):
+    """Get all local IPv4 addresses for display, for Lida join diagnostics - OPTIMIZED with cache (was 5s blocking!)"""
+    global _cached_ips, _cached_ips_time
+    import time as _t
+    # Cache for 30 seconds - ifconfig is expensive (5 sec on macOS)
+    if not force_refresh and _cached_ips is not None and (_t.time() - _cached_ips_time) < 30:
+        return list(_cached_ips)
+
     ips = []
     try:
-        # Try via netifaces-like via socket gethostbyname_ex
         import socket as _sock
-        hostname = _sock.gethostname()
-        try:
-            _, _, ip_list = _sock.gethostbyname_ex(hostname)
-            for ip in ip_list:
-                if not ip.startswith("127.") and "." in ip:
-                    if ip not in ips:
-                        ips.append(ip)
-        except:
-            pass
-        # Primary via 8.8.8.8 trick
+        # Fast path: 8.8.8.8 trick (0.002s) - primary and most reliable, return immediately if works
         try:
             s = _sock.socket(_sock.AF_INET, _sock.SOCK_DGRAM)
+            s.settimeout(0.3)
             s.connect(("8.8.8.8", 80))
             ip = s.getsockname()[0]
             s.close()
-            if ip not in ips:
-                ips.insert(0, ip)
+            if ip and not ip.startswith("127.") and "." in ip:
+                ips.append(ip)
+                # Fast success: return immediately without slow DNS lookups
+                _cached_ips = list(ips)
+                _cached_ips_time = _t.time()
+                return ips
         except:
             pass
-        # Parse ifconfig for en0-en9
-        try:
-            import subprocess
-            for iface in ["en0", "en1", "en2", "en3", "wlan0", "eth0"]:
-                try:
-                    result = subprocess.check_output(["ifconfig", iface], text=True, stderr=subprocess.DEVNULL, timeout=1)
-                    for line in result.split("\n"):
-                        line=line.strip()
-                        if line.startswith("inet ") and "127.0.0.1" not in line:
-                            parts=line.split()
-                            # second token is ip
-                            ip = parts[1] if len(parts)>1 else None
-                            if ip and "." in ip and ip not in ips and not ip.startswith("169.254"):
-                                ips.append(ip)
-                except:
-                    continue
-        except:
-            pass
+
+        # Second fast: gethostbyname_ex (can be slow on macOS with .local mDNS, so try with short timeout via thread)
+        # We skip it for fast path unless force_refresh, because it was causing 5 sec delay
+        if force_refresh:
+            try:
+                hostname = _sock.gethostname()
+                _, _, ip_list = _sock.gethostbyname_ex(hostname)
+                for ip in ip_list:
+                    if not ip.startswith("127.") and "." in ip and ip not in ips and not ip.startswith("169.254"):
+                        ips.append(ip)
+            except:
+                pass
+
+            # Slow path: ifconfig - only when force_refresh
+            try:
+                import subprocess
+                for iface in ["en0", "en1"]:
+                    try:
+                        result = subprocess.check_output(["ifconfig", iface], text=True, stderr=subprocess.DEVNULL, timeout=0.5)
+                        for line in result.split("\n"):
+                            line=line.strip()
+                            if line.startswith("inet ") and "127.0.0.1" not in line:
+                                parts=line.split()
+                                ip = parts[1] if len(parts)>1 else None
+                                if ip and "." in ip and ip not in ips and not ip.startswith("169.254"):
+                                    ips.append(ip)
+                    except:
+                        continue
+            except:
+                pass
     except:
         pass
     if not ips:
         ips = ["127.0.0.1"]
+    # Cache
+    _cached_ips = list(ips)
+    _cached_ips_time = _t.time()
     return ips
 
 def get_local_ip():
+    global _cached_ip, _cached_ips_time
+    import time as _t
+    # Fast cache for get_local_ip too
+    if _cached_ip is not None and (_t.time() - _cached_ips_time) < 30:
+        return _cached_ip
     ips = get_all_local_ips()
     # Prefer 192.168.x or 10.x over others
     for ip in ips:
         if ip.startswith("192.168.") or ip.startswith("10."):
+            _cached_ip = ip
             return ip
-    return ips[0] if ips else "127.0.0.1"
+    _cached_ip = ips[0] if ips else "127.0.0.1"
+    return _cached_ip
 
 def get_ip_subnet(ip):
     """Return /24 subnet string e.g. 192.168.0.* -> 192.168.0."""

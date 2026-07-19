@@ -242,45 +242,69 @@ class Game:
             self.mega_count = 0
             self.is_mega = False
 
-        # LAN Multiplayer - Remote P2 join via same local network - disabled in web (no UDP in browser)
-        # Also allow --solo flag to disable for Chad solo restart even if Lida client still running
+        # LAN Multiplayer - Remote P2 join via same local network - OPTIMIZED: async startup to avoid 5+ sec block
+        # Previously get_all_local_ips() did 6x ifconfig = 5 sec blocking in Game.__init__, causing long wait for menu
+        # Now start network in background thread, menu appears instantly
         import sys as _sys
         _no_network_flag = "--solo" in _sys.argv or "--no-network" in _sys.argv or "--no-remote" in _sys.argv
         self.network_host = None
         self.network_host_ip = None
         self.network_enabled = not _no_network_flag
+        self._network_starting = False
         if _no_network_flag:
-            print(f"[Game] Network disabled via --solo flag - Chad solo mode, Lida remote disabled")
+            print(f"[Game] Network disabled via --solo flag - Chad solo mode, Lida remote disabled (fast startup)")
             _trace_log("NETWORK", "Network disabled via --solo flag - solo mode", level="INFO")
         elif not getattr(self, 'is_web', False):
-            try:
-                from .network import NetworkHost, get_local_ip
-                self.network_host = NetworkHost()
-                self.network_host_ip = self.network_host.start()
-                if self.network_host_ip:
-                    print(f"[Game] LAN Host ready - Lida (P2) can join remotely via same WiFi")
-                    print(f"[Game] Remote: python3 remote_client.py --host {self.network_host_ip}")
-                    print(f"[Game] To allow Chad solo even if Lida connected: select CHAD card (LEFT/RIGHT), or press N/Ctrl+K to kick Lida, or run with --solo")
-            except Exception as e:
-                print(f"[Game] Network host failed to start: {e}")
-                self.network_host = None
-                self.network_host_ip = None
+            # Async start - don't block Game.__init__ (menu appears instantly)
+            def _start_network_async():
+                try:
+                    from .network import NetworkHost
+                    nh = NetworkHost()
+                    ip = nh.start()
+                    # Update game object (thread-safe, just assignment)
+                    self.network_host = nh
+                    self.network_host_ip = ip
+                    self._network_starting = False
+                    if ip:
+                        print(f"[Game] LAN Host ready (async) - Lida (P2) can join via same WiFi")
+                        print(f"[Game] Remote: python3 remote_client.py --host {ip}")
+                except Exception as e:
+                    print(f"[Game] Network host failed to start: {e}")
+                    self.network_host = None
+                    self.network_host_ip = None
+                    self._network_starting = False
+            self._network_starting = True
+            print(f"[Game] Starting LAN host in background... (menu will appear instantly, network ready in ~0.1s)")
+            import threading
+            threading.Thread(target=_start_network_async, daemon=True).start()
         else:
             print("[Game] Web mode: LAN host disabled (no UDP in browser)")
 
-        # Projector Mode - disabled in web (web already is projector via browser)
+        # Projector Mode - also async for fast startup (was 0.5s block)
         self.projector_ip = None
         self.projector_port = 8080
-        if not getattr(self, 'is_web', False):
-            try:
-                from .projector import start_server
-                self.projector_ip = start_server(port=self.projector_port)
-                if self.projector_ip:
-                    print(f"[Game] Projector server ready - Open on same WiFi:")
-                    print(f"[Game] Projector: http://{self.projector_ip}:{self.projector_port} - for projector or any browser")
-            except Exception as e:
-                print(f"[Game] Projector server failed to start: {e}")
-                self.projector_ip = None
+        if not getattr(self, 'is_web', False) and not _no_network_flag:
+            # Async projector too
+            def _start_projector_async():
+                try:
+                    from .projector import start_server
+                    pip = start_server(port=self.projector_port, blocking=False)
+                    # For display, get actual IP quickly via cached method
+                    try:
+                        from .projector import get_local_ip as proj_ip
+                        actual_ip = proj_ip()
+                        self.projector_ip = actual_ip
+                        print(f"[Game] Projector server ready (async) - http://{actual_ip}:{self.projector_port}")
+                    except:
+                        self.projector_ip = pip
+                except Exception as e:
+                    print(f"[Game] Projector server failed to start: {e}")
+                    self.projector_ip = None
+            print(f"[Game] Starting projector server in background...")
+            import threading
+            threading.Thread(target=_start_projector_async, daemon=True).start()
+        elif _no_network_flag:
+            print(f"[Game] Projector disabled via --solo flag (faster startup)")
         else:
             print("[Game] Web mode: Projector server disabled (web already is projector)")
 

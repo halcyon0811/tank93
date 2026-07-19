@@ -59,6 +59,12 @@ def clean_db():
 def game(clean_db):
     from game.game import Game
     g = Game()
+    # Wait for async network host to be ready (was blocking before, now async for fast startup)
+    # Previously Game.__init__ blocked 5s for network, now 0.1s and network starts in bg thread
+    for _ in range(20):  # wait up to 2 sec for network host
+        if g.network_host is not None:
+            break
+        time.sleep(0.1)
     yield g
     try:
         from game.debug_logger import debug_logger

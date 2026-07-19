@@ -62,9 +62,13 @@ class HUD:
             joy_txt = self.font_small.render("Joy: 0 (Press J to rescan)", True, (200,100,100))
         screen.blit(joy_txt, (xpos, ypos))
         ypos += 14
-        # LAN Multiplayer status - Chad & Lida remote
+        # LAN Multiplayer status - Chad & Lida remote (optimized async startup)
         try:
-            if hasattr(game, 'network_host_ip') and game.network_host_ip:
+            if hasattr(game, '_network_starting') and game._network_starting:
+                ip_txt = self.font_small.render(f"LAN Host: starting... (fast menu, network in bg)", True, (100,200,255))
+                screen.blit(ip_txt, (xpos, ypos))
+                ypos += 14
+            elif hasattr(game, 'network_host_ip') and game.network_host_ip and game.network_host_ip != "starting...":
                 ip_txt = self.font_small.render(f"LAN Host: {game.network_host_ip}:9999", True, (100,200,255))
                 screen.blit(ip_txt, (xpos, ypos))
                 ypos += 14
@@ -74,8 +78,12 @@ class HUD:
                     conn_txt = self.font_small.render(f"Lida join: remote_client.py --host {game.network_host_ip}  [CHAD 1P OK even if Lida connected]", True, (150,150,150))
                 screen.blit(conn_txt, (xpos, ypos))
                 ypos += 14
+            elif hasattr(game, 'network_enabled') and not game.network_enabled:
+                ip_txt = self.font_small.render(f"LAN Host: disabled (--solo fast startup)", True, (120,120,120))
+                screen.blit(ip_txt, (xpos, ypos))
+                ypos += 14
             # Projector status - for projecting to projector via local network browser
-            if hasattr(game, 'projector_ip') and game.projector_ip:
+            if hasattr(game, 'projector_ip') and game.projector_ip and game.projector_ip != "starting...":
                 proj_txt = self.font_small.render(f"PROJECTOR: http://{game.projector_ip}:8080", True, (255,200,100))
                 screen.blit(proj_txt, (xpos, ypos))
                 ypos += 14

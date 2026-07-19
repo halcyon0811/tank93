@@ -118,19 +118,43 @@ Press F11 for fullscreen on projector
         # Suppress default logging
         return
 
+_proj_cached_ip = None
+_proj_cached_time = 0
+
 def get_local_ip():
-    """Get local IP"""
+    """Get local IP - optimized with cache"""
+    global _proj_cached_ip, _proj_cached_time
+    import time as _t
+    if _proj_cached_ip and (_t.time() - _proj_cached_time) < 30:
+        return _proj_cached_ip
     try:
+        # Reuse game.network's fast cached version if available
+        try:
+            from .network import get_local_ip as net_get_ip
+            ip = net_get_ip()
+            _proj_cached_ip = ip
+            _proj_cached_time = _t.time()
+            return ip
+        except:
+            pass
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.settimeout(0.5)
         s.connect(("8.8.8.8", 80))
         ip = s.getsockname()[0]
         s.close()
+        _proj_cached_ip = ip
+        _proj_cached_time = _t.time()
         return ip
     except:
         try:
-            return socket.gethostbyname(socket.gethostname())
+            ip = socket.gethostbyname(socket.gethostname())
+            if not ip.startswith("127."):
+                _proj_cached_ip = ip
+                _proj_cached_time = _t.time()
+                return ip
         except:
-            return "127.0.0.1"
+            pass
+        return "127.0.0.1"
 
 def update_frame(pygame_surface):
     """Called from game loop to update latest frame for projector"""
@@ -183,8 +207,8 @@ def update_frame(pygame_surface):
         # print(f"[Projector] Frame update error: {e}")
         pass
 
-def start_server(port=8080):
-    """Start HTTP server for projector in background thread"""
+def start_server(port=8080, blocking=False):
+    """Start HTTP server for projector in background thread - optimized to not block startup (was 0.5s sleep)"""
     global _server_running, _server_thread, _httpd
 
     if _server_running:
@@ -198,7 +222,6 @@ def start_server(port=8080):
             ip = get_local_ip()
             print(f"[Projector] HTTP server started on http://{ip}:{port} for projector")
             print(f"[Projector] Open on any device same WiFi: http://{ip}:{port}")
-            print(f"[Projector] For projector: Connect laptop to projector via HDMI, open browser to http://{ip}:{port}, F11 fullscreen")
             _httpd.serve_forever()
         except Exception as e:
             print(f"[Projector] Failed to start server on {port}: {e}")
@@ -206,9 +229,12 @@ def start_server(port=8080):
 
     _server_thread = threading.Thread(target=run_server, daemon=True)
     _server_thread.start()
-    # Give it a moment to start
-    time.sleep(0.5)
-    return get_local_ip()
+    if blocking:
+        time.sleep(0.5)
+        return get_local_ip()
+    else:
+        # Non-blocking: return quickly, server will print when ready
+        return "starting..."
 
 def stop_server():
     global _server_running, _httpd
