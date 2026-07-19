@@ -236,49 +236,94 @@ class Tank:
         new_rect = self.rect.copy()
         new_rect.center = (new_x, new_y)
 
-        # bounds - authentic: tanks cannot go outside playfield, allow tolerance for smooth edge movement
-        # FIX for edge stuck bug: 
-        # 1) Increased tolerance from -6 to -12
-        # 2) Check X bounds only when moving horizontally, Y bounds only when moving vertically
-        #    Previously, moving UP/DOWN while at right edge would be blocked because X was already near limit
-        #    This caused player to get stuck at edge when trying to slide along edge
-        edge_tolerance = 12
-        # Only check X bounds if moving horizontally or if new X is further outside than old X
-        if dx != 0:
-            if new_rect.left < PLAYFIELD_X - edge_tolerance or new_rect.right > PLAYFIELD_X + PLAYFIELD_W + edge_tolerance:
-                self.stuck_timer = getattr(self, 'stuck_timer', 0) + 1
-                self._log_stuck_if_needed(dir_name)
+        # bounds - FIXED edge stuck bug (user reports tank stuck attached to edge)
+        # Previous fix with tolerance helped but still allowed tank to drift outside then get permanently blocked
+        # New robust fix:
+        # 1) Always clamp current position if already outside (prevent permanent stuck)
+        # 2) For movement, check if new position would go further outside than current - only block that axis
+        # 3) Allow sliding: if moving diagonally and X blocked but Y not, allow Y movement (slide along edge)
+        # 4) Clamp new position to playfield bounds + small tolerance
+        edge_tolerance = 14
+        # If current position already outside tolerance, pull back in immediately (auto-correct)
+        if self.rect.left < PLAYFIELD_X - edge_tolerance*2 or self.rect.right > PLAYFIELD_X + PLAYFIELD_W + edge_tolerance*2 or \
+           self.rect.top < PLAYFIELD_Y - edge_tolerance*2 or self.rect.bottom > PLAYFIELD_Y + PLAYFIELD_H + edge_tolerance*2:
+            # Emergency clamp
+            cx = max(PLAYFIELD_X + TANK_SIZE//2, min(PLAYFIELD_X + PLAYFIELD_W - TANK_SIZE//2, self.x))
+            cy = max(PLAYFIELD_Y + TANK_SIZE//2, min(PLAYFIELD_Y + PLAYFIELD_H - TANK_SIZE//2, self.y))
+            if abs(cx - self.x) > 1 or abs(cy - self.y) > 1:
                 try:
                     from .logger_integration import safe_log_gameplay
-                    if random.random() < 0.01:
-                        safe_log_gameplay("EDGE_BLOCK", data={"x": new_x, "y": new_y, "dir": dir_name, "left": new_rect.left, "right": new_rect.right})
+                    safe_log_gameplay("EDGE_AUTO_CLAMP", data={"old_x": self.x, "old_y": self.y, "new_x": cx, "new_y": cy})
                 except:
                     pass
+            self.x = cx
+            self.y = cy
+            self.rect.center = (self.x, self.y)
+            new_x = cx + dx * self.speed * speed_mult
+            new_y = cy + dy * self.speed * speed_mult
+            new_rect = self.rect.copy()
+            new_rect.center = (new_x, new_y)
+
+        # Check X bounds
+        x_blocked = False
+        if new_rect.left < PLAYFIELD_X - edge_tolerance:
+            # Moving left further outside? Block only if dx<0
+            if dx < 0:
+                x_blocked = True
+            else:
+                # Clamp to edge, allow Y movement
+                new_x = max(new_x, PLAYFIELD_X + new_rect.width//2 - edge_tolerance)
+        if new_rect.right > PLAYFIELD_X + PLAYFIELD_W + edge_tolerance:
+            if dx > 0:
+                x_blocked = True
+            else:
+                new_x = min(new_x, PLAYFIELD_X + PLAYFIELD_W - new_rect.width//2 + edge_tolerance)
+
+        # Check Y bounds
+        y_blocked = False
+        if new_rect.top < PLAYFIELD_Y - edge_tolerance:
+            if dy < 0:
+                y_blocked = True
+            else:
+                new_y = max(new_y, PLAYFIELD_Y + new_rect.height//2 - edge_tolerance)
+        if new_rect.bottom > PLAYFIELD_Y + PLAYFIELD_H + edge_tolerance:
+            if dy > 0:
+                y_blocked = True
+            else:
+                new_y = min(new_y, PLAYFIELD_Y + PLAYFIELD_H - new_rect.height//2 + edge_tolerance)
+
+        # If both axes blocked, fully blocked
+        if x_blocked and y_blocked:
+            # For diagonal, allow sliding on one axis if possible
+            # Try X only and Y only separately
+            test_rect_x = self.rect.copy()
+            test_rect_x.center = (new_x, self.y)
+            test_rect_y = self.rect.copy()
+            test_rect_y.center = (self.x, new_y)
+            # Re-check with tile collision for slide?
+            # For edge only, if both blocked, return False
+            self.stuck_timer = getattr(self, 'stuck_timer', 0) + 1
+            self._log_stuck_if_needed(dir_name)
+            return False
+        elif x_blocked:
+            # X blocked but Y may still move (slide along vertical edge)
+            if dy != 0:
+                new_x = self.x  # keep X, only move Y
+            else:
+                self.stuck_timer = getattr(self, 'stuck_timer', 0) + 1
+                self._log_stuck_if_needed(dir_name)
                 return False
-        else:
-            # Moving vertically - only block if already far outside and trying to go further
-            # Allow sliding along edge even if slightly outside
-            if new_rect.left < PLAYFIELD_X - edge_tolerance*2 or new_rect.right > PLAYFIELD_X + PLAYFIELD_W + edge_tolerance*2:
+        elif y_blocked:
+            if dx != 0:
+                new_y = self.y  # keep Y, only move X (slide along horizontal edge)
+            else:
                 self.stuck_timer = getattr(self, 'stuck_timer', 0) + 1
                 self._log_stuck_if_needed(dir_name)
                 return False
 
-        if dy != 0:
-            if new_rect.top < PLAYFIELD_Y - edge_tolerance or new_rect.bottom > PLAYFIELD_Y + PLAYFIELD_H + edge_tolerance:
-                self.stuck_timer = getattr(self, 'stuck_timer', 0) + 1
-                self._log_stuck_if_needed(dir_name)
-                try:
-                    from .logger_integration import safe_log_gameplay
-                    if random.random() < 0.01:
-                        safe_log_gameplay("EDGE_BLOCK", data={"x": new_x, "y": new_y, "dir": dir_name, "top": new_rect.top, "bottom": new_rect.bottom})
-                except:
-                    pass
-                return False
-        else:
-            if new_rect.top < PLAYFIELD_Y - edge_tolerance*2 or new_rect.bottom > PLAYFIELD_Y + PLAYFIELD_H + edge_tolerance*2:
-                self.stuck_timer = getattr(self, 'stuck_timer', 0) + 1
-                self._log_stuck_if_needed(dir_name)
-                return False
+        # Rebuild rect after potential clamping/sliding adjustment
+        new_rect = self.rect.copy()
+        new_rect.center = (new_x, new_y)
 
         # tile collision - FIXED: tank 32px vs brick tile 24px
         # Previously used full 32 rect for tile collision -> destroying 1 brick (24px) not enough for 32px tank to pass
@@ -417,27 +462,40 @@ class Tank:
                 from .logger_integration import safe_log_gameplay
                 # Only log every 60 frames to avoid spam
                 if self.stuck_timer % 60 == 0:
-                    safe_log_gameplay("PLAYER_STUCK" if self.is_player else "ENEMY_STUCK", data={"x": self.x, "y": self.y, "dir": dir_name, "stuck_timer": self.stuck_timer, "is_player": self.is_player, "player_id": getattr(self, 'player_id', None)})
+                    safe_log_gameplay("PLAYER_STUCK" if self.is_player else "ENEMY_STUCK", data={"x": self.x, "y": self.y, "dir": dir_name, "stuck_timer": self.stuck_timer, "is_player": self.is_player, "player_id": getattr(self, 'player_id', None), "rect": (self.rect.left, self.rect.top, self.rect.right, self.rect.bottom)})
             except:
                 pass
-        # Emergency auto-unstuck for player at edge: if stuck >90 frames, try slight push to free
-        if self.is_player and getattr(self, 'stuck_timer', 0) > 90:
-            try:
-                # Push player slightly toward center of playfield to unstick from edge
-                center_x = PLAYFIELD_X + PLAYFIELD_W // 2
-                center_y = PLAYFIELD_Y + PLAYFIELD_H // 2
-                dx = center_x - self.x
-                dy = center_y - self.y
-                dist = max(1, (dx*dx + dy*dy)**0.5)
-                push = 8
-                self.x += (dx/dist) * push
-                self.y += (dy/dist) * push
-                self.rect.center = (self.x, self.y)
-                self.stuck_timer = 0
-                from .logger_integration import safe_log_gameplay
-                safe_log_gameplay("PLAYER_AUTO_UNSTUCK", data={"x": self.x, "y": self.y, "push": push})
-            except:
-                self.stuck_timer = 0
+        # Emergency auto-unstuck for player at edge: more aggressive after fix for reported stuck-to-edge bug
+        # Previously 90 frames, now 60 frames, push 16px instead of 8, and also clamp to safe zone
+        if self.is_player:
+            st = getattr(self, 'stuck_timer', 0)
+            if st > 45:  # earlier detection (was 90)
+                try:
+                    # Check if near edge
+                    near_edge = (self.rect.left < PLAYFIELD_X + 5 or self.rect.right > PLAYFIELD_X + PLAYFIELD_W - 5 or
+                                 self.rect.top < PLAYFIELD_Y + 5 or self.rect.bottom > PLAYFIELD_Y + PLAYFIELD_H - 5)
+                    push = 16 if near_edge else 8
+                    center_x = PLAYFIELD_X + PLAYFIELD_W // 2
+                    center_y = PLAYFIELD_Y + PLAYFIELD_H // 2
+                    dx = center_x - self.x
+                    dy = center_y - self.y
+                    dist = max(1, (dx*dx+dy*dy)**0.5)
+                    self.x += (dx/dist) * push
+                    self.y += (dy/dist) * push
+                    # Hard clamp to ensure inside playfield
+                    self.x = max(PLAYFIELD_X + TANK_SIZE//2 + 2, min(PLAYFIELD_X + PLAYFIELD_W - TANK_SIZE//2 - 2, self.x))
+                    self.y = max(PLAYFIELD_Y + TANK_SIZE//2 + 2, min(PLAYFIELD_Y + PLAYFIELD_H - TANK_SIZE//2 - 2, self.y))
+                    self.rect.center = (self.x, self.y)
+                    self.stuck_timer = 0
+                    from .logger_integration import safe_log_gameplay
+                    safe_log_gameplay("PLAYER_AUTO_UNSTUCK", data={"x": self.x, "y": self.y, "push": push, "near_edge": near_edge, "stuck_timer": st})
+                except Exception as e:
+                    try:
+                        from .logger_integration import safe_log_gameplay
+                        safe_log_gameplay("UNSTUCK_FAIL", data={"error": str(e)})
+                    except:
+                        pass
+                    self.stuck_timer = 0
 
     def update(self, tilemap, other_tanks):
         if self.cooldown > 0:

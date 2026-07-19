@@ -186,7 +186,8 @@ class TileMap:
             if t == TILE_BRICK:
                 return True
             if t == TILE_STEEL:
-                return bullet_power >= 2 or True
+                # Now all bullets can chip steel, but still block until destroyed
+                return True
             if t == TILE_WATER:
                 return False
         else:
@@ -203,44 +204,57 @@ class TileMap:
         return False
 
     def destroy_tile(self, gx, gy, bullet_power=1, bullet_dir=None, bullet_type='normal'):
-        """All weapons destroy bricks with different hit counts"""
+        """All weapons destroy bricks/steel with different hit counts - steel harder than brick (user request)"""
         if not (0 <= gx < self.grid_w and 0 <= gy < self.grid_h):
             return False
         
         t = self.tiles[gy][gx]
-        if t == TILE_STEEL:
+        if t == TILE_EMPTY:
+            return False
+        if t not in (TILE_BRICK, TILE_STEEL):
+            return False
+        
+        # Determine hits needed based on tile type and bullet type
+        is_steel = (t == TILE_STEEL)
+        if is_steel:
+            hits_needed = STEEL_HITS_NEEDED.get(bullet_type, 5)
+            # Power reduces steel hits by 1, but minimum 1
             if bullet_power >= 2:
-                self.tiles[gy][gx] = TILE_EMPTY
-                self.brick_health.pop((gx,gy), None)
-                return True
-            return False
-        
-        if t != TILE_BRICK:
-            return False
-        
-        hits_needed = BRICK_HITS_NEEDED.get(bullet_type, 2)
-        if bullet_power >= 2:
-            hits_needed = max(1, hits_needed - 1)
+                hits_needed = max(1, hits_needed - 1)
+            # Ultimate power spread rapid vs steel still hardest but 1
+            if bullet_type == 'power_spread_rapid':
+                hits_needed = 1
+        else:
+            hits_needed = BRICK_HITS_NEEDED.get(bullet_type, 2)
+            if bullet_power >= 2:
+                hits_needed = max(1, hits_needed - 1)
+            if bullet_type == 'homing':
+                import random as _rnd2
+                # Homing brick: random 3-4, but steel already has 6
+                max_needed = _rnd2.choice([3, 4])
+                hits_needed = max_needed
         
         key = (gx, gy)
         current_hits = self.brick_health.get(key, 0) + 1
         max_needed = hits_needed
-        
-        if bullet_type == 'homing':
-            import random as _rnd2
-            max_needed = _rnd2.choice([3, 4])
         
         if current_hits >= max_needed:
             self.tiles[gy][gx] = TILE_EMPTY
             self.brick_health.pop(key, None)
             if HAS_DEBUG:
                 try:
-                    safe_log_gameplay("BRICK_DESTROY", data={"x": gx, "y": gy, "hits": current_hits, "needed": max_needed, "type": bullet_type, "power": bullet_power})
+                    log_type = "STEEL_DESTROY" if is_steel else "BRICK_DESTROY"
+                    safe_log_gameplay(log_type, data={"x": gx, "y": gy, "hits": current_hits, "needed": max_needed, "type": bullet_type, "power": bullet_power, "is_steel": is_steel})
                 except:
                     pass
             return True
         else:
             self.brick_health[key] = current_hits
+            if HAS_DEBUG and is_steel:
+                try:
+                    safe_log_gameplay("STEEL_CHIP", data={"x": gx, "y": gy, "hits": current_hits, "needed": max_needed, "type": bullet_type})
+                except:
+                    pass
             return False
 
     def update(self, dt):
@@ -318,6 +332,11 @@ class TileMap:
         screen.blit(scaled, (x+1, y+1))
 
     def draw_steel(self, screen, x, y):
+        # Show cracking based on hits (steel now destructible, harder than brick)
+        gx = int((x - PLAYFIELD_X) // self.tile_size)
+        gy = int((y - PLAYFIELD_Y) // self.tile_size)
+        hits = self.brick_health.get((gx, gy), 0) if hasattr(self, 'brick_health') else 0
+
         s = pygame.Surface((8,8))
         S_BG = (210, 210, 210)
         S_DARK = (130, 130, 130)
@@ -332,6 +351,21 @@ class TileMap:
         s.set_at((6,1), S_DARK)
         s.set_at((2,2), S_RIVET_D)
         s.set_at((1,1), S_RIVET_L)
+
+        # Cracks for steel when damaged - darker and more pronounced than brick
+        if hits > 0:
+            # draw cracks proportional to hits
+            for _ in range(hits):
+                x1 = random.randint(1, 6)
+                y1 = random.randint(1, 6)
+                x2 = x1 + random.randint(-3, 3)
+                y2 = y1 + random.randint(-3, 3)
+                pygame.draw.line(s, (60, 60, 60), (x1, y1), (x2, y2), 1)
+            # dark overlay increasing with hits
+            dark = pygame.Surface((8,8), pygame.SRCALPHA)
+            dark.fill((0, 0, 0, min(120, hits * 30)))
+            s.blit(dark, (0,0))
+
         scaled = pygame.transform.scale(s, (self.tile_size, self.tile_size))
         screen.blit(scaled, (x, y))
 

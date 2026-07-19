@@ -107,6 +107,22 @@ BRICK_HITS_NEEDED = {
     'power_spread_rapid': 1,    # ultimate spread rapid power
 }
 
+# Steel / concrete durability - harder than bricks, but now destructible by all weapons
+# User request: weapon should be able to destroy concrete/steel, just harder than bricks
+STEEL_HITS_NEEDED = {
+    'normal': 5,      # normal bullet 5 hits (vs 2 for brick)
+    'power': 2,       # power/gun 2 hits (vs 1)
+    'rapid': 8,       # rapid 8 hits (weaker)
+    'homing': 6,      # tracking missile 6 hits
+    'spread': 5,      # spread 5 hits
+    'venom': 4,       # venom 4 hits
+    'power_homing': 2,          # powerful homing 2 hits
+    'power_homing_spread': 2,   # 8 powerful homing 2 hits
+    'power_spread': 2,
+    'power_rapid': 2,
+    'power_spread_rapid': 1,    # ultimate still 1 hit even for steel (reward)
+}
+
 # Sidebar HUD
 HUD_X = PLAYFIELD_X + PLAYFIELD_W + 20
 HUD_W = SCREEN_WIDTH - HUD_X - 20

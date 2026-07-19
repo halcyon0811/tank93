@@ -661,13 +661,17 @@ class Bullet:
                     return 'hit_brick'
             elif tt == TILE_STEEL:
                 if self.homing:
-                    # Steel = hard wall, always avoid. Never destroy unless power>=2 and extremely stuck (60 frames)
-                    if self.power >= 2 and self.stuck_timer > HOMING_STUCK_DESTROY_THRESHOLD + 45:
-                        destroyed = False
-                        try:
-                            destroyed = tilemap.destroy_tile(gx, gy, self.power, self.dir, getattr(self, 'bullet_type', 'normal'))
-                        except TypeError:
-                            destroyed = tilemap.destroy_tile(gx, gy, self.power, self.dir, getattr(self, 'bullet_type', 'normal'))
+                    # Steel = hard wall, now destructible but harder than brick (user request)
+                    # Previously only destroyed if power>=2 and stuck 60 frames, now always damage but needs more hits
+                    # Try to destroy with current power/type, but keep avoidance for smarter pathing unless heavily stuck
+                    # First attempt to chip steel (needs 5 hits normal, 2 power etc via STEEL_HITS_NEEDED)
+                    destroyed = False
+                    try:
+                        destroyed = tilemap.destroy_tile(gx, gy, self.power, self.dir, getattr(self, 'bullet_type', 'normal'))
+                    except TypeError:
+                        destroyed = tilemap.destroy_tile(gx, gy, self.power, self.dir, getattr(self, 'bullet_type', 'normal'))
+                    if destroyed or self.power >= 2 or self.stuck_timer > HOMING_STUCK_DESTROY_THRESHOLD:
+                        # If destroyed or power enough, explode
                         self.alive = False
                         try:
                             from ..sound_manager import sound_manager
@@ -678,6 +682,7 @@ class Bullet:
                             pass
                         return 'hit_steel'
                     else:
+                        # Not yet destroyed, normal steel needs 5 hits, so bounce and keep hunting
                         self.x -= self.vx * self.speed * 2.4
                         self.y -= self.vy * self.speed * 2.4
                         self.rect.center = (self.x, self.y)
@@ -698,13 +703,17 @@ class Bullet:
                         self.avoid_vector = (away_x * 2.2, away_y * 2.2)
                         self.replan_timer = 0
                         self.stuck_timer += 8
+                        # If heavily stuck, still count as hit but keep alive to chip more
+                        if self.stuck_timer > HOMING_STUCK_DESTROY_THRESHOLD + 20:
+                            self.alive = False
+                            return 'hit_steel'
                 else:
+                    # Normal bullets: all can destroy steel now, but harder (5 hits normal, 2 power)
                     destroyed = False
-                    if self.power >= 2:
-                        try:
-                            destroyed = tilemap.destroy_tile(gx, gy, self.power, self.dir, getattr(self, 'bullet_type', 'normal'))
-                        except TypeError:
-                            destroyed = tilemap.destroy_tile(gx, gy, self.power, self.dir, getattr(self, 'bullet_type', 'normal'))
+                    try:
+                        destroyed = tilemap.destroy_tile(gx, gy, self.power, self.dir, getattr(self, 'bullet_type', 'normal'))
+                    except TypeError:
+                        destroyed = tilemap.destroy_tile(gx, gy, self.power, self.dir, getattr(self, 'bullet_type', 'normal'))
                     self.alive = False
                     try:
                         from ..sound_manager import sound_manager
