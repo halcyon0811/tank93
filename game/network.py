@@ -65,6 +65,8 @@ class NetworkHost:
         self.running = False
         self.thread = None
         self.sock = None
+        self.discovery_sock = None
+        self.discovery_thread = None
         self.remote_p2_input = {"dir": None, "shoot": False, "timestamp": 0}
         self.last_client_addr = None
         self.client_connected = False
@@ -82,14 +84,61 @@ class NetworkHost:
             self.running = True
             self.thread = threading.Thread(target=self._listen_loop, daemon=True)
             self.thread.start()
+            # Also start discovery responder on broadcast port
+            try:
+                self.discovery_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                self.discovery_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                self.discovery_sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+                self.discovery_sock.bind(("0.0.0.0", DEFAULT_BROADCAST_PORT))
+                self.discovery_sock.settimeout(0.5)
+                self.discovery_thread = threading.Thread(target=self._discovery_loop, daemon=True)
+                self.discovery_thread.start()
+                print(f"[Network] Discovery responder listening on 0.0.0.0:{DEFAULT_BROADCAST_PORT}")
+            except Exception as e:
+                print(f"[Network] Discovery responder failed to start (optional): {e}")
             ip = get_local_ip()
             print(f"[Network] Host listening on {ip}:{self.port} for remote P2")
             print(f"[Network] Remote player can join with: python3 remote_client.py --host {ip}")
+            print(f"[Network] Or auto-discover: python3 remote_client.py (no --host)")
             return ip
         except Exception as e:
             print(f"[Network] Failed to start host: {e}")
+            import traceback
+            traceback.print_exc()
             self.running = False
             return None
+
+    def _discovery_loop(self):
+        """Respond to broadcast discovery requests from clients on same WiFi"""
+        while self.running:
+            try:
+                data, addr = self.discovery_sock.recvfrom(1024)
+                try:
+                    msg = json.loads(data.decode('utf-8'))
+                    if msg.get("type") == "discovery" and msg.get("player_id") == 2:
+                        # Reply with host info
+                        ip = get_local_ip()
+                        reply = {
+                            "type": "host_info",
+                            "ip": ip,
+                            "port": self.port,
+                            "game": "Tank93",
+                            "players": 1,  # could add current players
+                            "timestamp": time.time()
+                        }
+                        self.discovery_sock.sendto(json.dumps(reply).encode('utf-8'), addr)
+                        print(f"[Network] Discovery request from {addr}, replied with {ip}:{self.port}")
+                except json.JSONDecodeError:
+                    # Ignore non-JSON
+                    pass
+                except Exception as e:
+                    print(f"[Network] Discovery handling error: {e}")
+            except socket.timeout:
+                continue
+            except Exception as e:
+                if self.running:
+                    print(f"[Network] Discovery listen error: {e}")
+                time.sleep(0.1)
 
     def _listen_loop(self):
         while self.running:
@@ -99,6 +148,19 @@ class NetworkHost:
                     msg = json.loads(data.decode('utf-8'))
                     # Validate
                     if isinstance(msg, dict) and "player_id" in msg:
+                        # Also handle discovery via main port
+                        if msg.get("type") == "discovery":
+                            ip = get_local_ip()
+                            reply = {
+                                "type": "host_info",
+                                "ip": ip,
+                                "port": self.port,
+                                "game": "Tank93",
+                                "timestamp": time.time()
+                            }
+                            self.sock.sendto(json.dumps(reply).encode('utf-8'), addr)
+                            print(f"[Network] Discovery via main port from {addr}, replied")
+                            continue
                         with self.lock:
                             if msg.get("player_id") == 2:
                                 self.remote_p2_input = {
@@ -107,6 +169,8 @@ class NetworkHost:
                                     "timestamp": time.time()
                                 }
                                 self.last_client_addr = addr
+                                if not self.client_connected:
+                                    print(f"[Network] Remote P2 connected from {addr}!")
                                 self.client_connected = True
                                 self.client_last_seen = time.time()
                         # Send ack
@@ -160,8 +224,21 @@ class NetworkHost:
                 self.sock.close()
             except:
                 pass
+        if self.discovery_sock:
+            try:
+                self.discovery_sock.close()
+            except:
+                pass
         if self.thread:
-            self.thread.join(timeout=1)
+            try:
+                self.thread.join(timeout=1)
+            except:
+                pass
+        if self.discovery_thread:
+            try:
+                self.discovery_thread.join(timeout=1)
+            except:
+                pass
 
 class NetworkClient:
     """Client that sends P2 input to host"""

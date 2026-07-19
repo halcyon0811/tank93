@@ -49,22 +49,108 @@ def get_keyboard_direction(keys):
         return 'RIGHT'
     return None
 
+def discover_hosts(timeout=3):
+    """Broadcast discovery to find game hosts on same local network"""
+    import socket, json
+    print(f"[Discovery] Scanning for Tank93 hosts on same WiFi (broadcasting to 255.255.255.255:9998 and 192.168.0.255:9998)...")
+    found = []
+    sock = None
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        sock.settimeout(timeout)
+        # Broadcast discovery packet
+        msg = json.dumps({"type": "discovery", "player_id": 2}).encode()
+        # Try broadcast addresses
+        for bcast in ["255.255.255.255", "192.168.0.255", "192.168.1.255", "10.0.0.255"]:
+            try:
+                sock.sendto(msg, (bcast, 9998))
+                # print(f"  Sent discovery to {bcast}:9998")
+            except:
+                pass
+        # Also try direct to common host IPs via main port discovery
+        for bcast in ["255.255.255.255"]:
+            try:
+                sock.sendto(msg, (bcast, 9999))
+            except:
+                pass
+
+        # Listen for replies
+        start = time.time()
+        while time.time() - start < timeout:
+            try:
+                data, addr = sock.recvfrom(1024)
+                try:
+                    reply = json.loads(data.decode())
+                    if reply.get("type") == "host_info":
+                        ip = reply.get("ip") or addr[0]
+                        port = reply.get("port", 9999)
+                        print(f"  Found host at {ip}:{port} from {addr} - {reply}")
+                        if (ip, port) not in [(h[0], h[1]) for h in found]:
+                            found.append((ip, port, reply))
+                except:
+                    pass
+            except socket.timeout:
+                break
+    except Exception as e:
+        print(f"[Discovery] Error: {e}")
+    finally:
+        if sock:
+            try:
+                sock.close()
+            except:
+                pass
+
+    return found
+
 def main():
-    parser = argparse.ArgumentParser(description="Tank93 Remote P2 Client")
-    parser.add_argument('--host', required=True, help='Host IP address (shown on host HUD)')
+    parser = argparse.ArgumentParser(description="Tank93 Remote P2 Client - Join host on same WiFi")
+    parser.add_argument('--host', required=False, default=None, help='Host IP address (shown on host HUD). If not provided, will auto-discover via broadcast')
     parser.add_argument('--port', type=int, default=9999, help='Host port (default 9999)')
     args = parser.parse_args()
 
     print("=== Tank93 Remote P2 Client ===")
-    print(f"Connecting to host {args.host}:{args.port}")
+    if args.host:
+        print(f"Intended host: {args.host}:{args.port} (from --host)")
+    else:
+        print("No --host provided, will auto-discover hosts on same WiFi via broadcast")
     print(f"Your local IP: {get_local_ip()}")
     print("\nControls for P2 remote:")
     print("  Keyboard: WASD or ARROWS to move, SPACE/ENTER to shoot")
-    print("  Joy-Con: Stick to move, any action button to shoot")
+    print("  Joy-Con: Stick to move, L/ZL/SL/SR shoulder to shoot (not D-pad)")
     print("  Press ESC or close window to quit")
-    print("\nHost must be running: python3 main.py")
+    print("\nHost must be running: python3 main.py on same WiFi")
     print("Host will show: 'Remote P2 connected' when you start sending input")
-    print("\nStarting...")
+    print("\nHow to find host IP:")
+    print("  On host Mac, look at HUD: LAN Host: 192.168.x.x:9999")
+    print("  Or in host terminal: [Network] Host listening on 192.168.x.x:9999")
+    print("  Or on host run: python3 -c \"from game.network import get_local_ip; print(get_local_ip())\"")
+    print()
+
+    # Auto-discovery if no host provided
+    if not args.host:
+        print("=== Auto-discovery ===")
+        found = discover_hosts(timeout=4)
+        if not found:
+            print("No hosts found via broadcast. Make sure:")
+            print("  1. Host is running python3 main.py on same WiFi")
+            print("  2. Both machines on same subnet (e.g., 192.168.0.x)")
+            print("  3. Firewall allows UDP 9999 and 9998")
+            print("  4. Try manual: python3 remote_client.py --host <host_ip_from_HUD>")
+            print("\nTrying to find hosts via ARP scan of 192.168.0.x with port 9999 open...")
+            # Quick scan of common 192.168.0.x hosts that responded to ping earlier
+            # We will try to discover via main port as well
+            return
+        else:
+            print(f"Found {len(found)} host(s):")
+            for i, (ip, port, info) in enumerate(found):
+                print(f"  [{i}] {ip}:{port} - {info}")
+            # Choose first
+            args.host, args.port = found[0][0], found[0][1]
+            print(f"Auto-selected host {args.host}:{args.port}")
+
+    print(f"\nConnecting to host {args.host}:{args.port}")
+    print("Starting...")
 
     pygame.init()
     pygame.joystick.init()
@@ -94,6 +180,68 @@ def main():
         print("Failed to start client")
         return
 
+    # Test connectivity to host before starting game loop
+    print(f"\n[Testing] Checking if host {args.host}:{args.port} is reachable...")
+    import socket, json
+    test_sock = None
+    reachable = False
+    try:
+        test_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        test_sock.settimeout(2)
+        test_msg = json.dumps({"type": "discovery", "player_id": 2}).encode()
+        test_sock.sendto(test_msg, (args.host, args.port))
+        print(f"  Sent discovery packet to {args.host}:{args.port}, waiting for reply...")
+        try:
+            data, addr = test_sock.recvfrom(1024)
+            reply = json.loads(data.decode())
+            print(f"  ✓ Host {args.host} responded! {reply} from {addr}")
+            print(f"  Host is reachable, game should work")
+            reachable = True
+        except socket.timeout:
+            print(f"  ✗ No reply from {args.host}:{args.port} (timeout 2s)")
+            print(f"  Host may not be running, or firewall blocking UDP 9999")
+            # Try ping
+            import subprocess, platform
+            try:
+                param = "-n" if platform.system().lower()=="windows" else "-c"
+                result = subprocess.run(["ping", param, "1", args.host], capture_output=True, text=True, timeout=3)
+                if result.returncode==0:
+                    print(f"  Ping to {args.host} OK - host is up but game not responding on port 9999")
+                    print(f"  Make sure host is running: python3 main.py on host machine")
+                else:
+                    print(f"  Ping to {args.host} FAIL - No route to host or offline")
+                    print(f"  Possible reasons:")
+                    print(f"    - Host {args.host} is offline or on different WiFi")
+                    print(f"    - Both machines not on same subnet (e.g., 192.168.0.x vs 192.168.1.x)")
+                    print(f"    - Host IP changed (DHCP) - check host HUD for current LAN Host IP")
+                    print(f"    - Firewall blocking UDP 9999")
+            except Exception as e:
+                print(f"  Ping check failed: {e}")
+    except Exception as e:
+        print(f"  Connectivity test error: {e}")
+    finally:
+        if test_sock:
+            try:
+                test_sock.close()
+            except:
+                pass
+
+    if not reachable:
+        print(f"\n[Warning] Host {args.host} did not respond, but will still try to send input")
+        print(f"If host is on same WiFi and running, check firewall and IP")
+        print(f"Trying auto-discovery of alternative hosts...")
+        found = discover_hosts(timeout=3)
+        if found:
+            print(f"Found alternative hosts via broadcast:")
+            for ip, port, info in found:
+                print(f"  {ip}:{port} - {info}")
+            print(f"Try: python3 remote_client.py --host {found[0][0]}")
+        else:
+            print(f"No alternative hosts found via broadcast")
+            print(f"Make sure host is running python3 main.py on same WiFi")
+    else:
+        print(f"  ✓ Host reachable, starting game loop...")
+
     # For button mapping, try to load custom mapping
     from game.input_manager import load_mapping
     mapping = load_mapping()
@@ -102,6 +250,8 @@ def main():
     running = True
     last_send = 0
     send_interval = 1/20  # 20 Hz
+    consecutive_failures = 0
+    last_fail_msg_time = 0
 
     try:
         while running:
@@ -169,7 +319,36 @@ def main():
             # Send at 20Hz or on change
             now = time.time()
             if now - last_send > send_interval:
-                client.send_input(final_dir, final_shoot)
+                success = client.send_input(final_dir, final_shoot)
+                if not success:
+                    consecutive_failures += 1
+                    # If many failures, show troubleshooting
+                    if consecutive_failures % 40 == 0:  # every 2 seconds at 20Hz
+                        print(f"[Warning] Failed to send to {args.host}:{args.port} ({consecutive_failures} fails)")
+                        if time.time() - last_fail_msg_time > 5:
+                            last_fail_msg_time = time.time()
+                            print(f"\n=== Cannot join {args.host}:{args.port} ===")
+                            print(f"Reason: No route to host or host not running")
+                            print(f"Diagnostics:")
+                            print(f"  Your local IP: {get_local_ip()}")
+                            print(f"  Intended host: {args.host}:{args.port}")
+                            print(f"  Host must be running: python3 main.py on same WiFi")
+                            print(f"  Host HUD should show: LAN Host: <ip>:9999")
+                            print(f"  Both machines must be on same subnet (e.g., 192.168.0.x)")
+                            print(f"  Firewall: Allow UDP 9999 and 9998")
+                            print(f"  Try ping: ping {args.host}")
+                            print(f"  Try auto-discovery: python3 remote_client.py (without --host)")
+                            print(f"  Or check host IP may have changed (DHCP): on host run: python3 -c \"from game.network import get_local_ip; print(get_local_ip())\"")
+                            print(f"\nTrying to auto-discover alternative hosts via broadcast...")
+                            found = discover_hosts(timeout=2)
+                            if found:
+                                print(f"Found alternative hosts: {found}")
+                                print(f"Try: python3 remote_client.py --host {found[0][0]}")
+                            else:
+                                print(f"No alternative hosts found via broadcast")
+                            print()
+                else:
+                    consecutive_failures = 0
                 last_send = now
 
             # Draw
