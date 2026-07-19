@@ -318,32 +318,19 @@ def main():
                 last_sent_shoot = final_shoot
                 if not success:
                     consecutive_failures += 1
-                    # If many failures, show troubleshooting
-                    if consecutive_failures % 40 == 0:  # every 2 seconds at 20Hz
-                        print(f"[Warning] Failed to send to {args.host}:{args.port} ({consecutive_failures} fails)")
-                        if time.time() - last_fail_msg_time > 5:
+                    # Reduced spam for No route case - don't block game loop with discovery (causes freeze and only discovery packets seen on host)
+                    # Lida case: 192.168.0.131 -> 192.168.0.194 No route, but broadcast fallback should now make it work
+                    if consecutive_failures % 90 == 0:  # every 3 seconds at 30 Hz
+                        print(f"[Warning] Failed to send to {args.host}:{args.port} ({consecutive_failures} fails) - using broadcast fallback")
+                        if time.time() - last_fail_msg_time > 10:  # only detailed diag every 10 sec, not 5
                             last_fail_msg_time = time.time()
-                            print(f"\n=== Cannot join {args.host}:{args.port} ===")
-                            print(f"Reason: No route to host or host not running")
-                            print(f"Diagnostics:")
-                            print(f"  Your local IP: {get_local_ip()}")
-                            print(f"  Intended host: {args.host}:{args.port}")
-                            print(f"  Host must be running: python3 main.py on same WiFi")
-                            print(f"  Host HUD should show: LAN Host: <ip>:9999")
-                            print(f"  Both machines must be on same subnet (e.g., 192.168.0.x)")
-                            print(f"  Firewall: Allow UDP 9999 and 9998")
-                            print(f"  Try ping: ping {args.host}")
-                            print(f"  Try auto-discovery: python3 remote_client.py (without --host)")
-                            print(f"  Or check host IP may have changed (DHCP): on host run: python3 -c \"from game.network import get_local_ip; print(get_local_ip())\"")
-                            print(f"\nTrying to auto-discover alternative hosts via broadcast...")
-                            found = discover_hosts(timeout=2)
-                            if found:
-                                print(f"Found alternative hosts: {found}")
-                                print(f"Try: python3 remote_client.py --host {found[0][0]}")
-                            else:
-                                print(f"No alternative hosts found via broadcast")
-                            print()
+                            print(f"  Diagnostics: local={get_local_ip()} host={args.host}:{args.port} - broadcast fallback active")
+                            print(f"  Host should see packets via broadcast even if unicast No route (AP isolation workaround)")
+                            print(f"  If still not working, try phone hotspot for both")
+                            # Don't call discover_hosts here (blocks 2 sec) - that was causing host to see only discovery floods
                 else:
+                    if consecutive_failures > 0 and consecutive_failures % 90 == 0:
+                        print(f"[Network] Recovered, now sending to {args.host} (failures reset)")
                     consecutive_failures = 0
                 last_send = now
 

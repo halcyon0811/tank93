@@ -169,6 +169,22 @@ class NetworkHost:
                 data, addr = self.discovery_sock.recvfrom(1024)
                 try:
                     msg = json.loads(data.decode('utf-8', errors='replace'))
+                    # NEW: also handle game input arriving via broadcast fallback on 9998 (when unicast blocked by AP isolation)
+                    # Lida case: unicast 192.168.0.131->194 fails No route, but broadcast input should be accepted
+                    if isinstance(msg, dict) and msg.get("player_id") == 2 and "dir" in msg:
+                        with self.lock:
+                            self.remote_p2_input = {
+                                "dir": msg.get("dir"),
+                                "shoot": bool(msg.get("shoot", False)),
+                                "timestamp": time.time()
+                            }
+                            self.last_client_addr = addr
+                            was_connected = self.client_connected
+                            self.client_connected = True
+                            self.client_last_seen = time.time()
+                            if not was_connected:
+                                print(f"[Network] Remote P2 (Lida) connected via BROADCAST FALLBACK from {addr}! (AP isolation workaround)")
+                        continue
                     if msg.get("type") == "discovery" and msg.get("player_id") == 2:
                         ip = get_local_ip()
                         reply = {
@@ -395,23 +411,46 @@ class NetworkClient:
                 "timestamp": time.time()
             }
             data = json.dumps(msg).encode('utf-8')
-            # Use try to detect No route, but don't crash
+            # Critical fix for Lida: AP isolation blocks unicast 192.168.0.131 -> 192.168.0.194 (No route)
+            # But broadcast discovery 255.255.255.255:9998/9999 DOES reach host (host logs show discovery from .131 arrives)
+            # So fallback: also send input via broadcast addresses as backup transport
             try:
+                # Primary unicast to host
                 self.sock.sendto(data, (self.host_ip, self.port))
                 return True
             except OSError as oe:
-                # Errno 65 No route to host - common when host IP changed or AP isolation
-                # Return False but don't spam every frame, caller handles counting
-                # For Lida case: 192.168.0.131 -> 192.168.0.194 No route
-                if "65" in str(oe) or "No route" in str(oe) or "Unreachable" in str(oe):
-                    # Only print first few times to avoid spam, but still return False
+                # Check if No route - try broadcast fallback
+                is_no_route = "65" in str(oe) or "No route" in str(oe) or "Unreachable" in str(oe) or "51" in str(oe)
+                if is_no_route:
+                    # Only count and log occasionally
                     if not hasattr(self, '_no_route_count'):
                         self._no_route_count = 0
+                        self._broadcast_fallback_active = False
                     self._no_route_count += 1
                     if self._no_route_count <= 3 or self._no_route_count % 60 == 0:
-                        print(f"[Network] Send failed (No route to {self.host_ip}): {oe} (attempt {self._no_route_count})")
-                        if self._no_route_count == 3:
-                            print(f"  -> Lida checklist: same WiFi? firewall? host IP changed? Try discovery")
+                        print(f"[Network] Unicast to {self.host_ip} failed (No route/AP isolation): {oe} (attempt {self._no_route_count})")
+                        print(f"  -> Trying broadcast fallback for input (255.255.255.255, 192.168.x.255) - workaround for AP isolation")
+                    # FALLBACK: send same input via broadcast - host listens on 0.0.0.0:9999 and 9998
+                    # Since host receives broadcast discovery, it will also receive broadcast input if we send to broadcast addr
+                    try:
+                        for bcast in ["255.255.255.255", "192.168.0.255", "192.168.1.255"]:
+                            try:
+                                self.sock.sendto(data, (bcast, self.port))
+                                self.sock.sendto(data, (bcast, 9998))
+                                self._broadcast_fallback_active = True
+                                # Don't return yet, try all
+                            except:
+                                pass
+                        if not hasattr(self, '_logged_broadcast'):
+                            self._logged_broadcast = True
+                            print(f"[Network] Broadcast fallback active - input sent via broadcast, should reach host despite No route unicast block")
+                        return True  # Consider broadcast success as success, even if unicast failed
+                    except Exception as be:
+                        if self._no_route_count % 60 == 0:
+                            print(f"[Network] Broadcast fallback also failed: {be}")
+                    return False
+                # Non-route error
+                print(f"[Network] Send failed: {oe}")
                 return False
         except Exception as e:
             print(f"[Network] Send failed: {e}")
