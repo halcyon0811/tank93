@@ -632,6 +632,44 @@ class PlayerTank(Tank):
             except:
                 pass
 
+        # Flamethrower priority - if active, fires flames instead of normal bullets (monster truck default)
+        if getattr(self, 'flamethrower_active', False):
+            import random as _rnd_f
+            import math as _m_f
+            flame_count = 5 + getattr(self, 'flamethrower_level', 1) * 2
+            for _ in range(flame_count):
+                sx, sy = self.get_bullet_spawn()
+                base_dx, base_dy = DIRS.get(self.direction, (0,-1))
+                ang = _rnd_f.uniform(-0.35, 0.35)
+                cos_a = _m_f.cos(ang)
+                sin_a = _m_f.sin(ang)
+                fdx = base_dx * cos_a - base_dy * sin_a
+                fdy = base_dx * sin_a + base_dy * cos_a
+                rng = _rnd_f.uniform(0.6, 1.2)
+                sx2 = sx + fdx * 8 * rng
+                sy2 = sy + fdy * 8 * rng
+                col = _rnd_f.choice([(255, 100, 20), (255, 200, 50), (255, 80, 10), (255, 150, 0)])
+                b = Bullet(sx2, sy2, self.direction, f"player{self.player_id}", power=2, color=col, homing=False, bullet_type='flamethrower')
+                # Flamethrower faster, short lived
+                b.speed = BULLET_SPEED * 1.5
+                b.life = 12  # short range
+                b.max_life = 12
+                b.flame = True
+                b.vx, b.vy = fdx, fdy
+                b.travelled = 0
+                b.max_distance = 80 + getattr(self, 'flamethrower_level', 1) * 20
+                self.bullets.append(b)
+                bullets_created.append(b)
+            self.cooldown = 4  # rapid fire
+            try:
+                from ..sound_manager import sound_manager
+                sound_manager.play_shoot('flame' if hasattr(sound_manager, 'play_shoot') else 'shoot')
+            except:
+                pass
+            if len(bullets_created) == 1:
+                return bullets_created[0]
+            return bullets_created
+
         # NEW LOGIC: fire spread and homing separately so they don't replace each other
         # If both active, you get 8 spread bullets + homing missiles (9+ total) - user request
         if has_spread:
@@ -1060,8 +1098,24 @@ class PlayerTank(Tank):
                 safe_log_gameplay("POWERUP_GIANT_ACTIVATE", data={"player_id": self.player_id, "timer": self.giant_timer, "x": getattr(self, 'x', 0), "y": getattr(self, 'y', 0)})
             except:
                 pass
+        elif type_name == 'monster_truck':
+            # New monster truck item - 2x bigger, crushes enemy + bricks + forest + steel
+            # Uses NES style blue truck image like provided
+            self.monster_truck_timer = MONSTER_TRUCK_DURATION
+            self.is_monster_truck = True
+            self.current_scale = MONSTER_TRUCK_SCALE
+            self.speed = self.base_speed * MONSTER_TRUCK_SPEED_MULT
+            self._update_rect_size()
+            self.score += 500
+            self.add_armor(60)
+            self.update_bullet_power()
+            print(f"[POWERUP] Monster Truck activated! 2x size crush all P{self.player_id}")
+            try:
+                from ..logger_integration import safe_log_gameplay
+                safe_log_gameplay("POWERUP_MONSTER_TRUCK_ACTIVATE", data={"player_id": self.player_id, "timer": self.monster_truck_timer, "x": getattr(self, 'x', 0), "y": getattr(self, 'y', 0), "scale": self.current_scale})
+            except:
+                pass
         # grenade, clock handled by game
         elif type_name == 'armor':
-            # New armor powerup if added
             self.add_armor(100)
             self.score += 200

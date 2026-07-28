@@ -27,7 +27,13 @@ jobs:
         pip install -r requirements.txt
         pip install pytest
 
-    - name: Run integration & E2E tests (21 tests, 0-latency debug DB checks)
+    - name: Check web asset sync (maps.json + settings.json from Python source)
+      run: |
+        python scripts/generate_web_assets.py --check
+        python scripts/generate_web_assets.py --verbose
+        echo "Web assets: $(python -c 'import json; d=json.load(open("web-pure/assets/settings.json")); print(f"{len(d)} keys, bullet={d[\"BULLET_SPEED\"]} homing={d[\"HOMING_SPEED\"]}")')"
+
+    - name: Run integration & E2E tests (26 tests, 0-latency debug DB checks)
       env:
         SDL_VIDEODRIVER: dummy
         SDL_AUDIODRIVER: dummy

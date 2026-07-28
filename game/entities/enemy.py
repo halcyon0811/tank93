@@ -1042,25 +1042,20 @@ class EnemyTank(Tank):
                             return
             except Exception:
                 pass
-        # Boss monster tank - special drawing
+        # Boss monster tank - special drawing - original green monster (back to original, not nailong)
         if getattr(self, 'is_boss', False):
             cx, cy = self.rect.center
             size = self.rect.width
             # Shadow
             pygame.draw.ellipse(screen, (0,0,0, 100), (cx - size//2 +4, cy - size//2 +12, size-8, size//3))
-            # Boss body - monster tank hybrid
-            # Main body - green monster with tank tracks
+            # Boss body - green monster with tank tracks
             body_color = (80, 200, 80)
-            # Body base
             body_rect = pygame.Rect(0,0,size-6, size-6)
             body_rect.center = (cx, cy)
             pygame.draw.rect(screen, body_color, body_rect, border_radius=8)
             pygame.draw.rect(screen, (40,100,30), body_rect, 3, border_radius=8)
-            # Tracks - dark
             pygame.draw.rect(screen, (30,30,30), (cx - size//2 +2, cy - size//2 +4, 8, size-8), border_radius=3)
             pygame.draw.rect(screen, (30,30,30), (cx + size//2 -10, cy - size//2 +4, 8, size-8), border_radius=3)
-            # Turret / cannon direction
-            # Use direction to draw cannon
             import math
             from ..settings import DIR_ANGLE, DIRS
             ang = DIR_ANGLE.get(self.direction, 0)
@@ -1069,34 +1064,26 @@ class EnemyTank(Tank):
             x2 = cx + vx * (size//2 + 8)
             y2 = cy + vy * (size//2 + 8)
             pygame.draw.line(screen, (20,20,20), (cx, cy), (x2, y2), 6)
-            # Monster face on top of tank
-            # Eyes
             t = getattr(self, 'flash_timer', 0)
             bob = (t//10)%4 -2
             eye_y = cy - 6 + bob
-            # White eyes big
             pygame.draw.circle(screen, (255,255,255), (cx-8, eye_y), 7)
             pygame.draw.circle(screen, (255,255,255), (cx+8, eye_y), 7)
-            # Red pupils angry
             pygame.draw.circle(screen, (255,0,0), (cx-8, eye_y), 3)
             pygame.draw.circle(screen, (255,0,0), (cx+8, eye_y), 3)
-            # Horns
             pygame.draw.polygon(screen, (200,30,30), [(cx-14, cy-12), (cx-12, cy-22), (cx-6, cy-12)])
             pygame.draw.polygon(screen, (200,30,30), [(cx+6, cy-12), (cx+12, cy-22), (cx+14, cy-12)])
-            # Mouth
             pygame.draw.arc(screen, (0,0,0), (cx-10, eye_y+4, 20, 12), 0, 3.14, 3)
-            # Teeth
             pygame.draw.rect(screen, (255,255,200), (cx-6, eye_y+8, 3, 5))
             pygame.draw.rect(screen, (255,255,200), (cx+3, eye_y+8, 3, 5))
-            # Venom drip from mouth when about to shoot
             if random.random() < 0.3:
                 pygame.draw.circle(screen, (80, 200, 40), (cx, eye_y+14), 2)
                 pygame.draw.circle(screen, (60, 180, 60), (cx+1, eye_y+16), 1)
-            # Speed lines for 1.5x
             if getattr(self, 'move_timer', 0) % 6 < 3:
                 pygame.draw.line(screen, (255,255,100), (cx-size//2-2, cy-4), (cx-size//2-6, cy-4), 2)
                 pygame.draw.line(screen, (255,255,100), (cx-size//2-2, cy+6), (cx-size//2-7, cy+6), 2)
-            # Boss label and health bar - big
+
+            # Boss label and health bar
             bar_w = 48
             bar_h = 7
             bar_x = cx - bar_w//2
@@ -1107,13 +1094,14 @@ class EnemyTank(Tank):
             frac = max(0, self.health / max_h)
             col = (int(255*(1-frac)), int(255*frac), 0)
             pygame.draw.rect(screen, col, (bar_x, bar_y, int(bar_w*frac), bar_h))
-            # BOSS text
             font = pygame.font.Font(None, 18)
             txt = font.render("BOSS", True, (255,50,50))
             screen.blit(txt, (cx-14, bar_y-14))
-            # Flash when powerup carrier or invulnerable
             if self.powerup_carrier and (self.flash_timer // 8) % 2 == 0:
-                pygame.draw.rect(screen, (255,50,50), body_rect, 3, border_radius=8)
+                try:
+                    pygame.draw.rect(screen, (255,50,50), body_rect, 3, border_radius=8)
+                except:
+                    pass
             return
 
         if self.powerup_carrier:

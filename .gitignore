@@ -26,3 +26,11 @@ game/assets/sounds/battle_city_intro_classic.wav
 crash.log
 bug_trace.log
 debug.db
+
+# Web pure deps
+web-pure/node_modules/
+web-pure/playwright-report/
+web-pure/test-results/
+web-pure/debug_logs.json
+web-pure/assets/sounds/
+web-pure/assets/images/*.tmp

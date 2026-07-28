@@ -1,6 +1,7 @@
 import pygame
 import math
 import heapq
+import random
 from collections import deque
 from ..settings import *
 
@@ -524,15 +525,28 @@ class Bullet:
         if self.homing:
             self._update_homing(tilemap, tanks)
 
-        # move - use vx,vy for homing, else use DIRS[dir]
-        if self.homing:
+        # move - use vx,vy for homing, flamethrower, else DIRS[dir]
+        if getattr(self, 'flame', False) or getattr(self, 'bullet_type', '') == 'flamethrower':
+            # Flamethrower: cone spread, short range limited by life / max_distance
+            dx = getattr(self, 'vx', DIRS.get(self.dir, (0, -1))[0])
+            dy = getattr(self, 'vy', DIRS.get(self.dir, (0, -1))[1])
+            self.x += dx * self.speed
+            self.y += dy * self.speed
+            self.travelled = getattr(self, 'travelled', 0) + self.speed
+            if hasattr(self, 'life'):
+                self.life -= 1
+                if self.life <= 0:
+                    self.alive = False
+                    return 'out'
+            if self.travelled >= getattr(self, 'max_distance', 80):
+                self.alive = False
+                return 'out'
+        elif self.homing:
             nx = self.x + self.vx * self.speed
             ny = self.y + self.vy * self.speed
-            # travel tracking
             self.travelled += math.hypot(nx - self.x, ny - self.y)
             self.x = nx
             self.y = ny
-            # check max distance - exhaust
             if self.travelled >= self.max_distance:
                 self.alive = False
                 return 'out_of_fuel'
@@ -566,6 +580,16 @@ class Bullet:
         gy = int((self.y - PLAYFIELD_Y) // ts)
         if 0 <= gx < gw and 0 <= gy < gh:
             tt = tilemap.tiles[gy][gx]
+            # Flamethrower instant melts bricks, forest, ice - steel takes 2 hits
+            if getattr(self, 'bullet_type', '') == 'flamethrower' or getattr(self, 'flame', False):
+                if tt in (TILE_BRICK, TILE_GRASS, TILE_ICE):
+                    destroyed = tilemap.destroy_tile(gx, gy, 2, self.dir, 'flamethrower')
+                    # Flame continues through soft tiles
+                    return 'hit_brick' if tt==TILE_BRICK else None
+                elif tt == TILE_STEEL:
+                    # Steel needs 2 flame hits
+                    tilemap.destroy_tile(gx, gy, 1, self.dir, 'flamethrower')
+                    return None
             if tt == TILE_BRICK:
                 if self.homing:
                     # NEW BEHAVIOR (user request): homing missile damages brick walls progressively
@@ -724,13 +748,10 @@ class Bullet:
                         pass
                     return 'hit_steel'
 
-        # base collision
+        # base collision - with big authentic explosion
         if base and base.alive:
             if base.rect.collidepoint(self.x, self.y):
-                # Homing should never hit own base? If player missile, avoid base too? But base is at bottom, usually not in path to enemies.
-                # Allow homing to avoid base similarly? For now keep behavior: if homing from player, avoid base as obstacle? Base is not in tilemap, but we can treat as blocking for player homing.
                 if self.homing and self.owner.startswith('player'):
-                    # bounce away from base
                     cx, cy = base.rect.center
                     away_x = self.x - cx
                     away_y = self.y - cy
@@ -749,6 +770,14 @@ class Bullet:
                     try:
                         from ..sound_manager import sound_manager
                         sound_manager.play_explosion(big=True)
+                    except:
+                        pass
+                    # Big base explosion will be handled by particle system in game.py release_monster_boss already adds
+                    # but add an initial base hit flash as well
+                    try:
+                        from ..entities.particles import ParticleSystem as _PS
+                        # We can't access game particles here, but game.py will add explosion in update after base.alive check
+                        pass
                     except:
                         pass
                     return 'hit_base'
@@ -844,38 +873,35 @@ class Bullet:
                 else:
                     pygame.draw.circle(screen, (100, 100, 100), (int(tx), int(ty)), size//2)
         # bullet body
-        if self.homing:
-            # missile shape: elongated with direction + fuel indicator
-            # fuel low -> flicker red
+        if getattr(self, 'bullet_type', '') == 'flamethrower' or getattr(self, 'flame', False):
+            # Flamethrower - NES style flame cone
+            life_ratio = getattr(self, 'life', 10) / getattr(self, 'max_life', 12)
+            size = int(8 * life_ratio + 3)
+            # Orange-yellow flicker
+            flicker = random.randint(-20, 20)
+            col = (min(255, self.color[0] + flicker), min(255, self.color[1] + flicker//2), 10)
+            pygame.draw.circle(screen, col, (int(self.x), int(self.y)), size)
+            pygame.draw.circle(screen, (255, 240, 180), (int(self.x), int(self.y)), max(1, size//2))
+        elif self.homing:
             fuel_ratio = 1.0
             if hasattr(self, 'travelled'):
                 fuel_ratio = max(0, 1.0 - self.travelled / max(self.max_distance, 1))
             base_col = self.color
             if fuel_ratio < 0.25:
-                # flicker red when low
                 if pygame.time.get_ticks() % 200 < 100:
                     base_col = (255, 40, 40)
             pygame.draw.circle(screen, base_col, (int(self.x), int(self.y)), BULLET_SIZE//2 + 3)
             pygame.draw.circle(screen, (255, 220, 0), (int(self.x), int(self.y)), BULLET_SIZE//2 + 1)
-            # direction indicator line
             if hasattr(self, 'vx'):
                 lx = int(self.x - self.vx * 8)
                 ly = int(self.y - self.vy * 8)
                 pygame.draw.line(screen, (255, 80, 0), (int(self.x), int(self.y)), (lx, ly), 2)
-            # waypoint debug? Disabled, but useful: draw small waypoint marker
-            # if self.waypoint:
-            #     pygame.draw.circle(screen, (0,255,0), (int(self.waypoint[0]), int(self.waypoint[1])), 3, 1)
-            # draw remaining range circle when very low? Not needed but helpful visual: draw faint range
             if fuel_ratio < 0.35:
-                # draw dashed low fuel warning ring? Keep minimal
                 pass
-            # Draw avoidance vector debug? ignore
         elif getattr(self, 'venom', False):
-            # Venom spit - gooey green blob with drips
             pygame.draw.circle(screen, (20, 100, 20), (int(self.x), int(self.y)), BULLET_SIZE//2 + 3)
             pygame.draw.circle(screen, (80, 220, 80), (int(self.x), int(self.y)), BULLET_SIZE//2 + 1)
             pygame.draw.circle(screen, (160, 255, 160), (int(self.x)+1, int(self.y)-1), 2)
-            # drip trail
             for i, (tx, ty) in enumerate(self.trail[-4:]):
                 pygame.draw.circle(screen, (60, 180, 60), (int(tx), int(ty+2)), 2)
         else:
@@ -903,7 +929,7 @@ class Base:
         self.is_monster = True
         self.monster_released = False
         self.release_animation_timer = 0
-        self.monster_type = 'cage_monster'  # cute monster in cage
+        self.monster_type = 'cage_monster'  # cute green blob monster in cage (boss back to original)
 
     def take_damage(self):
         if not self.alive:
@@ -933,46 +959,31 @@ class Base:
 
     def draw(self, screen):
         if self.alive:
-            # Draw monster in cage - to protect
-            # Cage background - dark with bars
+            # Draw monster in cage - to protect (back to original green blob boss)
             pygame.draw.rect(screen, (30, 20, 10), self.rect)  # cage dark brown
             pygame.draw.rect(screen, (80, 60, 30), self.rect, 4)  # cage border
-            # Bars - vertical
             for i in range(3):
                 bx = self.rect.left + 8 + i*14
                 pygame.draw.rect(screen, (120, 90, 40), (bx, self.rect.top+2, 4, self.rect.height-4))
-            # Horizontal bars
             pygame.draw.rect(screen, (120, 90, 40), (self.rect.left, self.rect.top+14, self.rect.width, 3))
             pygame.draw.rect(screen, (120, 90, 40), (self.rect.left, self.rect.bottom-16, self.rect.width, 3))
 
-            # Monster inside - cute blob
             cx = self.rect.centerx
             cy = self.rect.centery + 2
             t = pygame.time.get_ticks()
-            bob = int(2 * pygame.math.Vector2(0,1).rotate(t//200).y) if False else (t//200)%4 -2  # small bob
-            # Monster body - round, color changing slightly
-            monster_color = (100, 200, 80)  # green monster
-            # Body shadow
+            bob = (t//200)%4 -2
+            monster_color = (100, 200, 80)  # green monster - original boss look
             pygame.draw.ellipse(screen, (60, 120, 40), (cx-16, cy-8+bob, 32, 26))
-            # Main body
             pygame.draw.ellipse(screen, monster_color, (cx-14, cy-10+bob, 28, 22))
-            # Eyes - big cute
             eye_y = cy - 4 + bob
-            # White eyes
             pygame.draw.circle(screen, (255,255,255), (cx-6, eye_y), 5)
             pygame.draw.circle(screen, (255,255,255), (cx+6, eye_y), 5)
-            # Pupils - look around slightly
-            px_offset = int(2 * (t % 2000) / 2000) -1
-            # Simple tracking - pupils follow time
             pupil_x = int((t//300) % 3) -1
             pygame.draw.circle(screen, (0,0,0), (cx-6+pupil_x, eye_y), 2)
             pygame.draw.circle(screen, (0,0,0), (cx+6+pupil_x, eye_y), 2)
-            # Mouth - small
             pygame.draw.arc(screen, (0,0,0), (cx-6, eye_y+2, 12, 8), 0, 3.14, 2)
-            # Small horns
             pygame.draw.polygon(screen, (200, 50, 50), [(cx-12, cy-10+bob), (cx-10, cy-18+bob), (cx-6, cy-10+bob)])
             pygame.draw.polygon(screen, (200, 50, 50), [(cx+6, cy-10+bob), (cx+10, cy-18+bob), (cx+12, cy-10+bob)])
-            # Label "PROTECT ME!"
             font = pygame.font.Font(None, 14)
             txt = font.render("PROTECT", True, (255,255,100))
             screen.blit(txt, (cx-18, self.rect.top-16))

@@ -231,9 +231,10 @@ if not MEGA_ENABLED:
     ENEMY_SPAWNS = [(0, 0), (12, 0), (24, 0)]
     BASE_POS = (12, 24)
 
-# Powerups - classic + new items (homing missile, 8-way spread, rapid fire 3x, shrink, giant)
+# Powerups - classic + new items (homing missile, 8-way spread, rapid fire 3x, shrink, giant, monster_truck)
 # grenade renamed to bomb per user request - now does armor damage, explodes only if no armor left
-POWERUP_TYPES = ['helmet', 'clock', 'shovel', 'star', 'grenade', 'tank', 'gun', 'homing', 'spread', 'rapid', 'shrink', 'giant']
+# monster_truck: new item - 2x bigger monster truck icon, crushes enemies + bricks + forest + steel
+POWERUP_TYPES = ['helmet', 'clock', 'shovel', 'star', 'grenade', 'tank', 'gun', 'homing', 'spread', 'rapid', 'shrink', 'giant', 'monster_truck']
 
 # Bomb (grenade) armor damage - new behavior: causes armor hurt, explodes only if no armor left
 BOMB_ARMOR_DAMAGE = 100  # how much armor damage bomb does to each enemy on screen
@@ -247,6 +248,7 @@ POWERUP_DURATION = {
     'rapid': 10 * FPS,    # rapid fire 3x attack speed - now PERM until death
     'shrink': 15 * FPS,   # half size double speed for 15s
     'giant': 15 * FPS,    # double size crush bricks + enemies for 15s
+    'monster_truck': 15 * FPS,  # monster truck 2x crush all including steel/forest
 }
 STAR_LEVELS = 4
 
@@ -255,6 +257,9 @@ SHRINK_SCALE = 0.5
 SHRINK_SPEED_MULT = 2.0
 GIANT_SCALE = 2.0
 GIANT_DURATION = 15 * FPS
+MONSTER_TRUCK_SCALE = 2.0
+MONSTER_TRUCK_DURATION = 15 * FPS
+MONSTER_TRUCK_SPEED_MULT = 1.6
 MONSTER_SPEED_MULT = 1.0  # slowed to normal enemy speed per user request (was 1.5x player)
 VENOM_DISSOLVE_TIME = 18 * FPS  # slowed down venom: was 10s, now 18s for more time to counter (user request)
 VENOM_SPEED = BULLET_SPEED * 0.45  # slowed down venom: was 0.7x bullet speed, now 0.45x (slower)
@@ -269,10 +274,27 @@ VENOM_SPILLOVER_ENEMY_DAMAGE_FACTOR = 1.0  # full damage to enemies
 VENOM_SPILLOVER_PLAYER_DAMAGE_FACTOR = 0.5  # half damage to other player (Chad/Lida friendly fire spillover)
 VENOM_SPILLOVER_BOSS_DAMAGE_FACTOR = 0.7  # boss takes less from spillover
 
-# Enemy count per level
+# Enemy count per level - progressive difficulty (user request: counter + increasing)
+# total_stages_cleared counter tracks how many stages player passed (persistent, never modulo)
+# Formulas used in game.py get_enemies_total, get_difficulty, init_level, init_next_level
 ENEMIES_PER_LEVEL = 20
 MAX_ENEMIES_ON_FIELD = 4
 ENEMY_SPAWN_INTERVAL = 2.5 * FPS
+
+# Progressive difficulty tuning - synced to web via scripts/generate_web_assets.py
+DIFFICULTY_MAX_ENEMIES_BASE = 4       # start 4 on field
+DIFFICULTY_MAX_ENEMIES_PER_STAGE = 0.5  # +1 per 2 stages cleared (total_stages_cleared // 2)
+DIFFICULTY_MAX_ENEMIES_CAP = 12       # was 8, now 12 for late game challenge
+DIFFICULTY_SPAWN_BASE = 2.5 * FPS     # 2.5 sec
+DIFFICULTY_SPAWN_PER_STAGE = 0.08 * FPS  # -0.08 sec per stage cleared (was 0.12, but now scales with total)
+DIFFICULTY_SPAWN_MIN = 0.4 * FPS       # was 0.8s, now 0.4s for intense late game
+DIFFICULTY_RAMP_INTERVAL = 12 * FPS   # every 12 sec within level: +1 max enemies, faster spawn
+DIFFICULTY_RAMP_SPAWN_DECREMENT = 8   # frames decrement per ramp (8 frames ~0.13s)
+DIFFICULTY_ENEMY_TOTAL_PER_STAGE = 2  # +2 enemies total per stage cleared
+DIFFICULTY_ENEMY_TOTAL_PER_LOOP = 5   # +5 extra per full 35-stage loop
+DIFFICULTY_SPEED_PER_LOOP = 0.12      # enemy speed multiplier +12% per loop
+DIFFICULTY_SHOOT_PER_LOOP = 0.15      # shoot chance +15% per loop
+DIFFICULTY_LOOP_ARMOR_MULT = 1        # extra armor type spawn weight after loop 1
 
 # Arcade Coin System - Each coin = 10 lives
 INITIAL_LIVES = 3

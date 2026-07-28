@@ -34,6 +34,12 @@ def clean_db():
         (ROOT / "bug_trace.log").unlink(missing_ok=True)
     except:
         pass
+    # clear pygame event queue to prevent cross-test pollution (menu tests failing if previous tests left events)
+    try:
+        import pygame
+        pygame.event.clear()
+    except:
+        pass
     # ensure DB exists and has tables
     db_path = ROOT / "debug.db"
     if not db_path.exists():
@@ -51,7 +57,12 @@ def clean_db():
         from game.debug_logger import debug_logger
         # end session but don't delete DB file (keep for next test)
         debug_logger.end_session()
-        time.sleep(0.1)
+        time.sleep(0.05)
+    except:
+        pass
+    try:
+        import pygame
+        pygame.event.clear()
     except:
         pass
 

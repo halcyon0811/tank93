@@ -23,6 +23,13 @@ except Exception:
     def get_tank_sprite_scaled(*a, **k):
         return None
 
+# Nailong image moved to optional - player back to original OG tank icon per user request
+# Keep cache for future optional cosmetic, but not used by default
+_NAILONG_IMG_CACHE = {}
+def _get_nailong_img(size=40):
+    # Disabled for OG taste - return None, player uses authentic NES General-Sprites.png
+    return None
+
 class Tank:
     def __init__(self, grid_x, grid_y, color, is_player=False, is_mega=None):
         self.grid_x = grid_x
@@ -70,8 +77,15 @@ class Tank:
         # size effects
         self.shrink_timer = 0
         self.giant_timer = 0
+        self.monster_truck_timer = 0
         self.is_shrunk = False
         self.is_giant = False
+        self.is_monster_truck = False
+
+        # Monster truck starting vehicle flamethrower
+        self.flamethrower_active = False
+        self.flamethrower_level = 0
+        self.flamethrower_cooldown = 0
 
         # venom
         self.venom_timer = 0
@@ -85,30 +99,50 @@ class Tank:
         self.last_pos = (self.x, self.y)
 
     def update_size_state(self):
+        # Monster truck has highest priority - 2x bigger, crushes everything
+        if self.monster_truck_timer > 0:
+            self.monster_truck_timer -= 1
+            self.is_monster_truck = True
+            self.current_scale = MONSTER_TRUCK_SCALE
+            self.speed = self.base_speed * MONSTER_TRUCK_SPEED_MULT
+            if self.monster_truck_timer == 0:
+                self.is_monster_truck = False
+                # Restore based on other timers
+                if self.shrink_timer > 0 and self.giant_timer > 0:
+                    self.current_scale = 1.0
+                    self.speed = self.base_speed * SHRINK_SPEED_MULT
+                elif self.shrink_timer > 0:
+                    self.current_scale = SHRINK_SCALE
+                    self.speed = self.base_speed * SHRINK_SPEED_MULT
+                elif self.giant_timer > 0:
+                    self.current_scale = GIANT_SCALE
+                    self.speed = self.base_speed
+                else:
+                    self.current_scale = 1.0
+                    self.speed = self.base_speed
+                self._update_rect_size()
+            self._update_rect_size()
+            return  # monster truck overrides shrink/giant synergy while active
+
         # Handle shrink/giant timers with synergy: small+giant = normal size, fast speed, crush bricks
-        # This implements user request: small + giant can have normal size tank but run over bricks and speed like small one
         if self.shrink_timer > 0 and self.giant_timer > 0:
-            # Synergy: both active
             self.shrink_timer -= 1
             self.giant_timer -= 1
             self.is_shrunk = True
             self.is_giant = True
-            self.current_scale = 1.0  # normal size
-            self.speed = self.base_speed * SHRINK_SPEED_MULT  # fast like small
-            # Handle expiry
+            self.current_scale = 1.0
+            self.speed = self.base_speed * SHRINK_SPEED_MULT
             if self.shrink_timer == 0:
                 self.is_shrunk = False
-                # If giant still active, go to giant only
                 if self.giant_timer > 0:
                     self.current_scale = GIANT_SCALE
-                    self.speed = self.base_speed  # giant solo speed base
+                    self.speed = self.base_speed
                 else:
                     self.current_scale = 1.0
                     self.speed = self.base_speed
                 self._update_rect_size()
             if self.giant_timer == 0:
                 self.is_giant = False
-                # If shrink still active, go to shrink only
                 if self.shrink_timer > 0:
                     self.current_scale = SHRINK_SCALE
                     self.speed = self.base_speed * SHRINK_SPEED_MULT
@@ -116,7 +150,6 @@ class Tank:
                     self.current_scale = 1.0
                     self.speed = self.base_speed
                 self._update_rect_size()
-            # Log synergy
             try:
                 if self.shrink_timer % 60 == 0 or self.giant_timer % 60 == 0:
                     from .logger_integration import safe_log_gameplay
@@ -140,13 +173,11 @@ class Tank:
             if self.giant_timer == 0:
                 self.is_giant = False
                 self.current_scale = SHRINK_SCALE if self.is_shrunk else 1.0
-                # speed back to normal or shrunk
                 if self.is_shrunk:
                     self.speed = self.base_speed * SHRINK_SPEED_MULT
                 else:
                     self.speed = self.base_speed
                 self._update_rect_size()
-        # update rect size based on scale
         self._update_rect_size()
 
     def _update_rect_size(self):
@@ -343,14 +374,16 @@ class Tank:
         # Previously 24x24 required perfect centering, now 20x20 allows ±2px tolerance, feels better
         # Giant/boss keep full rect for crush detection
         is_giant = getattr(self, 'is_giant', False) and getattr(self, 'giant_timer', 0) > 0
+        is_monster_truck = getattr(self, 'is_monster_truck', False) and getattr(self, 'monster_truck_timer', 0) > 0
         is_boss = getattr(self, 'is_boss', False)
-        can_crush_brick = is_giant or is_boss
+        can_crush_brick = is_giant or is_boss or is_monster_truck
+        can_crush_all = is_monster_truck or is_boss  # monster truck crushes bricks, forest, steel
         is_shrunk = getattr(self, 'is_shrunk', False) and getattr(self, 'shrink_timer', 0) > 0
 
-        if can_crush_brick:
-            tile_check_rect = new_rect.copy()  # full 32 for crush detection
+        if can_crush_all or can_crush_brick:
+            tile_check_rect = new_rect.copy()  # full for crush detection (2x for monster truck)
         elif is_shrunk:
-            tile_check_rect = new_rect.inflate(-16, -16)  # shrink: 32*0.5=16 visual, but collision 16 -> 32-16=16, even smaller for easy passage
+            tile_check_rect = new_rect.inflate(-16, -16)
         else:
             # Normal tank: 20x20 collision (was 24x24) - allows passing through single destroyed brick (24px gap) with 4px clearance
             # TANK_SIZE 32, TILE 24, collision 20 = 6px visual overlap each side when squeezing, acceptable
@@ -358,34 +391,61 @@ class Tank:
 
         tiles = tilemap.get_tiles_in_rect(tile_check_rect)
         crushed_bricks = []
-        for ttype, gx, gy, trect in tiles:
+        # For monster truck, also scan forest/grass tiles directly since get_tiles_in_rect excludes grass/ice
+        extra_tiles = []
+        if can_crush_all:
+            left = max(0, int((tile_check_rect.left - PLAYFIELD_X) // tilemap.tile_size))
+            right = min(tilemap.grid_w-1, int((tile_check_rect.right -1 - PLAYFIELD_X) // tilemap.tile_size))
+            top = max(0, int((tile_check_rect.top - PLAYFIELD_Y) // tilemap.tile_size))
+            bottom = min(tilemap.grid_h-1, int((tile_check_rect.bottom -1 - PLAYFIELD_Y) // tilemap.tile_size))
+            for gy in range(top, bottom+1):
+                for gx in range(left, right+1):
+                    t = tilemap.tiles[gy][gx]
+                    if t in (TILE_GRASS, TILE_STEEL, TILE_BRICK):
+                        trect = pygame.Rect(
+                            PLAYFIELD_X + gx * tilemap.tile_size,
+                            PLAYFIELD_Y + gy * tilemap.tile_size,
+                            tilemap.tile_size, tilemap.tile_size
+                        )
+                        if tile_check_rect.colliderect(trect):
+                            extra_tiles.append((t, gx, gy, trect))
+
+        # Combine normal blocking tiles + extra forest for monster truck
+        all_tiles = tiles + extra_tiles if can_crush_all else tiles
+        for ttype, gx, gy, trect in all_tiles:
             if tile_check_rect.colliderect(trect):
-                if can_crush_brick:
-                    # Giant and boss can crush brick, boss can also crush steel for escape (user request)
+                if can_crush_all:
+                    if ttype in (TILE_BRICK, TILE_STEEL, TILE_GRASS):
+                        crushed_bricks.append((gx, gy))
+                        continue
+                elif can_crush_brick:
                     if ttype == TILE_BRICK:
                         crushed_bricks.append((gx, gy))
                         continue
                     elif ttype == TILE_STEEL and is_boss:
-                        # Boss can crush steel walls to escape once surrounding wall partially destroyed
-                        # Takes more effort, but allowed
                         crushed_bricks.append((gx, gy))
                         continue
                 if is_turn and (abs(snap_x - self.x) > 0.1 or abs(snap_y - self.y) > 0.1):
-                    # Try without snap (original position + movement only) to allow turning near walls without clipping
                     new_rect2 = self.rect.copy()
                     new_rect2.center = (self.x + dx * self.speed * speed_mult, self.y + dy * self.speed * speed_mult)
-                    if can_crush_brick:
+                    if can_crush_all:
+                        tile_check_rect2 = new_rect2.copy()
+                    elif can_crush_brick:
                         tile_check_rect2 = new_rect2.copy()
                     elif is_shrunk:
                         tile_check_rect2 = new_rect2.inflate(-16, -16)
                     else:
-                        tile_check_rect2 = new_rect2.inflate(-12, -12)  # 20x20 for normal (was 24x24)
+                        tile_check_rect2 = new_rect2.inflate(-12, -12)
                     tiles2 = tilemap.get_tiles_in_rect(tile_check_rect2)
                     blocked2 = False
                     for t2, gx2, gy2, tr2b in tiles2:
                         if not tile_check_rect2.colliderect(tr2b):
                             continue
+                        if can_crush_all and t2 in (TILE_BRICK, TILE_STEEL, TILE_GRASS):
+                            continue
                         if t2 == TILE_BRICK and can_crush_brick:
+                            continue
+                        if t2 == TILE_STEEL and is_boss:
                             continue
                         blocked2 = True
                         break
@@ -396,9 +456,11 @@ class Tank:
                         new_rect = new_rect2
                         tile_check_rect = tile_check_rect2
                         tiles = tiles2
-                        # collect crushed bricks for new_rect2
                         for t2, gx2, gy2, _ in tiles2:
-                            if t2 == TILE_BRICK and can_crush_brick and tile_check_rect2.colliderect(_):
+                            if can_crush_all and t2 in (TILE_BRICK, TILE_STEEL, TILE_GRASS) and tile_check_rect2.colliderect(_):
+                                if (gx2, gy2) not in crushed_bricks:
+                                    crushed_bricks.append((gx2, gy2))
+                            elif t2 == TILE_BRICK and can_crush_brick and tile_check_rect2.colliderect(_):
                                 if (gx2, gy2) not in crushed_bricks:
                                     crushed_bricks.append((gx2, gy2))
                     else:
@@ -406,10 +468,8 @@ class Tank:
                         self._log_stuck_if_needed(dir_name)
                         return False
                 else:
-                    # Try sliding through 1-tile gap: if moving vertically, nudge X slightly to find gap; if horizontal, nudge Y
-                    # This helps passing through destroyed brick channel even if not perfectly centered (user report)
                     slid = False
-                    if not can_crush_brick:
+                    if not can_crush_brick and not can_crush_all:
                         for offset in (4, -4, 8, -8, 12, -12):
                             test_x = new_x
                             test_y = new_y
@@ -450,39 +510,38 @@ class Tank:
                         return False
 
         for gx, gy in crushed_bricks:
+            btype = 'monster_truck' if is_monster_truck else 'normal'
             try:
-                tilemap.destroy_tile(gx, gy, 2, dir_name)
-            except:
+                tilemap.destroy_tile(gx, gy, 2, dir_name, btype)
+            except TypeError:
                 try:
-                    tilemap.destroy_tile(gx, gy, 2)
+                    tilemap.destroy_tile(gx, gy, 2, dir_name)
                 except:
-                    pass
-            # Log brick crush by giant/boss
+                    try:
+                        tilemap.destroy_tile(gx, gy, 2)
+                    except:
+                        pass
             try:
                 from .logger_integration import safe_log_gameplay
-                safe_log_gameplay("BRICK_CRUSH", data={"x": gx, "y": gy, "by": "giant" if is_giant else "boss" if is_boss else "unknown", "dir": dir_name})
+                crusher = "monster_truck" if is_monster_truck else "giant" if is_giant else "boss" if is_boss else "unknown"
+                safe_log_gameplay("BRICK_CRUSH", data={"x": gx, "y": gy, "by": crusher, "dir": dir_name})
             except:
                 pass
 
-        # tank-tank collision - strict full rects to prevent any visual overlap, giant/boss can run over enemies
+        # tank-tank collision - giant / monster_truck / boss can crush enemies
         for other in other_tanks:
             if other is self or not other.alive:
                 continue
             if new_rect.colliderect(other.rect):
-                # If self is player giant and other is enemy, crush it
-                if is_giant and self.is_player and not other.is_player:
-                    # Crush enemy
+                if (is_giant or is_monster_truck) and self.is_player and not other.is_player:
                     try:
                         other.die()
-                        # score?
                         if hasattr(self, 'score'):
                             self.score += getattr(other, 'score_value', 100)
                     except:
                         other.alive = False
-                    continue  # don't block, ran over
-                # Boss monster can crush enemy tanks too (free-for-all)
+                    continue
                 if is_boss and not getattr(other, 'is_player', False) and not getattr(other, 'is_boss', False):
-                    # Boss crushes normal enemy tanks
                     try:
                         other.die()
                         from .logger_integration import safe_log_gameplay
@@ -490,7 +549,6 @@ class Tank:
                     except:
                         other.alive = False
                     continue
-                # Shrink can go through smaller gaps? No, still block
                 self.stuck_timer = getattr(self, 'stuck_timer', 0) + 1
                 self._log_stuck_if_needed(dir_name)
                 return False
@@ -675,32 +733,152 @@ class Tank:
     def draw(self, screen, tilemap=None):
         if not self.alive:
             return
-        
-        # Forest hiding check - if in forest, mostly hide tank
+
+        # Monster Truck has highest visual priority - NES style blue truck image
+        if getattr(self, 'is_monster_truck', False) and self.monster_truck_timer > 0:
+            cx, cy = self.rect.center
+            scale = getattr(self, 'current_scale', 2.0)
+            size = int((TANK_SIZE - 4) * scale)
+            # Try to load NES truck image if exists, else procedural NES style matching user's image
+            truck_img = None
+            try:
+                # Cache
+                if not hasattr(Tank, '_monster_truck_cache'):
+                    Tank._monster_truck_cache = {}
+                if size not in Tank._monster_truck_cache:
+                    # Try to load file the user provided concept image - we created monster_truck_nes.png
+                    import pathlib
+                    candidates = [
+                        pathlib.Path(__file__).parent.parent / "assets" / "monster_truck_nes.png",
+                        pathlib.Path(__file__).parent.parent / "assets" / "images" / "monster_truck_nes.png",
+                        pathlib.Path(__file__).parent.parent / "assets" / "items" / "battle_city_icon_monster_truck.png",
+                    ]
+                    loaded = None
+                    for p in candidates:
+                        if p.exists():
+                            try:
+                                img = pygame.image.load(str(p)).convert_alpha()
+                                loaded = pygame.transform.smoothscale(img, (size, size)) if size>0 else img
+                                break
+                            except:
+                                pass
+                    if loaded is None:
+                        # Procedural NES monster truck matching user's image: blue with yellow stripes, big black tires
+                        surf = pygame.Surface((size, size), pygame.SRCALPHA)
+                        # Tires
+                        tire_w = max(6, size//4)
+                        tire_h = max(10, size//3)
+                        # Left
+                        pygame.draw.rect(surf, (15,15,15), (2, 4, tire_w, tire_h), border_radius=2)
+                        pygame.draw.rect(surf, (15,15,15), (2, size-tire_h-4, tire_w, tire_h), border_radius=2)
+                        # Right
+                        pygame.draw.rect(surf, (15,15,15), (size-tire_w-2, 4, tire_w, tire_h), border_radius=2)
+                        pygame.draw.rect(surf, (15,15,15), (size-tire_w-2, size-tire_h-4, tire_w, tire_h), border_radius=2)
+                        # Body blue
+                        body_x, body_y = tire_w+1, 6
+                        body_w, body_h = size - (tire_w+1)*2, size-12
+                        pygame.draw.rect(surf, (50,110,230), (body_x, body_y, body_w, body_h), border_radius=2)
+                        pygame.draw.rect(surf, (30,70,180), (body_x, body_y, body_w, body_h), 2, border_radius=2)
+                        # Yellow stripes
+                        stripe_w = max(2, body_w//6)
+                        pygame.draw.rect(surf, (255,230,0), (body_x+body_w//3 - stripe_w//2, body_y+2, stripe_w, body_h-4))
+                        pygame.draw.rect(surf, (255,230,0), (body_x+body_w*2//3 - stripe_w//2, body_y+2, stripe_w, body_h-4))
+                        # Dark cabin top
+                        pygame.draw.rect(surf, (20,30,100), (body_x+2, body_y+2, body_w-4, body_h//3))
+                        # Front bumper dark
+                        pygame.draw.rect(surf, (20,20,80), (body_x+2, body_y+body_h-4, body_w-4, 3))
+                        # Small exhausts like in image (4 small yellow)
+                        ex_y = body_y + body_h//2
+                        for i in range(4):
+                            ex_x = body_x + 4 + i*(body_w-8)//3
+                            pygame.draw.circle(surf, (255,220,50), (ex_x, ex_y), 2)
+                            pygame.draw.circle(surf, (0,0,0), (ex_x, ex_y), 2, 1)
+                        # Headlights
+                        pygame.draw.rect(surf, (40,40,120), (body_x+2, body_y+body_h-10, 4, 6))
+                        pygame.draw.rect(surf, (40,40,120), (body_x+body_w-6, body_y+body_h-10, 4, 6))
+                        # Rotation - handle direction
+                        loaded = surf
+                    Tank._monster_truck_cache[size] = loaded
+                truck_img = Tank._monster_truck_cache[size]
+            except Exception as e:
+                # print(f"Monster truck draw error {e}")
+                truck_img = None
+
+            if truck_img:
+                # Rotate according to direction (top-down)
+                ang_map = {'UP':0, 'RIGHT':90, 'DOWN':180, 'LEFT':270,
+                           'UP_RIGHT':45, 'DOWN_RIGHT':135, 'DOWN_LEFT':225, 'UP_LEFT':315}
+                ang = ang_map.get(self.direction, 0)
+                try:
+                    rotated = pygame.transform.rotate(truck_img, -ang)
+                    rect = rotated.get_rect(center=(cx, cy))
+                    # Shadow
+                    shadow = pygame.Surface(rotated.get_size(), pygame.SRCALPHA)
+                    shadow.fill((0,0,0,0))
+                    # Simple shadow offset
+                    screen.blit(rotated, rect)
+                    # Crushing effect - orange sparks under tires when moving near bricks
+                    if getattr(self, 'move_timer', 0) % 3 == 0:
+                        for dx in (-size//3, size//3):
+                            px = cx + dx + random.randint(-3,3)
+                            py = cy + random.randint(-6,6)
+                            pygame.draw.circle(screen, (255,180,40), (px, py), 2)
+                except:
+                    screen.blit(truck_img, truck_img.get_rect(center=(cx,cy)))
+            else:
+                # Fallback rects if image fails
+                pygame.draw.rect(screen, (50,110,230), (cx-size//2, cy-size//2, size, size))
+
+            # Name tag + timer
+            pid = getattr(self, 'player_id', 1)
+            timer_sec = self.monster_truck_timer // 60
+            try:
+                from ..settings import get_player_display_name
+                dname = get_player_display_name(pid)
+            except:
+                dname = f"P{pid}"
+            font = pygame.font.Font(None, 14)
+            txt = font.render(f"{dname} TRUCK {timer_sec}s", True, (255,240,100))
+            bg = pygame.Surface((txt.get_width()+6, txt.get_height()+2))
+            bg.fill((0,0,0))
+            screen.blit(bg, (cx - txt.get_width()//2 -3, self.rect.top - 30))
+            screen.blit(txt, (cx - txt.get_width()//2, self.rect.top - 30))
+
+            # Armor bar (same as normal)
+            if hasattr(self, 'armor') and self.max_armor > 0 and self.armor > 0:
+                bar_w, bar_h = 26, 5
+                bx, by = cx, self.rect.top - 14
+                pct = max(0, self.armor / self.max_armor)
+                col = (255,220,80) if pct>0.3 else (255,100,100)
+                pygame.draw.rect(screen, (0,0,0), (bx-bar_w//2-1, by-1, bar_w+2, bar_h+2))
+                pygame.draw.rect(screen, (40,40,50), (bx-bar_w//2, by, bar_w, bar_h))
+                pygame.draw.rect(screen, col, (bx-bar_w//2, by, int(bar_w*pct), bar_h))
+
+            # Shield
+            if self.invulnerable_timer > 0 and (self.invulnerable_timer // 4) % 2 == 0:
+                pygame.draw.circle(screen, (200,200,200), self.rect.center, size//2+8, 2)
+            return  # skip rest of draw for monster truck
+
+        # Forest hiding check
         in_forest = False
         if tilemap and hasattr(tilemap, 'is_in_forest'):
             in_forest = tilemap.is_in_forest(self.x, self.y)
         elif tilemap:
-            # fallback check
             gx = int((self.x - PLAYFIELD_X) // TILE_SIZE)
             gy = int((self.y - PLAYFIELD_Y) // TILE_SIZE)
             if 0 <= gx < GRID_W and 0 <= gy < GRID_H:
                 if tilemap.tiles[gy][gx] == TILE_GRASS:
                     in_forest = True
         
-        # For enemy tanks in forest: completely hidden
         if in_forest and not self.is_player:
-            # Enemy completely hidden in forest - don't draw at all
             return
         
-        # For player in forest: show subtle hint (15% visibility)
         forest_alpha = 1.0
         is_player_in_forest = False
         if in_forest and self.is_player:
             is_player_in_forest = True
-            forest_alpha = 0.18  # 18% visibility for own tank in forest
+            forest_alpha = 0.18
 
-        # Venom dissolve visual
         venom_t = getattr(self, 'venom_timer', 0)
         venom_lv = getattr(self, 'venom_level', 0)
         if venom_t > 0 and hasattr(self, 'venom_timer'):
@@ -708,33 +886,25 @@ class Tank:
             if int(pygame.time.get_ticks()/100) % 2 == 0 or diss > 0.5:
                 pass
 
-        # If authentic NES sprites available, use them for true retro look matching downloaded_maps
-        # This matches General-Sprites.png ripped from NES ROM (yellow player, green P2, silver enemy, red power)
         shield_flicker = self.invulnerable_timer > 0 and (self.invulnerable_timer // 4) % 2 == 0
         if shield_flicker:
-            # draw shield (NES had blinking shield)
             pygame.draw.circle(screen, (200,200,200), self.rect.center, TANK_SIZE//2+6, 2)
 
-        # Determine which sprite color to use based on downloaded_maps + original NES sheet
-        # P1 = yellow, P2 = green, Enemy basic = silver (gray), fast = gray but faster, power = red, armor = red/purple (we use red)
-        # Star levels: for player, increasing power shows bigger gun – we will map level to sprite row
         sprite_color = None
         sprite_level = 0
 
-        # Check for powerup carrier flashing (original NES flashes red/silver) – we already flash red in subclass but here handle base
         is_powerup_flash = getattr(self, 'powerup_carrier', False) and getattr(self, 'flash_timer', 0) % 16 < 8 and hasattr(self, 'flash_timer') and ((self.flash_timer // 8) % 2 == 0) if hasattr(self, 'flash_timer') else False
 
         if self.is_player:
-            # P1 yellow, P2 green
+            # Player back to original OG tank icon (General-Sprites.png) per user request
+            # Nailong not fitting OG taste - revert to yellow P1 / green P2 authentic NES
             pid = getattr(self, 'player_id', 1)
             if pid == 1:
                 sprite_color = 'yellow'
             else:
                 sprite_color = 'green'
-            # star level mapping: 0 basic (small gun), 1 fast? Actually armor level shows bigger? Use star_level as level index
             sprite_level = getattr(self, 'star_level', 0)  # 0-3
         else:
-            # enemy
             etype = getattr(self, 'enemy_type', 'basic')
             if etype == 'basic':
                 sprite_color = 'silver'

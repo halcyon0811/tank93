@@ -204,14 +204,52 @@ class TileMap:
         return False
 
     def destroy_tile(self, gx, gy, bullet_power=1, bullet_dir=None, bullet_type='normal'):
-        """All weapons destroy bricks/steel with different hit counts - steel harder than brick (user request)"""
+        """All weapons destroy bricks/steel with different hit counts - steel harder than brick (user request)
+        Monster truck (bullet_type='monster_truck') instantly crushes brick, steel, forest"""
         if not (0 <= gx < self.grid_w and 0 <= gy < self.grid_h):
             return False
         
         t = self.tiles[gy][gx]
         if t == TILE_EMPTY:
             return False
+
+        # Monster truck instant crush - bricks, steel, forest, ice all
+        if bullet_type == 'monster_truck':
+            if t in (TILE_BRICK, TILE_STEEL, TILE_GRASS, TILE_ICE):
+                self.tiles[gy][gx] = TILE_EMPTY
+                self.brick_health.pop((gx, gy), None)
+                if HAS_DEBUG:
+                    try:
+                        safe_log_gameplay("MONSTER_TRUCK_CRUSH", data={"x": gx, "y": gy, "type": t})
+                    except:
+                        pass
+                return True
+            return False
+
+        # Flamethrower melts bricks, forest, ice instantly, steel needs 2 hits
+        if bullet_type == 'flamethrower':
+            if t in (TILE_BRICK, TILE_GRASS, TILE_ICE):
+                self.tiles[gy][gx] = TILE_EMPTY
+                self.brick_health.pop((gx, gy), None)
+                return True
+            elif t == TILE_STEEL:
+                key = (gx, gy)
+                cur = self.brick_health.get(key, 0) + 1
+                if cur >= 2:
+                    self.tiles[gy][gx] = TILE_EMPTY
+                    self.brick_health.pop(key, None)
+                    return True
+                else:
+                    self.brick_health[key] = cur
+                    return False
+            return False
+
+        # Ice not crushable by normal tanks (except monster truck/flamethrower handled above)
+        if t == TILE_ICE:
+            return False
+
         if t not in (TILE_BRICK, TILE_STEEL):
+            # Allow grass crush only for monster truck (handled above), otherwise ignore
             return False
         
         # Determine hits needed based on tile type and bullet type

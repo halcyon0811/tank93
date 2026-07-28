@@ -1,0 +1,33 @@
+{
+  "name": "tank93-web-pure",
+  "version": "1.0.0",
+  "description": "Tank93 pure JS version - 35 original NES maps - synced with Python via scripts/generate_web_assets.py",
+  "type": "module",
+  "scripts": {
+    "sync-assets": "python3 ../scripts/generate_web_assets.py --verbose",
+    "sync-check": "python3 ../scripts/generate_web_assets.py --check",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "e2e": "playwright test",
+    "e2e:headed": "playwright test --headed",
+    "e2e:ui": "playwright test --ui",
+    "dev": "python3 -m http.server 8000",
+    "debug": "echo 'Open http://localhost:8000?debug=1 - console: logger.query({tag:\"STATE\"}), logger.report(), logger.export()'"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.44.0",
+    "vitest": "^1.6.0"
+  },
+  "keywords": [
+    "tank",
+    "battle-city",
+    "nes",
+    "game",
+    "canvas",
+    "35-maps"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  }
+}

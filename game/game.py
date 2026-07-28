@@ -203,7 +203,10 @@ class Game:
         self.menu_selected = 0
         self.menu_mode = 'main'
         self.num_players = 1
-        self.current_level = 0
+        self.current_level = 0  # 0..34 map index (modulo)
+        self.total_stages_cleared = 0  # persistent counter how many stages player passed (never modulo) - progressive difficulty
+        self.current_loop = 0  # how many times player looped 35 maps = total_stages_cleared // 35
+        self.vehicle_choice = 'tank'  # 'tank' or 'monster_truck' - choice at landing page
         self.high_score = 0
         self.menu_hat_cooldown = 0
         self.menu_stuck_timer = 0
@@ -379,22 +382,66 @@ class Game:
             return list(ENEMY_QUEUES_ORIGINAL[lvl])
         return None
 
+    def _get_difficulty_params(self):
+        """Compute progressive difficulty based on total_stages_cleared (persistent counter)
+        More stages passed = more enemies, faster spawn, faster enemy bullets, more co-existing tanks
+        """
+        total = getattr(self, 'total_stages_cleared', 0)
+        loop = total // (len(LEVELS) if LEVELS else 35)
+        # Max enemies on field: 4 + total//2, cap 12 (was 4->8)
+        max_on_field = min(DIFFICULTY_MAX_ENEMIES_CAP, DIFFICULTY_MAX_ENEMIES_BASE + int(total * DIFFICULTY_MAX_ENEMIES_PER_STAGE))
+        # Spawn interval: 2.5s - total*0.08s, min 0.4s (was 2.5->0.8)
+        spawn_interval = max(int(DIFFICULTY_SPAWN_MIN), int(DIFFICULTY_SPAWN_BASE - total * DIFFICULTY_SPAWN_PER_STAGE))
+        # Speed mult for enemies: 1 + loop*0.12
+        speed_mult = 1.0 + loop * DIFFICULTY_SPEED_PER_LOOP
+        # Shoot chance mult: 1 + loop*0.15
+        shoot_mult = 1.0 + loop * DIFFICULTY_SHOOT_PER_LOOP
+        return {
+            "total": total,
+            "loop": loop,
+            "max_on_field": max_on_field,
+            "spawn_interval": spawn_interval,
+            "speed_mult": speed_mult,
+            "shoot_mult": shoot_mult,
+        }
+
     def _get_enemies_total_for_level(self, level_idx):
+        """Total enemies this level - now scales with total_stages_cleared progressive counter"""
+        total_cleared = getattr(self, 'total_stages_cleared', 0)
+        loop = total_cleared // (len(LEVELS) if LEVELS else 35)
         if self.is_mega and self.mega_queues:
             lvl = level_idx % len(self.mega_queues)
             base = len(self.mega_queues[lvl]) if lvl < len(self.mega_queues) else 30
-            extra = lvl * 3 + (lvl // 5) * 4
+            # Progressive: +2 per total cleared +5 per loop + lvl ramp
+            extra = total_cleared * DIFFICULTY_ENEMY_TOTAL_PER_STAGE + loop * DIFFICULTY_ENEMY_TOTAL_PER_LOOP + lvl * 2 + (lvl // 5) * 3
             return base + extra
         lvl = level_idx % len(LEVELS)
         if ENEMY_QUEUES_ORIGINAL and lvl < len(ENEMY_QUEUES_ORIGINAL):
             base = len(ENEMY_QUEUES_ORIGINAL[lvl])
-            extra = lvl * 2 + (lvl // 5) * 3
+            # Progressive: base +2*total +5*loop + lvl ramp (instead of just lvl*2)
+            extra = total_cleared * DIFFICULTY_ENEMY_TOTAL_PER_STAGE + loop * DIFFICULTY_ENEMY_TOTAL_PER_LOOP + lvl * 2 + (lvl // 5) * 3
             return base + extra
-        return ENEMIES_PER_LEVEL + lvl * 3 + (lvl // 4) * 2
+        return ENEMIES_PER_LEVEL + total_cleared * DIFFICULTY_ENEMY_TOTAL_PER_STAGE + loop * DIFFICULTY_ENEMY_TOTAL_PER_LOOP + lvl * 3 + (lvl // 4) * 2
 
     def init_level(self, level_idx, num_players=1):
         old_state = getattr(self, 'state', 'unknown')
-        _trace_log("LEVEL", f"init_level called level_idx={level_idx} num_players={num_players} old_state={old_state} is_mega={self.is_mega} current_level_before={self.current_level}", with_stack=True)
+        # New game starts fresh counter (unless continuing same session)
+        if level_idx == 0 and getattr(self, 'state', '') == 'menu':
+            # Only reset counter on fresh new game from menu stage 0
+            # If this is first start, total_stages_cleared is 0 already, but if replaying after game over, reset
+            if not hasattr(self, 'total_stages_cleared'):
+                self.total_stages_cleared = 0
+            else:
+                # If starting new game from menu after having cleared stages, reset to 0
+                # Keep high score
+                if self.state == 'menu':
+                    self.total_stages_cleared = 0
+            self.current_loop = 0
+        if not hasattr(self, 'total_stages_cleared'):
+            self.total_stages_cleared = 0
+        if not hasattr(self, 'current_loop'):
+            self.current_loop = 0
+        _trace_log("LEVEL", f"init_level called level_idx={level_idx} num_players={num_players} old_state={old_state} is_mega={self.is_mega} current_level_before={self.current_level} total_cleared={self.total_stages_cleared} loop={self.current_loop}", with_stack=True)
         if self.is_mega and self.mega_levels:
             self.current_level = level_idx % len(self.mega_levels)
             level_data = self.mega_levels[self.current_level]
@@ -422,11 +469,28 @@ class Game:
         # Keep grouped order authentic but allow occasional shuffle of remaining? We'll keep as-is for faithfulness
         # If queue is None, random weighted spawning will be used (legacy)
 
-        # players - use mega spawns if mega mode
+        # players - use mega spawns if mega mode, with vehicle choice (tank / monster_truck)
         spawns = MEGA_PLAYER_SPAWN if self.is_mega else PLAYER_SPAWN
         for i in range(num_players):
             gx, gy = spawns[i]
             p = PlayerTank(i+1, gx, gy, is_mega=self.is_mega)
+            # Apply vehicle choice from landing page
+            veh = getattr(self, 'vehicle_choice', 'tank')
+            if veh == 'monster_truck':
+                # Start as 1.3x truck with flamethrower default
+                p.is_monster_truck = True
+                p.monster_truck_timer = 10**9  # effectively permanent until death (player chose truck)
+                p.current_scale = 1.3
+                p._update_rect_size()
+                # Flamethrower as default weapon
+                p.flamethrower_active = True
+                p.flamethrower_level = 1
+                # Slight speed boost for truck 1.3x size but still nimble (original truck 2x had 1.6x, here 1.3x should be ~1.2x speed)
+                p.speed = p.base_speed * 1.2
+                try:
+                    _log_gameplay("VEHICLE_CHOICE", level_idx=self.current_level, player_id=p.player_id, data={"vehicle": "monster_truck", "scale": 1.3, "weapon": "flamethrower", "x": gx, "y": gy})
+                except:
+                    pass
             self.players.append(p)
 
         self.enemies_total = self._get_enemies_total_for_level(self.current_level)
@@ -434,12 +498,12 @@ class Game:
         self.enemies_spawned = 0
         self.spawn_timer = 0
         self.freeze_timer = 0
-        # Gradual enemy increase - more enemies as level progresses and within level
-        # Max on field: start 4, +1 per 2 levels, capped at 8, plus ramp within level
-        self.max_enemies_on_field = min(8, MAX_ENEMIES_ON_FIELD + self.current_level // 2)
+        # Progressive difficulty based on total_stages_cleared counter (persistent, never modulo)
+        # User request: more stages passed -> harder: faster spawn, more co-existing tanks
+        diff = self._get_difficulty_params()
+        self.max_enemies_on_field = diff["max_on_field"]
         self.base_max_enemies = self.max_enemies_on_field
-        # Spawn interval: start 2.5s, -0.1s per level, min 0.8s, plus within-level ramp
-        self.dynamic_spawn_interval = max(int(0.8 * FPS), int(ENEMY_SPAWN_INTERVAL - self.current_level * 0.12 * FPS))
+        self.dynamic_spawn_interval = diff["spawn_interval"]
         self.base_spawn_interval = self.dynamic_spawn_interval
         self.difficulty_ramp_timer = 0
         # Monster boss system
@@ -449,10 +513,11 @@ class Game:
         self.monster_boss_defeated = False
         prev_state = getattr(self, '_prev_state_for_trace', old_state)
         self.state = 'playing'
-        _trace_state_change(old_state, 'playing', f"init_level level={self.current_level} players={num_players}", extra=f"enemies_total={self.enemies_total}")
-        # Comprehensive gameplay log
+        _trace_state_change(old_state, 'playing', f"init_level level={self.current_level} total_cleared={self.total_stages_cleared} loop={self.current_loop} players={num_players}", extra=f"enemies_total={self.enemies_total} max_on_field={self.max_enemies_on_field}")
+        # Comprehensive gameplay log with difficulty
         try:
-            _log_gameplay("LEVEL_INIT", level_idx=self.current_level, data={"num_players": num_players, "enemies_total": self.enemies_total, "max_on_field": self.max_enemies_on_field, "spawn_interval": self.dynamic_spawn_interval, "enemy_queue_len": len(self.enemy_queue) if self.enemy_queue else 0})
+            _log_gameplay("LEVEL_INIT", level_idx=self.current_level, data={"num_players": num_players, "enemies_total": self.enemies_total, "max_on_field": self.max_enemies_on_field, "spawn_interval": self.dynamic_spawn_interval, "enemy_queue_len": len(self.enemy_queue) if self.enemy_queue else 0, "total_cleared": self.total_stages_cleared, "loop": self.current_loop, "difficulty": diff})
+            _log_gameplay("DIFFICULTY_UPDATE", level_idx=self.current_level, data=diff)
         except:
             pass
         # SFX: For first stage (new game), play authentic NES intro "Battle City Tank 1990 NES Intro Live 8bit by deegee (5.59 sec)"
@@ -491,15 +556,29 @@ class Game:
         self.powerups = []
         self.particles = ParticleSystem()
         self.enemy_queue = self._get_enemy_queue_for_level(self.current_level)
+        # Progressive counter: increment total stages cleared BEFORE computing next level difficulty
+        # User request: keep counter of how many stages player passed, difficulty increases
+        if not hasattr(self, 'total_stages_cleared'):
+            self.total_stages_cleared = 0
+        self.total_stages_cleared += 1
+        self.current_loop = self.total_stages_cleared // (len(LEVELS) if LEVELS else 35)
+        print(f"[DIFFICULTY] Stage cleared! Total={self.total_stages_cleared} Loop={self.current_loop} Next map={self.current_level} (Stage {self.current_level+1}/35)")
+        try:
+            _log_gameplay("STAGE_CLEARED_COUNTER", level_idx=self.current_level, data={"total_stages_cleared": self.total_stages_cleared, "loop": self.current_loop, "next_map": self.current_level})
+            _log_gameplay("DIFFICULTY_UPDATE", level_idx=self.current_level, data=self._get_difficulty_params())
+        except:
+            pass
+
         self.enemies_total = self._get_enemies_total_for_level(self.current_level)
         self.enemies_killed = 0
         self.enemies_spawned = 0
         self.spawn_timer = 0
         self.freeze_timer = 0
-        # Gradual increase per level
-        self.max_enemies_on_field = min(8, MAX_ENEMIES_ON_FIELD + self.current_level // 2)
+        # Progressive difficulty per total stages cleared
+        diff = self._get_difficulty_params()
+        self.max_enemies_on_field = diff["max_on_field"]
         self.base_max_enemies = self.max_enemies_on_field
-        self.dynamic_spawn_interval = max(int(0.8 * FPS), int(ENEMY_SPAWN_INTERVAL - self.current_level * 0.12 * FPS))
+        self.dynamic_spawn_interval = diff["spawn_interval"]
         self.base_spawn_interval = self.dynamic_spawn_interval
         self.difficulty_ramp_timer = 0
         # Monster boss system - reset per level
@@ -510,6 +589,7 @@ class Game:
         # respawn players at start with protections - preserve items across stages
         spawns = MEGA_PLAYER_SPAWN if self.is_mega else PLAYER_SPAWN
         new_players = []
+        veh = getattr(self, 'vehicle_choice', 'tank')
         for i, old_p in enumerate(prev_players):
             gx, gy = spawns[i]
             p = PlayerTank(old_p.player_id, gx, gy, is_mega=self.is_mega)
@@ -523,9 +603,21 @@ class Game:
             p.homing_active = getattr(old_p, 'homing_active', False)
             p.spread_active = getattr(old_p, 'spread_active', False)
             p.rapid_active = getattr(old_p, 'rapid_active', False)
-            # Also preserve helmet if still active? Keep star level only per classic, but items should persist
             p.helmet_timer = getattr(old_p, 'helmet_timer', 0)
-            p.invulnerable_timer = getattr(old_p, 'helmet_timer', 0)  # if had helmet, keep shield briefly
+            p.invulnerable_timer = getattr(old_p, 'helmet_timer', 0)
+            # Preserve vehicle choice across stages
+            if veh == 'monster_truck':
+                p.is_monster_truck = True
+                p.monster_truck_timer = 10**9
+                p.current_scale = 1.3
+                p._update_rect_size()
+                p.flamethrower_active = getattr(old_p, 'flamethrower_active', True)
+                p.flamethrower_level = getattr(old_p, 'flamethrower_level', 1)
+                p.speed = p.base_speed * 1.2
+            # Preserve flamethrower if was active
+            if getattr(old_p, 'flamethrower_active', False):
+                p.flamethrower_active = True
+                p.flamethrower_level = getattr(old_p, 'flamethrower_level', 1)
             p.update_bullet_power()
             new_players.append(p)
         self.players = new_players
@@ -811,6 +903,18 @@ class Game:
                         weights = ['basic']*15 + ['fast']*25 + ['power']*30 + ['armor']*30
                     etype = random.choice(weights)
                 enemy = EnemyTank(sx, sy, etype, is_mega=self.is_mega)
+                # Progressive difficulty: increase speed and shoot chance with loop (total_stages_cleared)
+                # User request: more stages = harder
+                try:
+                    diff = self._get_difficulty_params()
+                    speed_mult = diff.get("speed_mult", 1.0)
+                    shoot_mult = diff.get("shoot_mult", 1.0)
+                    if speed_mult != 1.0:
+                        enemy.speed *= speed_mult
+                    if hasattr(enemy, 'shoot_chance'):
+                        enemy.shoot_chance *= shoot_mult
+                except:
+                    pass
                 # Original NES: powerup tanks are at indices 3,7,12,17 (0-based) -> 4 per level
                 # feichao remix uses [3,7,12,17]; classic [3,10,17]. We'll follow remix for more fun.
                 # If queue is authentic, carrier logic already random 25% in EnemyTank; but we force original powerup positions for authenticity
@@ -822,7 +926,7 @@ class Game:
                 self.enemies_spawned += 1
                 self.particles.add_spawn(enemy.rect.centerx, enemy.rect.centery)
                 try:
-                    _log_gameplay("ENEMY_SPAWN", level_idx=self.current_level, data={"type": etype, "grid_x": sx, "grid_y": sy, "spawned": self.enemies_spawned, "total": self.enemies_total, "on_field": len(self.enemies), "carrier": getattr(enemy, 'powerup_carrier', False)})
+                    _log_gameplay("ENEMY_SPAWN", level_idx=self.current_level, data={"type": etype, "grid_x": sx, "grid_y": sy, "spawned": self.enemies_spawned, "total": self.enemies_total, "on_field": len(self.enemies), "carrier": getattr(enemy, 'powerup_carrier', False), "difficulty": getattr(self, '_get_difficulty_params', lambda: {})() if hasattr(self, '_get_difficulty_params') else {}})
                 except:
                     pass
                 break
@@ -1179,6 +1283,19 @@ class Game:
                         pass
 
                     if self.state == 'menu':
+                        # Check vehicle choice clicks at landing page
+                        try:
+                            mx, my = event.pos
+                            if hasattr(self.hud, '_veh_tank_rect') and self.hud._veh_tank_rect.collidepoint(mx, my):
+                                self.vehicle_choice = 'tank'
+                                print("[Vehicle] Clicked TANK 1.0x")
+                                continue
+                            if hasattr(self.hud, '_veh_truck_rect') and self.hud._veh_truck_rect.collidepoint(mx, my):
+                                self.vehicle_choice = 'monster_truck'
+                                print("[Vehicle] Clicked MONSTER TRUCK 1.3x + FLAME")
+                                continue
+                        except:
+                            pass
                         # Ignore mouse clicks in first 60 frames (avoid accidental trackpad)
                         if getattr(self, 'menu_stuck_timer', 0) > 60:
                             print(f"Mouse click to start menu {self.menu_selected}")
@@ -1418,6 +1535,15 @@ class Game:
                         self.player_join(2)
 
                 if self.state == 'menu':
+                    # Vehicle choice toggle with V key at landing page - tank vs monster truck 1.3x + flamethrower
+                    if event.key == pygame.K_v and self.menu_mode == 'main':
+                        old_veh = getattr(self, 'vehicle_choice', 'tank')
+                        self.vehicle_choice = 'monster_truck' if old_veh == 'tank' else 'tank'
+                        print(f"[Vehicle] Choice toggled {old_veh} -> {self.vehicle_choice} (1.3x truck with flamethrower)" if self.vehicle_choice=='monster_truck' else f"[Vehicle] Choice {old_veh} -> tank")
+                        try:
+                            _log_gameplay("VEHICLE_TOGGLE", level_idx=self.current_level, data={"from": old_veh, "to": self.vehicle_choice})
+                        except:
+                            pass
                     if self.menu_mode == 'main':
                         # New navigation: 1P/2P cards are horizontal, so LEFT/RIGHT controls them
                         # Top row: [0:1P left, 1:2P right], then 2:LEVEL SELECT, 3:HOWTO, 4:QUIT below
@@ -1880,7 +2006,23 @@ class Game:
                 except:
                     pass
                 if result in ('hit_brick', 'hit_steel'):
+                    # Authentic NES: bullet hitting brick creates small white flash + brick debris if destroyed
+                    # result string doesn't tell if destroyed or chipped - chip = hit, destroyed = break
+                    # Check via nearby tile check: if tile now empty, it was destroyed -> add brick debris + crush
                     self.particles.add_hit(b.x, b.y)
+                    # Try to add brick break debris for juicier feel (NES had 4 orange squares)
+                    try:
+                        # Guess destroy - if brick was destroyed, add_crush + brick_break
+                        if hasattr(self.tilemap, 'brick_health'):
+                            # If no health entry, it was destroyed (or not tracked)
+                            # We'll add small debris regardless for juice
+                            if result == 'hit_brick':
+                                if hasattr(self.particles, 'add_brick_break'):
+                                    self.particles.add_brick_break(b.x, b.y)
+                            else:  # steel
+                                self.particles.add_crush(b.x, b.y)
+                    except:
+                        pass
                 elif result == 'hit_tank':
                     self.particles.add_explosion(b.x, b.y, (255, 150, 0), 12)
                 elif result == 'hit_base':
@@ -2059,10 +2201,13 @@ class Game:
                     killer = min(alive_ps, key=lambda p: math.hypot(p.x - e.x, p.y - e.y)) if alive_ps else self.players[0]
                     killer.score += e.score_value
                     killer_id = getattr(killer, 'player_id', None)
-                self.particles.add_explosion(e.rect.centerx, e.rect.centery, e.color, 25)
+                # Authentic NES explosion with kind for juice - tank/armor/boss/monster
+                exp_kind = 'boss' if getattr(e, 'is_boss', False) else ('armor' if getattr(e, 'enemy_type', '')=='armor' else 'monster' if 'monster' in getattr(e, 'enemy_type','') else 'tank')
+                is_big = exp_kind in ('armor','boss','monster') or getattr(e, 'enemy_type','')=='armor'
+                self.particles.add_explosion(e.rect.centerx, e.rect.centery, e.color, 25, big=is_big, kind=exp_kind)
                 # Authentic NES explosion SFX - varies by enemy type
                 if snd_mgr:
-                    snd_mgr.play_explosion(big=(e.enemy_type=='armor'))
+                    snd_mgr.play_explosion(big=(e.enemy_type=='armor' or getattr(e, 'is_boss', False)))
                 try:
                     _log_gameplay("ENEMY_KILL", level_idx=self.current_level, player_id=killer_id, data={"enemy_type": getattr(e, 'enemy_type', 'unknown'), "x": e.x, "y": e.y, "carrier": e.powerup_carrier, "score_value": e.score_value, "killed": self.enemies_killed+1, "total": self.enemies_total})
                 except:
@@ -2348,9 +2493,21 @@ class Game:
     def draw(self):
         # Create canvas at original resolution for consistent drawing and easy scaling to fullscreen
         # This fixes "content not zoomed" issue when in fullscreen with (0,0) mode
+        # Apply screenshake from authentic NES explosions (particles.py AuthenticExplosion.screenshake)
+        shake_x = shake_y = 0
+        try:
+            shake_intensity = getattr(self.particles, 'screenshake', 0) or getattr(self.particles, '_shake', 0)
+            if shake_intensity > 0:
+                import random as _rnd
+                shake_x = _rnd.randint(-shake_intensity, shake_intensity)
+                shake_y = _rnd.randint(-shake_intensity, shake_intensity)
+        except:
+            pass
         canvas = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
 
         if self.state == 'menu':
+            # Pass vehicle choice to HUD for landing page toggle
+            self.hud._game_vehicle_choice = getattr(self, 'vehicle_choice', 'tank')
             self.hud.draw_menu(canvas, self.menu_selected, self.menu_mode)
         elif self.state in ('playing', 'paused', 'gameover', 'stage_clear'):
             # bg
@@ -2392,20 +2549,29 @@ class Game:
                 total_score = sum(p.score for p in self.players)
                 self.hud.draw_game_over(canvas, self.gameover_won, total_score, self)
 
+            # Flash overlay from explosions (white flash like NES base explosion)
+            try:
+                if hasattr(self.particles, 'draw_flash'):
+                    self.particles.draw_flash(canvas)
+            except:
+                pass
+
         # Now blit canvas to screen with scaling if fullscreen
+        # Apply screenshake offset before blit
         # This ensures content is zoomed to fill fullscreen, not just small in corner
         if self.is_fullscreen:
             # Scale canvas to fullscreen size (e.g., 960x720 -> 1920x1080) - zoomed
             try:
                 scaled = pygame.transform.scale(canvas, self.screen.get_size())
-                self.screen.blit(scaled, (0, 0))
+                # Apply screenshake to scaled
+                self.screen.blit(scaled, (shake_x, shake_y))
             except Exception:
                 # Fallback: centered blit without scaling if scale fails
                 self.screen.fill(COLOR_BG)
-                self.screen.blit(canvas, ((self.screen.get_width()-SCREEN_WIDTH)//2, (self.screen.get_height()-SCREEN_HEIGHT)//2))
+                self.screen.blit(canvas, ((self.screen.get_width()-SCREEN_WIDTH)//2 + shake_x, (self.screen.get_height()-SCREEN_HEIGHT)//2 + shake_y))
         else:
-            # Windowed: direct blit (no scaling needed, same size)
-            self.screen.blit(canvas, (0, 0))
+            # Windowed: direct blit with shake
+            self.screen.blit(canvas, (shake_x, shake_y))
 
         # Projector: update frame for network projector view (http://host_ip:8080)
         # Use canvas (original res) for consistent quality
