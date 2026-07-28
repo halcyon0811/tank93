@@ -334,25 +334,27 @@ class ParticleSystem:
     def add_explosion(self, x, y, color=None, count=20, big=False, kind=None):
         # Determine kind from context
         if kind is None:
-            # Heuristic from original code: green monster etc
             if color and isinstance(color, tuple) and color[0] < 100 and color[1] > 150:
                 kind = 'monster'
             elif big or count > 18:
                 kind = 'base' if count > 28 else 'armor' if count > 20 else 'tank'
             else:
                 kind = 'tank'
-        # Normalize kind
         if big and kind == 'tank':
             kind = 'armor'
-        # Create authentic explosion
         exp = AuthenticExplosion(x, y, big=big, color=color, kind=kind)
         self.explosions.append(exp)
-        # Trigger screenshake accumulation
         if exp.screenshake > self._shake:
             self._shake = exp.screenshake
         if exp.flash > self._flash:
             self._flash = exp.flash
             self._flash_color = (255,255,255) if kind != 'monster' else (180,255,180)
+        # Logging for new authentic explosion + screenshake + flash
+        try:
+            from .logger_integration import safe_log_explosion
+            safe_log_explosion(kind.upper(), {"x": x, "y": y, "big": big, "kind": kind, "shake": exp.screenshake, "flash": exp.flash, "count": count})
+        except:
+            pass
 
     def add_hit(self, x, y):
         # NES bullet hitting wall = small white 4x4 flash + 2 sparks
@@ -415,7 +417,11 @@ class ParticleSystem:
     def draw_flash(self, screen):
         """Call after everything to draw white flash overlay if needed"""
         if self._flash > 0:
-            alpha = int(200 * (self._flash / 6))
-            s = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
-            s.fill((*self._flash_color, alpha))
-            screen.blit(s, (0,0))
+            try:
+                alpha = int(200 * (self._flash / 6))
+                w, h = screen.get_size()
+                s = pygame.Surface((w, h), pygame.SRCALPHA)
+                s.fill((*self._flash_color, alpha))
+                screen.blit(s, (0,0))
+            except Exception:
+                pass

@@ -580,15 +580,23 @@ class Bullet:
         gy = int((self.y - PLAYFIELD_Y) // ts)
         if 0 <= gx < gw and 0 <= gy < gh:
             tt = tilemap.tiles[gy][gx]
-            # Flamethrower instant melts bricks, forest, ice - steel takes 2 hits
+            # Flamethrower instant melts bricks, forest, ice - steel takes 2 hits + logging
             if getattr(self, 'bullet_type', '') == 'flamethrower' or getattr(self, 'flame', False):
                 if tt in (TILE_BRICK, TILE_GRASS, TILE_ICE):
                     destroyed = tilemap.destroy_tile(gx, gy, 2, self.dir, 'flamethrower')
-                    # Flame continues through soft tiles
+                    try:
+                        from ..logger_integration import safe_log_flamethrower
+                        safe_log_flamethrower("HIT", {"tile": tt, "gx": gx, "gy": gy, "destroyed": destroyed, "owner": self.owner}, player_id=int(self.owner[-1]) if self.owner[-1].isdigit() else None)
+                    except:
+                        pass
                     return 'hit_brick' if tt==TILE_BRICK else None
                 elif tt == TILE_STEEL:
-                    # Steel needs 2 flame hits
-                    tilemap.destroy_tile(gx, gy, 1, self.dir, 'flamethrower')
+                    destroyed = tilemap.destroy_tile(gx, gy, 1, self.dir, 'flamethrower')
+                    try:
+                        from ..logger_integration import safe_log_flamethrower
+                        safe_log_flamethrower("HIT_STEEL", {"gx": gx, "gy": gy, "destroyed": destroyed, "owner": self.owner})
+                    except:
+                        pass
                     return None
             if tt == TILE_BRICK:
                 if self.homing:

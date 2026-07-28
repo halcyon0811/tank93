@@ -90,8 +90,48 @@ def safe_log_perf(metric, value_ms, extra=None):
         pass
 
 def safe_log_hud(event_type, data=None):
-    """HUD observability: explicit P/C buttons, HP renamed, PWR index"""
+    """HUD observability: explicit P/C buttons, HP renamed, PWR index, vehicle choice"""
     try:
         safe_log_gameplay(f"HUD_{event_type}", data=data)
+    except:
+        pass
+
+def safe_log_vehicle(event_type, data=None, player_id=None):
+    """Vehicle choice observability: tank vs monster_truck 1.3x + flamethrower"""
+    try:
+        safe_log_gameplay(f"VEHICLE_{event_type}", player_id=player_id, data=data)
+        safe_log_event("VEHICLE", f"{event_type}: {data}", level="INFO", extra=data)
+    except:
+        pass
+
+def safe_log_monster_truck(event_type, data=None, player_id=None):
+    """Monster truck item observability: crush all, 2x size, NES blue truck"""
+    try:
+        safe_log_gameplay(f"MONSTER_TRUCK_{event_type}", player_id=player_id, data=data)
+        safe_log_event("MONSTER_TRUCK", f"{event_type}: {data}", level="INFO", extra=data)
+    except:
+        pass
+
+def safe_log_flamethrower(event_type, data=None, player_id=None):
+    """Flamethrower weapon observability: default for truck, cone, short range"""
+    try:
+        safe_log_gameplay(f"FLAMETHROWER_{event_type}", player_id=player_id, data=data)
+    except:
+        pass
+
+def safe_log_explosion(event_type, data=None):
+    """Explosion observability: NES authentic blocky + screenshake + flash"""
+    try:
+        safe_log_gameplay(f"EXPLOSION_{event_type}", data=data)
+        safe_log_event("EXPLOSION", f"{event_type}: {data}", level="INFO", extra=data)
+    except:
+        pass
+
+def safe_log_input2(event_type, device, code, value=None, mapped_action=None, extra=None):
+    """Input observability for vehicle toggle V, mouse vehicle clicks"""
+    try:
+        from game.debug_logger import debug_logger
+        if debug_logger._session_id is not None:
+            debug_logger.log_input(event_type, device=device, code=code, value=value, mapped_action=mapped_action, extra=extra)
     except:
         pass

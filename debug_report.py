@@ -326,6 +326,59 @@ def auto_diagnose(session_id=None):
         if map_gp or map_ev:
             print(f"  ℹ Map select: {len(map_gp)} grid nav events - short names, no overlap, grid-aware UP/DOWN/LEFT/RIGHT")
 
+        # Check vehicle choice (tank vs monster truck)
+        try:
+            vehicles = logger.query_sql("SELECT * FROM gameplay WHERE session_id=? AND event_type LIKE '%VEHICLE_%' ORDER BY id DESC LIMIT 15", (session_id,))
+            if vehicles:
+                print(f"  ℹ Vehicle choice: {len(vehicles)} events")
+                for v in vehicles[:5]:
+                    print(f"    F{v['frame']} {v['event_type']} {v['data_json']}")
+        except:
+            pass
+
+        # Check monster truck
+        try:
+            truck = logger.query_sql("SELECT * FROM gameplay WHERE session_id=? AND event_type LIKE '%MONSTER_TRUCK_%' ORDER BY id DESC LIMIT 15", (session_id,))
+            if truck:
+                print(f"  ℹ Monster Truck: {len(truck)} events (2x crush all)")
+                for t in truck[:5]:
+                    print(f"    F{t['frame']} {t['event_type']} {t['data_json']}")
+        except:
+            pass
+
+        # Check flamethrower
+        try:
+            flame = logger.query_sql("SELECT * FROM gameplay WHERE session_id=? AND event_type LIKE '%FLAME%' ORDER BY id DESC LIMIT 15", (session_id,))
+            if flame:
+                print(f"  ℹ Flamethrower: {len(flame)} events (1.3x truck default)")
+                for f in flame[:5]:
+                    print(f"    F{f['frame']} {f['event_type']} {f['data_json']}")
+        except:
+            pass
+
+        # Check explosions (authentic NES + screenshake + flash)
+        try:
+            explosions = logger.query_sql("SELECT * FROM gameplay WHERE session_id=? AND event_type LIKE '%EXPLOSION_%' ORDER BY id DESC LIMIT 15", (session_id,))
+            if explosions:
+                print(f"  ℹ Explosions: {len(explosions)} authentic NES (blocky + shake + flash)")
+                kinds = {}
+                for e in explosions:
+                    try:
+                        import json as _gj
+                        # event_type like EXPLOSION_TANK etc
+                        kinds[e['event_type']] = kinds.get(e['event_type'], 0) + 1
+                    except:
+                        pass
+                for k,v in kinds.items():
+                    print(f"    {k}: {v}")
+
+            # Flash events
+            flash_logs = logger.query_sql("SELECT * FROM events WHERE session_id=? AND tag='EXPLOSION' ORDER BY id DESC LIMIT 10", (session_id,))
+            if flash_logs:
+                print(f"  ℹ Explosion logs: {len(flash_logs)} with shake/flash")
+        except:
+            pass
+
     except Exception as e:
         print(f"  Error in auto-diagnosis recent changes: {e}")
         import traceback

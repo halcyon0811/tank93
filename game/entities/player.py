@@ -632,11 +632,16 @@ class PlayerTank(Tank):
             except:
                 pass
 
-        # Flamethrower priority - if active, fires flames instead of normal bullets (monster truck default)
+        # Flamethrower priority - if active, fires flames instead of normal bullets (monster truck default) + logging
         if getattr(self, 'flamethrower_active', False):
             import random as _rnd_f
             import math as _m_f
             flame_count = 5 + getattr(self, 'flamethrower_level', 1) * 2
+            try:
+                from ..logger_integration import safe_log_flamethrower
+                safe_log_flamethrower("SHOOT", {"player_id": self.player_id, "level": getattr(self, 'flamethrower_level', 1), "count": flame_count, "dir": self.direction, "x": getattr(self, 'x', 0), "y": getattr(self, 'y', 0)}, player_id=self.player_id)
+            except:
+                pass
             for _ in range(flame_count):
                 sx, sy = self.get_bullet_spawn()
                 base_dx, base_dy = DIRS.get(self.direction, (0,-1))

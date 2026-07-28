@@ -7,9 +7,9 @@ Tank93 now has a **production-grade debug logging system** with:
 - **SQLite DB** (`debug.db`) in WAL mode for 0-latency concurrent read/write queries
 - **Async writer thread** with queue to avoid game loop stalls
 - **Text mirror** (`bug_trace.log`) for quick tail
-- **Structured events**: sessions, state_changes, gameplay, perf, inputs, exceptions, network, edge, steel, weapons, maps, HUD, perf
+- **Structured events**: sessions, state_changes, gameplay, perf, inputs, exceptions, network, edge, steel, weapons, maps, HUD, perf, vehicle, monster_truck, flamethrower, explosion
 - **Detailed breadcrumbs** for instant root cause analysis
-- **Enhanced observability** for all recent features (network, steel, edge, startup perf, weapon stacking, map select, HUD)
+- **Enhanced observability** for all recent features (network, steel, edge, startup perf, weapon stacking, map select, HUD, vehicle choice tank vs truck, monster truck crush, flamethrower, authentic NES explosion with screenshake+flash)
 
 ## Architecture
 

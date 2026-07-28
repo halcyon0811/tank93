@@ -99,15 +99,21 @@ class Tank:
         self.last_pos = (self.x, self.y)
 
     def update_size_state(self):
-        # Monster truck has highest priority - 2x bigger, crushes everything
+        # Monster truck has highest priority - 2x bigger, crushes everything + logs for debug
         if self.monster_truck_timer > 0:
             self.monster_truck_timer -= 1
             self.is_monster_truck = True
             self.current_scale = MONSTER_TRUCK_SCALE
             self.speed = self.base_speed * MONSTER_TRUCK_SPEED_MULT
+            # Log expiry warning at 3s, 1s
+            if self.monster_truck_timer in (180, 60, 0):
+                try:
+                    from .logger_integration import safe_log_monster_truck
+                    safe_log_monster_truck("TIMER", {"timer": self.monster_truck_timer, "player_id": getattr(self, 'player_id', None), "scale": self.current_scale, "x": getattr(self, 'x', 0), "y": getattr(self, 'y', 0)})
+                except:
+                    pass
             if self.monster_truck_timer == 0:
                 self.is_monster_truck = False
-                # Restore based on other timers
                 if self.shrink_timer > 0 and self.giant_timer > 0:
                     self.current_scale = 1.0
                     self.speed = self.base_speed * SHRINK_SPEED_MULT
@@ -121,8 +127,13 @@ class Tank:
                     self.current_scale = 1.0
                     self.speed = self.base_speed
                 self._update_rect_size()
+                try:
+                    from .logger_integration import safe_log_monster_truck
+                    safe_log_monster_truck("END", {"player_id": getattr(self, 'player_id', None), "x": getattr(self, 'x', 0), "y": getattr(self, 'y', 0)})
+                except:
+                    pass
             self._update_rect_size()
-            return  # monster truck overrides shrink/giant synergy while active
+            return
 
         # Handle shrink/giant timers with synergy: small+giant = normal size, fast speed, crush bricks
         if self.shrink_timer > 0 and self.giant_timer > 0:

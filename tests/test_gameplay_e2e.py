@@ -9,13 +9,15 @@ def test_full_game_400_frames_no_crash(game):
         assert game.state=='playing', f"bounced at {frame} to {game.state}"
         game.update_playing(16)
         game.draw()
-    # Check DB
+    # Check DB scoped to this session only - avoid cross-test pollution
     from tests.conftest import get_db
     dl=get_db()
-    bounces=dl.query_sql("SELECT * FROM state_changes WHERE old_state='playing' AND new_state='menu' AND reason LIKE '%CRASH%'")
-    assert len(bounces)==0
-    exc=dl.query_sql("SELECT * FROM exceptions_log")
-    assert len(exc)==0
+    from game.debug_logger import debug_logger
+    sid = debug_logger._session_id
+    bounces=dl.query_sql("SELECT * FROM state_changes WHERE session_id=? AND old_state='playing' AND new_state='menu' AND reason LIKE '%CRASH%'", (sid,))
+    assert len(bounces)==0, f"Found {len(bounces)} crash bounces in this session"
+    exc=dl.query_sql("SELECT * FROM exceptions_log WHERE session_id=?", (sid,))
+    assert len(exc)==0, f"Found {len(exc)} exceptions: {exc[:2]}"
 
 def test_boss_escape_and_homing_track(game):
     game.menu_selected=0
@@ -121,6 +123,8 @@ def test_fuzz_monkey_no_crash(game):
         except Exception as e:
             assert False, f"Crash at frame {frame}: {e}"
     from tests.conftest import get_db
+    from game.debug_logger import debug_logger
     dl=get_db()
-    bounces=dl.query_sql("SELECT * FROM state_changes WHERE reason LIKE '%CRASH%'")
-    assert len(bounces)==0
+    sid = debug_logger._session_id
+    bounces=dl.query_sql("SELECT * FROM state_changes WHERE session_id=? AND reason LIKE '%CRASH%'", (sid,))
+    assert len(bounces)==0, f"Found {len(bounces)} crash bounces in fuzz test"
