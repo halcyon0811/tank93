@@ -39,6 +39,8 @@ NEW_ICON_MAP = {
     'rapid': 'battle_city_icon_rapid.png',
     'shrink': 'battle_city_icon_shrink.png',
     'giant': 'battle_city_icon_giant.png',
+    'monster_truck': 'battle_city_icon_monster_truck.png',
+    'flamethrower': 'battle_city_icon_monster_truck.png',  # flamethrower shares truck icon if needed
 }
 
 ALL_ICON_MAP = {**CLASSIC_ICON_MAP, **NEW_ICON_MAP}
@@ -122,6 +124,18 @@ def generate_fallback_icon(type_name, size):
         pygame.draw.rect(surf, (200,200,200), (cx-6, cy-2, 12, 6))
     elif type_name == 'gun':
         pygame.draw.rect(surf, (200,200,200), (cx-1, cy-8, 2, 12))
+    elif type_name == 'monster_truck':
+        # NES style truck icon for fallback if image file missing - blue mini truck
+        # Body
+        pygame.draw.rect(surf, (50,110,230), (cx-8, cy-6, 16, 12), border_radius=1)
+        # Yellow stripes
+        pygame.draw.rect(surf, (255,230,0), (cx-3, cy-6, 2, 12))
+        pygame.draw.rect(surf, (255,230,0), (cx+1, cy-6, 2, 12))
+        # Tires
+        pygame.draw.rect(surf, (15,15,15), (cx-9, cy-7, 4, 4))
+        pygame.draw.rect(surf, (15,15,15), (cx+5, cy-7, 4, 4))
+        pygame.draw.rect(surf, (15,15,15), (cx-9, cy+3, 4, 4))
+        pygame.draw.rect(surf, (15,15,15), (cx+5, cy+3, 4, 4))
     else:
         font = pygame.font.Font(None, size//2)
         txt = font.render(type_name[0].upper(), True, (255,255,255))
@@ -163,6 +177,8 @@ class PowerUp:
             'rapid': (255, 50, 150),
             'shrink': (80, 220, 255),
             'giant': (255, 80, 80),
+            'monster_truck': (80, 140, 255),
+            'flamethrower': (255, 120, 20),
         }
         # Preload icon
         try:

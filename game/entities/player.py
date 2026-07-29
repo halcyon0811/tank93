@@ -1131,24 +1131,34 @@ class PlayerTank(Tank):
                 pass
         elif type_name == 'monster_truck':
             # Monster truck item - 2x bigger, crushes enemy + bricks + forest + steel, lasts 3 min
-            # While in truck mode, player can still get new weapons that fire multi-formed (user request)
-            # Uses NES style blue truck image like provided
+            # Fix: if in small mode, truck should override small - clear shrink/giant timers
+            # User reported: getting M item (truck) but player did not change to truck maybe because in small mode
+            was_small = getattr(self, 'is_shrunk', False)
+            was_giant = getattr(self, 'is_giant', False)
+            if was_small or was_giant:
+                print(f"[POWERUP] Monster Truck overriding small/giant mode (was small={was_small} giant={was_giant})")
+                self.shrink_timer = 0
+                self.giant_timer = 0
+                self.is_shrunk = False
+                self.is_giant = False
+
             self.monster_truck_timer = MONSTER_TRUCK_DURATION  # 3 min = 180 sec
             self.is_monster_truck = True
-            self.current_scale = MONSTER_TRUCK_SCALE  # 2.0x for item (starting vehicle was 1.3x but removed)
+            self.current_scale = MONSTER_TRUCK_SCALE  # 2.0x
             self.speed = self.base_speed * MONSTER_TRUCK_SPEED_MULT
             self._update_rect_size()
-            # Also give flamethrower as default weapon for truck if not already active - still allows stacking
+            # Also give flamethrower as default weapon for truck if not already active - still allows stacking multi weapons
             if not getattr(self, 'flamethrower_active', False):
                 self.flamethrower_active = True
                 self.flamethrower_level = max(1, getattr(self, 'flamethrower_level', 0))
             self.score += 500
             self.add_armor(60)
             self.update_bullet_power()
-            print(f"[POWERUP] Monster Truck activated! 2.0x size crush all + flame for 3 min P{self.player_id}")
+            print(f"[POWERUP] Monster Truck ACTIVATED! 2.0x size crush all + flame for 3 min P{self.player_id} (was_small={was_small})")
             try:
                 from ..logger_integration import safe_log_monster_truck
-                safe_log_monster_truck("ACTIVATE", {"player_id": self.player_id, "timer": self.monster_truck_timer, "timer_sec": self.monster_truck_timer//60, "x": getattr(self, 'x', 0), "y": getattr(self, 'y', 0), "scale": self.current_scale, "weapon_stacking": True})
+                safe_log_monster_truck("ACTIVATE", {"player_id": self.player_id, "timer": self.monster_truck_timer, "timer_sec": self.monster_truck_timer//60, "x": getattr(self, 'x', 0), "y": getattr(self, 'y', 0), "scale": self.current_scale, "was_small": was_small, "was_giant": was_giant, "weapon_stacking": True, "flame": getattr(self, 'flamethrower_active', False)})
+                safe_log_monster_truck("PICKUP_ITEM_M", {"type": "monster_truck", "player_id": self.player_id, "was_small": was_small, "x": getattr(self, 'x', 0), "y": getattr(self, 'y', 0)})
             except:
                 pass
         # grenade, clock handled by game
