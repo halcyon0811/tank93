@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Tank93 - 35 Maps - OG Classic - itch.io</title>
+<link rel="stylesheet" href="style.css">
+<style>
+body{overflow:hidden;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;height:100dvh;background:#0e0e14}
+#wrap{width:100%;max-width:960px;display:flex;flex-direction:column;gap:4px}
+#topBar{display:flex;justify-content:space-between;align-items:center;background:#000;border:2px solid #444;border-radius:6px;padding:4px 8px;font-size:11px;flex-wrap:wrap}
+#topBar b{color:#ff0}
+#canvasWrap{position:relative;width:100%;aspect-ratio:960/720;background:#000;border:3px solid #444;border-radius:8px;overflow:hidden}
+#gameCanvas{width:100%;height:100%;display:block}
+#loading{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:#000;color:#ff0;z-index:20;text-align:center;padding:16px;font-size:16px}
+.btnSmall{padding:3px 8px;background:#222;border:1px solid #555;color:#ccc;border-radius:4px;font-size:10px;cursor:pointer}
+.btnSmall:hover{border-color:#ff0;color:#ff0}
+</style>
+</head>
+<body>
+<div id="wrap">
+<div id="topBar">
+<div><b>TANK 93</b> OG • 35 maps • <span id="stageInfo">STAGE 1/35</span> • <span id="vehicleInfo">TANK</span></div>
+<div><span id="enemyInfo">ENEMY 20</span> • <button class="btnSmall" onclick="toggleFullscreen()">⛶ Full</button> <button class="btnSmall" onclick="location.reload()">↻</button></div>
+</div>
+<div id="canvasWrap">
+<canvas id="gameCanvas" width="960" height="720" tabindex="0"></canvas>
+<div id="touchControls"><div class="joystick" id="joyBase"><div class="joystick-knob" id="joyKnob"></div></div><div class="btnTouch" id="btnShoot">FIRE</div><div class="btnTouch" id="btnPause">P</div><div id="hudTouch"><div id="p1InfoTouch"></div><div id="bossInfoTouch"></div></div></div>
+<div id="loading">Loading 35 NES maps...<br><br><button id="startBtn2" style="padding:12px 28px;background:#ff0;color:#000;border:2px solid #ff0;border-radius:8px;font-size:18px;cursor:pointer">▶ TAP / CLICK TO START</button><br><br><span style="font-size:11px;color:#0f0">Fixed: bullets destroy tanks • armor bar • brick texture NES mortar</span><br><span style="font-size:10px;color:#aaa">If START doesn't work, click canvas then press ENTER</span></div>
+<canvas id="mapCanvas" width="130" height="130" style="display:none"></canvas>
+</div>
+<div style="font-size:9px;color:#666;text-align:center">WASD+SPACE • Arrows+ENTER • Gamepad • Touch joystick left + FIRE right • V Truck toggle • C Coin • P Pause</div>
+</div>
+<script type="module">
+import './game.js';
+
+// Add touch controls glue to existing game global
+(function(){
+  let joyBase=document.getElementById('joyBase'), joyKnob=document.getElementById('joyKnob');
+  let shootBtn=document.getElementById('btnShoot'), pauseBtn=document.getElementById('btnPause');
+  if(!joyBase) return;
+  let dir=null, active=false;
+  const handleMove=(touch)=>{
+    let r=joyBase.getBoundingClientRect();
+    let cx=r.left+r.width/2, cy=r.top+r.height/2;
+    let dx=touch.clientX-cx, dy=touch.clientY-cy;
+    let dist=Math.hypot(dx,dy);
+    let max=36;
+    if(dist>max){dx=dx/dist*max; dy=dy/dist*max;}
+    joyKnob.style.transform=`translate(${dx}px,${dy}px)`;
+    if(Math.abs(dx)<12&&Math.abs(dy)<12){dir=null; return;}
+    dir=Math.abs(dy)>Math.abs(dx)?(dy<0?'UP':'DOWN'):(dx<0?'LEFT':'RIGHT');
+  };
+  const end=()=>{joyKnob.style.transform='translate(0px,0px)'; dir=null; active=false;};
+  const setTouch=(d)=>{if(window.game){window.game._touchDirVal=d;}};
+  joyBase.addEventListener('touchstart', e=>{active=true; handleMove(e.touches[0]); setTouch(dir); e.preventDefault();},{passive:false});
+  joyBase.addEventListener('touchmove', e=>{if(active){handleMove(e.touches[0]); setTouch(dir);} e.preventDefault();},{passive:false});
+  joyBase.addEventListener('touchend', e=>{end(); setTouch(null); e.preventDefault();},{passive:false});
+  joyBase.addEventListener('mousedown', e=>{active=true; handleMove(e); setTouch(dir);});
+  window.addEventListener('mousemove', e=>{if(active){handleMove(e); setTouch(dir);}});
+  window.addEventListener('mouseup', e=>{end(); setTouch(null);});
+  if(shootBtn){
+    shootBtn.addEventListener('touchstart', e=>{if(window.game) window.game._touchShoot=true; e.preventDefault();},{passive:false});
+    shootBtn.addEventListener('touchend', e=>{if(window.game) window.game._touchShoot=false; e.preventDefault();},{passive:false});
+    shootBtn.addEventListener('mousedown', ()=>{if(window.game) window.game._touchShoot=true;});
+    window.addEventListener('mouseup', ()=>{if(window.game) window.game._touchShoot=false;});
+  }
+  if(pauseBtn){
+    pauseBtn.addEventListener('touchstart', e=>{if(window.game){window.game.state=window.game.state==='playing'?'paused':'playing';} e.preventDefault();},{passive:false});
+  }
+  // Show touch controls on mobile
+  if(/Mobi|Android/i.test(navigator.userAgent)){
+    document.getElementById('touchControls').classList.add('show');
+  }
+  // Always show for itch mobile embed
+  document.getElementById('touchControls').classList.add('show');
+})();
+
+function toggleFullscreen(){
+  // itch.io version: try container fullscreen, fallback to CSS maximized
+  let wrap=document.getElementById('wrap');
+  try{
+    if(!document.fullscreenElement){
+      if(wrap.requestFullscreen) wrap.requestFullscreen();
+      else document.documentElement.requestFullscreen();
+    } else {
+      document.exitFullscreen?.();
+    }
+  }catch(e){
+    // Fallback CSS fullscreen for iframe
+    let canvas=document.getElementById('gameCanvas');
+    if(canvas.style.position!=='fixed'){
+      canvas.style.position='fixed'; canvas.style.inset='0'; canvas.style.width='100vw'; canvas.style.height='100vh'; canvas.style.zIndex='9999';
+    } else {
+      canvas.style.position=''; canvas.style.inset=''; canvas.style.width=''; canvas.style.height=''; canvas.style.zIndex='';
+    }
+  }
+}
+window.toggleFullscreen=toggleFullscreen;
+window.restartGame=function(){
+  if(window.game){
+    window.game.state='menu'; window.game.menu_selected=0; window.game.initLevel(0,1);
+    setTimeout(()=>{window.game.state='playing';},50);
+  } else location.reload();
+};
+
+(function(){
+  function focusGame(){
+    let c=document.getElementById('gameCanvas');
+    c?.focus();
+    c?.scrollIntoView({block:'center'});
+    let ld=document.getElementById('loading');
+    if(ld) ld.style.display='none';
+    if(window.game && window.game.state==='menu'){
+      window.game.menu_selected=0;
+      try{window.game.initLevel(0,1); window.game.state='playing';}catch(e){}
+    }
+  }
+  document.getElementById('startBtn2')?.addEventListener('click', (e)=>{e.preventDefault(); focusGame();});
+  document.getElementById('gameCanvas')?.addEventListener('click', focusGame);
+  window.addEventListener('keydown', (e)=>{
+    if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' ','Space'].includes(e.code)) e.preventDefault();
+  }, {passive:false});
+  setTimeout(focusGame, 800);
+})();
+
+// Hook into game.js Game class to support touchDir
+(function waitGame(){
+  if(window.game){
+    const origUpdate=window.game.updatePlaying?.bind(window.game);
+  }
+  if(!window.game) setTimeout(waitGame, 200);
+})();
+</script>
+</body>
+</html>

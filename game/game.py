@@ -2450,14 +2450,31 @@ class Game:
             except:
                 pass
         elif pu_type == 'monster_truck':
+            # Clear surrounding bricks to prevent instant stuck inside wall when growing 0.5->2.0
+            try:
+                gx = int((player.x - PLAYFIELD_X) // TILE_SIZE)
+                gy = int((player.y - PLAYFIELD_Y) // TILE_SIZE)
+                for dy in range(-1, 2):
+                    for dx in range(-1, 2):
+                        if dx==0 and dy==0:
+                            continue
+                        self.tilemap.destroy_tile(gx+dx, gy+dy, 2, None, 'monster_truck')
+            except:
+                pass
             player.apply_powerup('monster_truck', self)
             self.particles.add_explosion(player.rect.centerx, player.rect.centery, (80, 140, 255), 20, big=True, kind='tank')
             try:
                 if snd_mgr:
                     snd_mgr.play_powerup_appear()
-                _log_gameplay("POWERUP_MONSTER_TRUCK_PICK", level_idx=self.current_level, player_id=getattr(player, 'player_id', None), data={"x": player.x, "y": player.y, "timer": getattr(player, 'monster_truck_timer', 0), "scale": getattr(player, 'current_scale', 2.0)})
+                _log_gameplay("POWERUP_MONSTER_TRUCK_PICK", level_idx=self.current_level, player_id=getattr(player, 'player_id', None), data={"x": player.x, "y": player.y, "timer": getattr(player, 'monster_truck_timer', 0), "scale": getattr(player, 'current_scale', 2.0), "was_small": False, "clear_area": True})
             except:
                 pass
+            # Extra safety: ensure player still alive after transform and invuln set
+            if not player.alive:
+                print(f"[BUGFIX] Player died during truck transform, reviving with invuln")
+                player.alive = True
+                player.invulnerable_timer = 120
+                player.spawn_protection = 120
 
     def draw(self):
         # Create canvas at original resolution for consistent drawing and easy scaling to fullscreen

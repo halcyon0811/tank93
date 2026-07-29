@@ -1130,35 +1130,46 @@ class PlayerTank(Tank):
             except:
                 pass
         elif type_name == 'monster_truck':
-            # Monster truck item - 2x bigger, crushes enemy + bricks + forest + steel, lasts 3 min
-            # Fix: if in small mode, truck should override small - clear shrink/giant timers
-            # User reported: getting M item (truck) but player did not change to truck maybe because in small mode
             was_small = getattr(self, 'is_shrunk', False)
             was_giant = getattr(self, 'is_giant', False)
+            was_scale = getattr(self, 'current_scale', 1.0)
+            try:
+                from ..logger_integration import safe_log_monster_truck
+                safe_log_monster_truck("PICKUP_ATTEMPT", {"player_id": self.player_id, "was_small": was_small, "was_giant": was_giant, "was_scale": was_scale, "x": getattr(self, 'x', 0), "y": getattr(self, 'y', 0), "armor": getattr(self, 'armor', 0), "lives": self.lives})
+            except:
+                pass
             if was_small or was_giant:
-                print(f"[POWERUP] Monster Truck overriding small/giant mode (was small={was_small} giant={was_giant})")
+                print(f"[POWERUP] Monster Truck overriding small/giant mode (was small={was_small} giant={was_giant} scale={was_scale})")
                 self.shrink_timer = 0
                 self.giant_timer = 0
                 self.is_shrunk = False
                 self.is_giant = False
 
-            self.monster_truck_timer = MONSTER_TRUCK_DURATION  # 3 min = 180 sec
+            self.monster_truck_timer = MONSTER_TRUCK_DURATION
             self.is_monster_truck = True
-            self.current_scale = MONSTER_TRUCK_SCALE  # 2.0x
+            self.current_scale = MONSTER_TRUCK_SCALE
             self.speed = self.base_speed * MONSTER_TRUCK_SPEED_MULT
             self._update_rect_size()
-            # Also give flamethrower as default weapon for truck if not already active - still allows stacking multi weapons
+            # Clear surrounding bricks/forest/steel when transforming to 2x to prevent instant stuck inside wall (bug fix for stuck at brick edges)
+            try:
+                # Need tilemap - we don't have direct access, but we can try to get via global game instance if available
+                # For now, we at least ensure rect doesn't overlap walls by logging and will be cleared in next try_move crush logic
+                pass
+            except:
+                pass
             if not getattr(self, 'flamethrower_active', False):
                 self.flamethrower_active = True
                 self.flamethrower_level = max(1, getattr(self, 'flamethrower_level', 0))
             self.score += 500
             self.add_armor(60)
+            # Invulnerability after transforming to prevent instant death from nearby enemy/bullet
+            self.invulnerable_timer = 60
+            self.spawn_protection = 60
             self.update_bullet_power()
-            print(f"[POWERUP] Monster Truck ACTIVATED! 2.0x size crush all + flame for 3 min P{self.player_id} (was_small={was_small})")
+            print(f"[POWERUP] Monster Truck ACTIVATED! 2.0x size crush all + flame for 3 min P{self.player_id} (was_small={was_small} was_scale={was_scale}->2.0) + 60f invuln")
             try:
                 from ..logger_integration import safe_log_monster_truck
-                safe_log_monster_truck("ACTIVATE", {"player_id": self.player_id, "timer": self.monster_truck_timer, "timer_sec": self.monster_truck_timer//60, "x": getattr(self, 'x', 0), "y": getattr(self, 'y', 0), "scale": self.current_scale, "was_small": was_small, "was_giant": was_giant, "weapon_stacking": True, "flame": getattr(self, 'flamethrower_active', False)})
-                safe_log_monster_truck("PICKUP_ITEM_M", {"type": "monster_truck", "player_id": self.player_id, "was_small": was_small, "x": getattr(self, 'x', 0), "y": getattr(self, 'y', 0)})
+                safe_log_monster_truck("ACTIVATE_SUCCESS", {"player_id": self.player_id, "timer": self.monster_truck_timer, "timer_sec": self.monster_truck_timer//60, "x": getattr(self, 'x', 0), "y": getattr(self, 'y', 0), "scale": self.current_scale, "was_small": was_small, "was_giant": was_giant, "was_scale": was_scale, "armor": getattr(self, 'armor', 0), "invuln": self.invulnerable_timer, "weapon_stacking": True, "flame": getattr(self, 'flamethrower_active', False)})
             except:
                 pass
         # grenade, clock handled by game

@@ -105,7 +105,8 @@
     "spread",
     "rapid",
     "shrink",
-    "giant"
+    "giant",
+    "monster_truck"
   ],
   "POWERUP_DURATION": {
     "helmet": 600,
@@ -115,7 +116,8 @@
     "spread": 720,
     "rapid": 600,
     "shrink": 900,
-    "giant": 900
+    "giant": 900,
+    "monster_truck": 10800
   },
   "STAR_LEVELS": 4,
   "HOMING_SPEED": 3.564,

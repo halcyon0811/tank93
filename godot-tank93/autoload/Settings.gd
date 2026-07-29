@@ -76,8 +76,10 @@ var DIRS: Dictionary = {
 var EIGHT_DIRS: Array = ["UP","UP_RIGHT","RIGHT","DOWN_RIGHT","DOWN","DOWN_LEFT","LEFT","UP_LEFT"]
 
 var MONSTER_TRUCK_SCALE: float = 2.0
-var MONSTER_TRUCK_DURATION: int = 900
+var MONSTER_TRUCK_DURATION: int = 10800 # 3 min = 180*60
+var MONSTER_TRUCK_DURATION_SEC: int = 180
 var GIANT_SCALE: float = 2.0
+var FLAMETHROWER_RANGE: float = 80.0
 
 var PLAYER_NAMES: Array = ["Chad","Lida"]
 

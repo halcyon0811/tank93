@@ -21,8 +21,8 @@ var powerups: Array = []
 var current_level: int = 0
 var total_stages_cleared: int = 0
 var current_loop: int = 0
-var vehicle_choice: String = "tank" # tank or monster_truck 1.3x + flame
-var state: String = "menu" # menu, playing, paused, gameover, stage_clear
+var vehicle_choice: String = "tank" # always tank OG now, truck is item-only 3 min
+var state: String = "menu"
 var menu_selected: int = 0
 var enemies_total: int = 20
 var enemies_killed: int = 0
@@ -39,10 +39,9 @@ var screenshake_decay: float = 0.9
 var flash_alpha: float = 0.0
 
 func _ready():
-	# Load saved vehicle choice
-	vehicle_choice = Save.vehicle_choice
+	vehicle_choice = "tank" # always OG tank now, truck is item-only
 	total_stages_cleared = Save.total_stages_cleared
-	print("[Godot Tank93] Ready - vehicle=%s total=%d - Press ENTER to start, V to toggle tank/truck" % [vehicle_choice, total_stages_cleared])
+	print("[Godot Tank93] Ready - OG Tank - total stages=%d - Truck is item-only 3 min + multi-weapons" % [total_stages_cleared])
 	state = "menu"
 	_init_level(0, 1)
 
@@ -53,23 +52,14 @@ func _unhandled_input(event):
 		elif event.is_action_pressed("ui_down") or event.is_action_pressed("p1_down"):
 			menu_selected = (menu_selected + 1) % 5
 		elif event.is_action_pressed("ui_left") or event.is_action_pressed("p1_left"):
-			menu_selected = 1 if menu_selected == 0 else 0 # CHAD <-> CHAD&LIDA
+			menu_selected = 1 if menu_selected == 0 else 0
 		elif event.is_action_pressed("ui_right") or event.is_action_pressed("p1_right"):
 			menu_selected = 1 if menu_selected == 0 else 0
-		elif event.is_action_pressed("vehicle_toggle"):
-			vehicle_choice = "monster_truck" if vehicle_choice == "tank" else "tank"
-			Save.vehicle_choice = vehicle_choice
-			Save.save_game()
-			print("[Vehicle] Toggled to %s" % vehicle_choice)
 		elif event.is_action_pressed("ui_accept") or event.is_action_pressed("p1_shoot"):
 			_handle_menu_select()
 	elif state == "playing":
 		if event.is_action_pressed("pause"):
 			state = "paused"
-		elif event.is_action_pressed("vehicle_toggle"):
-			vehicle_choice = "monster_truck" if vehicle_choice == "tank" else "tank"
-			Save.vehicle_choice = vehicle_choice
-			print("[Vehicle] Toggled in-game (next stage) to %s" % vehicle_choice)
 	elif state in ["gameover", "stage_clear", "paused"]:
 		if event.is_action_pressed("ui_accept"):
 			if state == "stage_clear":
@@ -132,9 +122,9 @@ func _create_player(spawn: Vector2i, player_id: int) -> Node2D:
 	var p = scene.instantiate()
 	p.position = Vector2(Settings.PLAYFIELD_X + spawn.x * Settings.TILE_SIZE + Settings.TILE_SIZE/2, Settings.PLAYFIELD_Y + spawn.y * Settings.TILE_SIZE + Settings.TILE_SIZE/2)
 	p.player_id = player_id
-	p.vehicle_choice = vehicle_choice # tank 1.0x or monster_truck 1.3x + flame
+	p.vehicle_choice = "tank" # always OG tank start, truck is item-only 3 min
 	p.total_stages_cleared = total_stages_cleared
-	add_child(p)
+	# Ensure player starts as OG tank 1.0x, not truck (truck is item)
 	return p
 
 func _draw_tilemap():
@@ -168,7 +158,7 @@ func _draw():
 func _process(delta):
 	match state:
 		"menu":
-			debug_label.text = "TANK 93 - OG Classic - Press ENTER to start - V to toggle %s - Stage %d Total %d" % [vehicle_choice.to_upper(), current_level+1, total_stages_cleared]
+			debug_label.text = "TANK 93 - OG Classic Tank - Press ENTER - Stage %d Total %d - Truck is item-only 3 min" % [current_level+1, total_stages_cleared]
 		"playing":
 			_update_playing(delta)
 		"paused":
@@ -194,20 +184,17 @@ func _update_playing(delta):
 	spawn_timer += delta
 	difficulty_ramp_timer += delta
 
-	# Difficulty ramp every 12 sec
 	if difficulty_ramp_timer >= 12.0:
 		difficulty_ramp_timer = 0.0
 		if max_enemies_on_field < Settings.DIFFICULTY_MAX_ENEMIES_CAP:
 			max_enemies_on_field += 1
-			print("[Difficulty] Ramp max enemies %d" % max_enemies_on_field)
+			print("[Difficulty] Ramp max %d" % max_enemies_on_field)
 		spawn_interval = max(Settings.DIFFICULTY_SPAWN_MIN / 60.0, spawn_interval - 0.13)
 
 	if spawn_timer >= spawn_interval:
 		spawn_timer = 0.0
 		_spawn_enemy()
 
-	# Update players via their own _physics_process
-	# Check win/lose
 	if enemies_killed >= enemies_total and enemies.size() == 0:
 		state = "stage_clear"
 		total_stages_cleared += 1
@@ -221,9 +208,11 @@ func _update_playing(delta):
 		Save.save_game()
 		print("[Stage Clear] Total %d Loop %d" % [total_stages_cleared, current_loop])
 
-	# Update HUD
 	var diff = Settings.get_difficulty_params(total_stages_cleared)
-	stage_label.text = "STAGE %d/35 TOTAL %d LOOP %d MAX %d SPAWN %.1fs LOOP x%.2f Vehicle %s" % [current_level+1, total_stages_cleared, diff.loop, diff.max_on_field, diff.spawn_interval/60.0, diff.speed_mult, vehicle_choice]
+	var truck_info = ""
+	if players.size() > 0 and players[0].is_monster_truck:
+		truck_info = " TRUCK %ds" % int(players[0].monster_truck_timer)
+	stage_label.text = "STAGE %d/35 TOTAL %d LOOP %d MAX %d SPAWN %.1fs x%.2f%s" % [current_level+1, total_stages_cleared, diff.loop, diff.max_on_field, diff.spawn_interval/60.0, diff.speed_mult, truck_info]
 
 func _spawn_enemy():
 	if enemies_spawned >= enemies_total:

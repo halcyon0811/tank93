@@ -2,8 +2,8 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Tank93 - Pure JS - 35 Original NES Maps - Exact Same Logic as Python</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Tank93 - 35 Original NES Maps - OG Classic</title>
 <link rel="stylesheet" href="style.css">
 <link rel="icon" href="assets/images/General-Sprites.png">
 <style>
@@ -16,42 +16,40 @@
 <body>
 <div id="gameContainer">
     <div id="header">
-        <h1>TANK 93 - PURE JS - EXACT SAME AS PYTHON VERSION</h1>
-        <div id="subtitle">No Python - Pure JavaScript Canvas - 35 Original NES Maps - All Fixed Features Ported 1:1 from Python</div>
-        <div id="versionToggle">
-            <button onclick="location.href='../'">🏠 Main Pygbag (Exact Python WASM)</button>
-            <button onclick="location.href='./'" style="background:#ff0;color:#000;">🎮 Pure JS Exact (You are here)</button>
-            <button onclick="window.open('https://github.com/halcyon0811/tank93','_blank')">📦 GitHub</button>
+        <h1>TANK 93 - OG CLASSIC - 35 MAPS</h1>
+        <div id="subtitle">Battle City Tribute - 35 Original NES Maps - Vehicle choice TANK 1.0x / MONSTER TRUCK 1.3x+FLAME - Progressive difficulty TOTAL counter</div>
+        <div id="versionToggle" style="position:relative; z-index:20;">
+            <button id="startBtn" style="background:#ff0;color:#000;font-weight:bold;padding:10px 28px;font-size:16px;border:2px solid #ff0;border-radius:8px;cursor:pointer">▶ START GAME</button>
+            <button onclick="toggleFullscreen()">⛶ Fullscreen</button>
+            <button onclick="restartGame()">↻ Restart</button>
         </div>
+        <div id="loading">Loading assets...</div>
         <div id="exactNote">
-            This Pure JS version is now <b>EXACT SAME LOGIC as Python version</b> - Ported 1:1:<br>
-            ✅ Tank facing fixed (RIGHT/LEFT swap corrected, 8-dir rotation) - same sprite sheet General-Sprites.png<br>
-            ✅ Enemy stuck fix (distance check 1.8*TANK_SIZE + separation push)<br>
-            ✅ Monster base cage (green blob in cage) → boss when hit (slowed to 1.8 same as normal, not 4.95)<br>
-            ✅ Boss releases random items to current enemies (60% get item, 50% carrier, 40% homing/spread/rapid)<br>
-            ✅ Items: Homing M (tracking nearest enemy), Spread 8 (8-way), Rapid R x3 (cooldown 20→6) - PERM until death, kept across stages<br>
-            ✅ Freeze (clock) now attackable (was unattackable bug fixed)<br>
-            ✅ Gradual enemies: total 20→106 (base 20 + lvl*2 + lvl//5*3), max 4→8, spawn 2.5s→0.8s, ramp every 12s<br>
-            ✅ Real tank sounds from your MP3 (distant_tank_shots.mp3 17.6s, 7 shots) - shoot uses single 0.8s, brick hit hybrid real low + synthetic crack<br>
-            ✅ Fullscreen zoomed (canvas 960x720 scaled to screen size, not small corner)<br>
-            ✅ Controller mapping: axis 0/1 for move, button 4 L for attack (not D-pad down)<br>
-            ✅ LAN remote P2 via same WiFi (Python desktop only, JS uses Gamepad API)<br>
-            ✅ Projector: http://host_ip:8080 for browser on same WiFi<br>
-            <br>
-            <b>Pure JS now uses same sprite sheet as Python:</b> General-Sprites.png 400x256, 25x16 tiles, 16x16 tanks, DIR_OFFSETS fixed RIGHT=6 LEFT=2 (was swapped), 8-dir rotation via canvas rotate<br>
-            <b>Sounds:</b> Web Audio API loads real/*.wav and distant_tank_shots.mp3 (same as Python 53 sounds)
+            <b>OG Classic - Now with fixes for itch.io:</b><br>
+            ✅ Fixed: bullets destroy enemies and enemies can destroy player (armor system + health bar accurate to Python)<br>
+            ✅ Fixed: no armor/HP bar -> now shows HP 100 + armor bars green/yellow/red for player and enemies<br>
+            ✅ Fixed: brick texture - NES style brick with mortar lines, steel with rivets, water sparkle, forest dense, ice diagonal<br>
+            ✅ Touch joystick on mobile: left stick move, right FIRE, top-right Pause<br>
+            ✅ Vehicle: Monster Truck item 2x 3min crush all bricks/steel/forest/water pass, Tank 1.3x 1.2x speed option with V key<br>
+            ✅ Weapons: Flamethrower cone 7 flames melt bricks, Homing tracking, Spread 8-way, Rapid x3<br>
+            ✅ 35 maps + progressive difficulty: MAX 4→12, SPAWN 2.5s→0.4s, TOTAL counter never resets<br>
+            ✅ Boss: green blob caged -> boss tank crush walls to escape, releases random items
         </div>
     </div>
     
     <div id="mainArea">
-        <div id="leftPanel">
-            <canvas id="gameCanvas" width="960" height="720"></canvas>
+        <div id="leftPanel" style="position:relative; width:100%; max-width:960px; margin:0 auto;">
+            <canvas id="gameCanvas" width="960" height="720" style="width:100%; height:auto; aspect-ratio:960/720; max-height:80vh;"></canvas>
+            <div id="touchControls">
+                <div class="joystick" id="joyBase"><div class="joystick-knob" id="joyKnob"></div></div>
+                <div class="btnTouch" id="btnShoot">FIRE</div>
+                <div class="btnTouch" id="btnPause">P</div>
+                <div id="hudTouch"><div id="p1InfoTouch">P1: 3 lives</div><div id="bossInfoTouch"></div></div>
+            </div>
             <div id="controls">
-                <b>Controls:</b> P1 WASD+SPACE | P2 ARROWS+ENTER | Gamepad - Stick move, Button 4 (L) shoot | F11 Fullscreen | P Pause | ESC Menu<br>
-                <b>Items:</b> Orange M=Tracking missile (homing), Purple 8=8-way, Pink R=Rapid 3x - PERM until death, kept across stages, gone on death<br>
-                <b>Boss:</b> Monster base (green in cage) - when hit releases BOSS tank (slowed to 1.8 same as normal enemy, not 4.95) - HUD shows BOSS HP 12/12<br>
-                <b>After Boss Out:</b> Current enemies randomly get items (60% get item, 50% carrier will drop item, 40% gain ability homing/spread/rapid)<br>
-                <b>Exact Parity with Python:</b> Same maps 26x26 (35), same tilemap direction-aware brick destroy (2 small bricks per hit), same A* pathfinding for enemies (13x13 big tiles), same homing, same gradual difficulty
+                <b>Controls:</b> P1 WASD+SPACE | P2 ARROWS+ENTER | Gamepad Stick+ A (shoot) L (shoot) | Touch joystick + FIRE | F11 Fullscreen | P Pause | C Coin | V Tank/Truck<br>
+                <b>Items:</b> H=Helmet shield, C=Clock freeze, S=Shovel steel base, *=Star upgrade, G=Grenade bomb, T=Tank life, P=Gun power, M=Homing missile, 8=Spread, R=Rapid, Truck=Monster Truck 2x 3min crush all<br>
+                <b>Fixed:</b> Bullet vs tank collision with armor + health (basic 1HP armor 4HP boss 18HP) | Brick texture NES mortar | Steel rivets
             </div>
         </div>
         
@@ -95,15 +93,119 @@
     </div>
 
     <div id="footer">
-        <div>35 ORIGINAL NES MAPS - 700 ENEMIES - EXACT SAME AS PYTHON - 26x26 precise, half-bricks, A* pathfinding, monster boss slowed to 1.8</div>
-        <div>CONTROLS: P1 WASD+SPACE / P2 ARROWS+ENTER / JOY-CON / GAMEPAD / F11 Fullscreen / P Pause / ESC Menu - Pure JS No Python, 540KB</div>
-        <div>LAN: For remote P2 use desktop Python version: python3 main.py (host) + python3 remote_client.py --host IP on same WiFi</div>
-        <div>PROJECTOR: Desktop Python: http://host_ip:8080 | Web Pure JS: F11 browser fullscreen | GitHub Pages: https://halcyon0811.github.io/tank93/</div>
+        <div>35 ORIGINAL NES MAPS - OG Classic - Protect base, truck crush steel, flame, 35 stages progressive TOTAL counter</div>
+        <div>CONTROLS: WASD+SPACE P1 ARROWS+ENTER P2 Gamepad Touch Left Joystick + Right FIRE V=Toggle Truck C=Coin P=Pause F11 Fullscreen</div>
     </div>
-
-    <div id="loading">Loading 35 original NES maps... Making JS exactly same as Python - tank sprites from General-Sprites.png, A* pathfinding, real tank sounds...</div>
 </div>
 
-<script type="module" src="game.js"></script>
+<script type="module">
+import './game.js';
+
+// itch.io fixes - no popup blocking START button
+window.addEventListener('load', ()=>{
+  const canvas = document.getElementById('gameCanvas');
+  const startBtn = document.getElementById('startBtn');
+  const loadingEl = document.getElementById('loading');
+
+  function hideLoading(){
+    if(loadingEl){
+      loadingEl.classList.add('hidden');
+      loadingEl.style.display='none';
+    }
+  }
+
+  function startGame(){
+    hideLoading();
+    canvas?.focus();
+    if(window.game){
+      try{
+        if(window.game.state==='menu'){
+          window.game.menu_selected=0;
+          window.game.initLevel(0,1);
+          window.game.state='playing';
+        } else if(window.game.state==='gameover'){
+          window.game.state='menu';
+          window.game.menu_selected=0;
+          window.game.initLevel(0,1);
+          window.game.state='playing';
+        } else if(window.game.state==='stage_clear'){
+          window.game.initNextLevel();
+        } else if(window.game.state==='paused'){
+          window.game.state='playing';
+        }
+      }catch(e){ console.error('start failed', e); }
+    }
+    canvas?.scrollIntoView({block:'center', behavior:'smooth'});
+  }
+
+  if(canvas){
+    canvas.setAttribute('tabindex','0');
+    canvas.addEventListener('click', startGame);
+    canvas.addEventListener('touchstart', startGame, {passive:true});
+  }
+
+  if(startBtn){
+    startBtn.addEventListener('click', (e)=>{
+      e.preventDefault();
+      e.stopPropagation();
+      startGame();
+    });
+  }
+
+  // When assets loaded, game.js will hide #loading via display:none
+  // We override to show START button always accessible
+  const observer = new MutationObserver(()=>{
+    if(loadingEl && loadingEl.style.display==='none'){
+      // keep hidden
+      loadingEl.classList.add('hidden');
+    }
+  });
+  if(loadingEl) observer.observe(loadingEl, {attributes:true, attributeFilter:['style']});
+
+  window.restartGame = function(){
+    if(window.game){
+      window.game.state='menu';
+      window.game.menu_selected=0;
+      window.game.initLevel(0,1);
+      window.game.state='playing';
+      hideLoading();
+    } else location.reload();
+  };
+
+  window.toggleFullscreen = function(){
+    try{
+      if(!document.fullscreenElement){
+        (document.getElementById('gameContainer') || document.documentElement).requestFullscreen();
+      } else {
+        document.exitFullscreen();
+      }
+    }catch(err){
+      // Fallback CSS fullscreen for itch iframe
+      let c=document.getElementById('gameCanvas');
+      if(c){
+        if(c.style.position!=='fixed'){
+          c.style.position='fixed'; c.style.inset='0'; c.style.width='100vw'; c.style.height='100vh'; c.style.zIndex='9999'; c.style.border='none';
+        } else {
+          c.style.position=''; c.style.inset=''; c.style.width=''; c.style.height=''; c.style.zIndex=''; c.style.border='';
+        }
+      }
+    }
+  };
+
+  // Auto-hide loading after 2s and show canvas - no popup blocking
+  setTimeout(()=>{
+    if(loadingEl && loadingEl.style.display!=='none'){
+      loadingEl.textContent='Assets loaded - Press START GAME';
+      loadingEl.classList.add('active');
+      loadingEl.style.pointerEvents='auto';
+    }
+  }, 1500);
+
+  setTimeout(()=>{
+    hideLoading();
+    canvas?.focus();
+  }, 2500);
+});
+</script>
 </body>
 </html>

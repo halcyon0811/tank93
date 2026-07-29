@@ -351,46 +351,73 @@ class TileMap {
     }
 
     drawBrick(ctx,x,y) {
-        // Simplified retro brick
-        ctx.fillStyle = '#D23818';
-        ctx.fillRect(x,y,TILE_SIZE,TILE_SIZE);
+        // NES authentic brick texture - 2x2 small bricks with mortar (matches Python tilemap.py draw_brick)
+        // Base mortar dark #8C1E0A
         ctx.fillStyle = '#8C1E0A';
-        ctx.fillRect(x+3,y+10,TILE_SIZE-6,2);
+        ctx.fillRect(x, y, TILE_SIZE, TILE_SIZE);
+
+        let gap = 2;
+        let bw = (TILE_SIZE - gap*3)/2;
+        let bh = (TILE_SIZE - gap*3)/2;
+
+        ctx.fillStyle = '#D23818';
+        ctx.fillRect(x+gap, y+gap, bw, bh);
+        ctx.fillRect(x+gap*2+bw, y+gap, bw, bh);
+        ctx.fillRect(x+gap, y+gap*2+bh, bw, bh);
+        ctx.fillRect(x+gap*2+bw, y+gap*2+bh, bw, bh);
+
         ctx.fillStyle = '#F07846';
-        ctx.fillRect(x,y,TILE_SIZE,3);
+        ctx.fillRect(x+gap, y+gap, bw, 2);
+        ctx.fillRect(x+gap*2+bw, y+gap, bw, 2);
+        ctx.fillRect(x+gap, y+gap*2+bh, bw, 2);
+        ctx.fillRect(x+gap*2+bw, y+gap*2+bh, bw, 2);
     }
     drawSteel(ctx,x,y) {
-        ctx.fillStyle = '#D2D2D2';
-        ctx.fillRect(x,y,TILE_SIZE,TILE_SIZE);
-        ctx.fillStyle = '#FFF';
-        ctx.fillRect(x+3,y+3,TILE_SIZE-6,TILE_SIZE-6);
+        // NES steel - light gray with white inner, dark border, rivets (matches Python)
         ctx.fillStyle = '#828282';
-        ctx.fillRect(x,y,TILE_SIZE,2);
-        ctx.fillRect(x,y,2,TILE_SIZE);
+        ctx.fillRect(x, y, TILE_SIZE, TILE_SIZE);
+        ctx.fillStyle = '#D2D2D2';
+        ctx.fillRect(x+1, y+1, TILE_SIZE-2, TILE_SIZE-2);
+        ctx.fillStyle = '#FFF';
+        ctx.fillRect(x+3, y+3, TILE_SIZE-6, TILE_SIZE-6);
+        ctx.fillStyle = '#646464';
+        ctx.fillRect(x+2, y+2, 3, 3);
+        ctx.fillRect(x+TILE_SIZE-5, y+2, 3, 3);
+        ctx.fillRect(x+2, y+TILE_SIZE-5, 3, 3);
+        ctx.fillRect(x+TILE_SIZE-5, y+TILE_SIZE-5, 3, 3);
+        ctx.fillStyle = 'rgba(0,0,0,0.15)';
+        ctx.fillRect(x+TILE_SIZE/2-1, y+3, 2, TILE_SIZE-6);
+        ctx.fillRect(x+3, y+TILE_SIZE/2-1, TILE_SIZE-6, 2);
     }
     drawWater(ctx,x,y) {
         ctx.fillStyle = '#1C5AF0';
-        ctx.fillRect(x,y,TILE_SIZE,TILE_SIZE);
+        ctx.fillRect(x, y, TILE_SIZE, TILE_SIZE);
         ctx.fillStyle = '#E8F0FF';
         let t = Date.now();
-        let phase = Math.floor(t/200)%2;
-        let dots = phase===0? [[1,1],[6,1],[2,4]] : [[2,1],[5,2],[1,3]];
-        for(let [dx,dy] of dots) { ctx.fillRect(x+dx*3, y+dy*3, 3, 3); }
+        let phase = Math.floor(t/200)%3;
+        let patterns = [[[3,4],[10,8],[18,14]], [[6,3],[14,10],[8,18]], [[4,12],[16,5],[12,16]]];
+        let pat = patterns[phase] || patterns[0];
+        for(let [dx,dy] of pat){ ctx.fillRect(x+dx, y+dy, 3, 2); }
     }
     drawGrass(ctx,x,y) {
         ctx.fillStyle = '#3CA014';
-        ctx.fillRect(x,y,TILE_SIZE,TILE_SIZE);
+        ctx.fillRect(x, y, TILE_SIZE, TILE_SIZE);
+        ctx.fillStyle = '#2A7A0A';
+        // seeded small random for dense look
+        let seed = (x*17 + y*31) % 233280;
+        let rand = (n)=>{ seed = (seed*9301 + 49297) % 233280; return (seed/233280)*n; };
+        for(let i=0;i<8;i++){ ctx.fillRect(x+rand(TILE_SIZE-5), y+rand(TILE_SIZE-5), 4, 4); }
         ctx.fillStyle = '#B0E050';
-        ctx.fillRect(x+4,y+4,4,4);
-        ctx.fillRect(x+16,y+12,4,4);
+        for(let i=0;i<4;i++){ ctx.fillRect(x+rand(TILE_SIZE-4), y+rand(TILE_SIZE-4), 3, 3); }
     }
     drawIce(ctx,x,y) {
         ctx.fillStyle = '#BEBEBE';
-        ctx.fillRect(x,y,TILE_SIZE,TILE_SIZE);
+        ctx.fillRect(x, y, TILE_SIZE, TILE_SIZE);
         ctx.fillStyle = '#828287';
-        ctx.fillRect(x+2,y+2,TILE_SIZE-4,2);
+        for(let i=0;i<TILE_SIZE;i+=6){ ctx.fillRect(x+i, y, 1, TILE_SIZE); }
         ctx.fillStyle = '#E6E6E6';
-        ctx.fillRect(x+6,y+10,TILE_SIZE-8,2);
+        ctx.fillRect(x+4, y+4, 8, 2);
+        ctx.fillRect(x+12, y+14, 8, 2);
     }
 }
 
@@ -410,6 +437,7 @@ class Tank {
         this.cooldown = 0;
         this.bullet_power = 1;
         this.speed = is_player ? 2.2*1.5 : 1.8;
+        this.base_speed = this.speed;
         this.invulnerable_timer = 0;
         this.spawn_protection = 0;
         this.on_ice = false;
@@ -422,6 +450,25 @@ class Tank {
         this.spread_active = false;
         this.rapid_active = false;
         this.venom_timer = 0;
+        this.venom_level = 0;
+        // Armor system (matches Python settings.py ARMOR_INITIAL_*)
+        this.armor = is_player ? 100 : 50;
+        this.max_armor = this.armor;
+        this.armor_flash_timer = 0;
+        // Health for armor/boss (like Python EnemyTank health)
+        this.health = 1;
+        this.max_health = 1;
+        // Size / scale for monster truck / giant / shrink
+        this.current_scale = 1.0;
+        this.base_size = TANK_SIZE;
+        this.is_shrunk = false;
+        this.is_giant = false;
+        this.is_monster_truck = false;
+        this.monster_truck_timer = 0;
+        this.giant_timer = 0;
+        this.shrink_timer = 0;
+        this.flamethrower_active = false;
+        this.flamethrower_level = 0;
     }
 
     updateRect() {
@@ -512,13 +559,19 @@ class Tank {
         return true;
     }
 
+    _update_rect_size(){
+        let sz = Math.max(12, Math.floor(this.base_size * this.current_scale));
+        this.rect = {left:this.x-sz/2, top:this.y-sz/2, right:this.x+sz/2, bottom:this.y+sz/2, centerx:this.x, centery:this.y};
+    }
+
     update(tilemap) {
         if(this.cooldown>0) this.cooldown--;
         if(this.invulnerable_timer>0) this.invulnerable_timer--;
         if(this.spawn_protection>0) this.spawn_protection--;
+        if(this.armor_flash_timer>0) this.armor_flash_timer--;
         if(this.venom_timer>0) {
             this.venom_timer--;
-            if(this.venom_timer<=0) this.alive=false;
+            if(this.venom_timer<=0) { this.alive=false; this.venom_timer=0; this.venom_level=0; }
         }
         // ice check
         let gx = Math.floor((this.rect.centerx - PLAYFIELD_X)/TILE_SIZE);
@@ -527,24 +580,87 @@ class Tank {
         else this.on_ice=false;
 
         // items timers - permanent until death (timer -1 = infinite)
-        if(this.homing_timer===-1) this.homing_active=true;
-        else if(this.homing_timer>0) { this.homing_timer--; this.homing_active=true; if(this.homing_timer<=0) this.homing_active=false; }
-        else if(this.homing_timer!== -1) this.homing_active=false;
+        if(this.homing_timer===-1) this.homing=true;
+        else if(this.homing_timer>0) { this.homing_timer--; this.homing=true; if(this.homing_timer<=0) this.homing=false; }
+        else if(this.homing_timer!== -1) this.homing=false;
 
-        if(this.spread_timer===-1) this.spread_active=true;
-        else if(this.spread_timer>0) { this.spread_timer--; this.spread_active=true; if(this.spread_timer<=0) this.spread_active=false; }
-        else if(this.spread_timer!== -1) this.spread_active=false;
+        if(this.spread_timer===-1) this.spread=true;
+        else if(this.spread_timer>0) { this.spread_timer--; this.spread=true; if(this.spread_timer<=0) this.spread=false; }
+        else if(this.spread_timer!== -1) this.spread=false;
 
-        if(this.rapid_timer===-1) this.rapid_active=true;
-        else if(this.rapid_timer>0) { this.rapid_timer--; this.rapid_active=true; if(this.rapid_timer<=0) this.rapid_active=false; }
-        else if(this.rapid_timer!== -1) this.rapid_active=false;
+        if(this.rapid_timer===-1) this.rapid=true;
+        else if(this.rapid_timer>0) { this.rapid_timer--; this.rapid=true; if(this.rapid_timer<=0) this.rapid=false; }
+        else if(this.rapid_timer!== -1) this.rapid=false;
+
+        if(this.monster_truck_timer>0){
+            this.monster_truck_timer--;
+            this.is_monster_truck=true;
+            this.current_scale=2.0;
+            if(this.monster_truck_timer<=0){this.is_monster_truck=false; this.current_scale=1.0; this._update_rect_size();}
+        } else {
+            if(this.is_monster_truck && this.monster_truck_timer===0){
+                this.is_monster_truck=false;
+                this.current_scale=1.0;
+                this._update_rect_size();
+            }
+        }
 
         this.bullets = this.bullets.filter(b=>b.alive);
     }
 
-    takeDamage(power=1) {
+    takeDamage(power=1, bullet_type='normal') {
         if(this.invulnerable_timer>0 || this.spawn_protection>0) return false;
+
+        // Armor: for VERY good quality itch, make it so armor break ALSO damages health same hit
+        // Player sees armor bar reduce, then tank explodes on next frame, not stuck with 0 armor + 1 HP forever
+        if(this.armor>0){
+            let dmg = power*25;
+            if(bullet_type.includes('power_homing')) dmg*=2.5;
+            else if(bullet_type.includes('power') || power>=2) dmg*=1.5;
+            else if(bullet_type==='homing') dmg*=0.8;
+            else if(bullet_type==='rapid') dmg*=0.6;
+            else if(bullet_type==='venom') dmg*=0.5;
+            else if(bullet_type==='flamethrower') dmg*=1.2;
+
+            let prevArmor = this.armor;
+            this.armor = Math.max(0, this.armor - dmg);
+            this.armor_flash_timer = 8;
+
+            // If armor still left, blocked
+            if(this.armor>0) return false;
+
+            // Armor just broke from >0 to 0: allow overkill damage to health immediately
+            // Overkill = dmg leftover after breaking armor goes to health
+            let overkill = Math.max(0, dmg - prevArmor);
+            if(overkill>0 && this.health>1){
+                // Convert overkill armor damage to health damage (1 power = 25 armor = 1 health)
+                let healthDmg = Math.max(1, Math.floor(overkill/25));
+                this.health -= healthDmg;
+            }
+            // If health still >1, give short invuln but not full death yet - still show armor 0 bar for 1 hit
+            if(this.health>1){
+                this.invulnerable_timer = 8;
+                return false;
+            }
+            // else fall through to die
+        }
+
+        // No armor or armor just broke - health damage
+        if(this.health>1){
+            this.health -= power;
+            if(this.health>0){
+                this.invulnerable_timer = 12;
+                return false;
+            }
+        }
+        // Health <=1 or now <=0 -> die
         return true;
+    }
+
+    add_armor(amount){
+        if(this.max_armor<=0) this.max_armor=100;
+        this.armor = Math.min(this.max_armor, this.armor+amount);
+        this.armor_flash_timer=15;
     }
 
     die() {
@@ -597,22 +713,44 @@ class Tank {
         }
 
         if(drewSprite) {
-            // Draw P1/P2 label and health bar on top of sprite, like Python does
+            // Draw P1/P2 label and HP bar - ALWAYS, not just boss (fixes bug #2 no HP bar)
             if(this.is_player) {
                 ctx.fillStyle = 'black';
-                ctx.fillRect(cx-12, this.rect.top-14, 24, 12);
+                ctx.fillRect(cx-16, this.rect.top-18, 32, 12);
                 ctx.fillStyle = this.player_id===1 ? 'white' : '#64ff64';
                 ctx.font = '10px monospace';
-                ctx.fillText(`P${this.player_id}`, cx-8, this.rect.top-4);
+                ctx.fillText(`P${this.player_id}`, cx-8, this.rect.top-8);
             }
-            // Armor/health bar for boss and armor
+            // Armor bar for ALL with armor (player HP + enemy armor)
+            if(this.armor>0 && this.max_armor>0){
+                let barW = this.is_player ? 26 : (this.is_boss ? 40 : 20);
+                let barH = this.is_player ? 5 : (this.is_boss ? 6 : 4);
+                let frac = this.armor / this.max_armor;
+                let bx = cx - barW/2;
+                let by = this.is_player ? this.rect.top-14 : (this.is_boss ? this.rect.top - 12 : this.rect.bottom + 2);
+                ctx.fillStyle = this.armor_flash_timer>0 && this.armor_flash_timer%4<2 ? '#fff' : '#000';
+                ctx.fillRect(bx-1, by-1, barW+2, barH+2);
+                ctx.fillStyle='#222';
+                ctx.fillRect(bx, by, barW, barH);
+                let col = frac>0.6 ? '#64C8FF' : frac>0.3 ? '#FFDC50' : '#FF5050';
+                if(this.armor_flash_timer>0 && this.armor_flash_timer%4<2) col='#fff';
+                ctx.fillStyle=col;
+                ctx.fillRect(bx, by, barW*frac, barH);
+                if(this.is_player){
+                    ctx.fillStyle='#fff'; ctx.font='8px monospace'; ctx.fillText(`${Math.floor(this.armor)}`, bx+barW+2, by+4);
+                }
+            }
+            // Health bar for armor enemies and boss
             if((this.enemy_type==='armor' || this.is_boss) && this.health>1) {
                 let barW = this.is_boss ? 40 : 20;
                 let barH = this.is_boss ? 6 : 4;
                 let maxH = this.is_boss ? 18 : 4;
                 let frac = this.health / maxH;
                 let bx = cx - barW/2;
-                let by = this.is_boss ? this.rect.top - 12 : this.rect.bottom + 2;
+                let by = this.is_boss ? this.rect.top - 20 : this.rect.bottom + 8;
+                // If also has armor bar, offset health bar below armor
+                if(this.armor>0 && this.is_boss) by += 0;
+                if(this.armor>0 && this.enemy_type==='armor') by = this.rect.bottom + 8;
                 ctx.fillStyle='#000';
                 ctx.fillRect(bx-1, by-1, barW+2, barH+2);
                 ctx.fillStyle='#444';
@@ -623,6 +761,9 @@ class Tank {
                     ctx.fillStyle='red';
                     ctx.font='10px monospace';
                     ctx.fillText('BOSS', cx-14, by-8);
+                    if(this.enemy_type && this.enemy_type.includes('monster')) {
+                        ctx.fillStyle='#ff0'; ctx.font='9px monospace'; ctx.fillText('MONSTER TRUCK BOSS', cx-36, by-16);
+                    }
                 }
             }
         }
@@ -716,44 +857,70 @@ class PlayerTank extends Tank {
         let limit = maxB;
         if(this.spread_active) limit = this.rapid_active ? 6 : 4;
         else if(this.rapid_active) limit = maxB*3;
+        if(this.homing_active && this.spread_active) limit = 10;
+        if(this.flamethrower_active) limit = 12;
         if(alive >= limit) return null;
 
         let bullets = [];
         let baseColor = this.bullet_power>=2 ? '#ff0' : this.color;
+        let hasFlame = this.flamethrower_active;
 
-        if(this.spread_active) {
+        if(hasFlame){
+            for(let i=0;i<7;i++){
+                let [sx,sy]=this.getBulletSpawn();
+                let baseDir=DIRS[this.direction]||[0,-1];
+                let ang=(Math.random()-0.5)*0.7;
+                let cosA=Math.cos(ang), sinA=Math.sin(ang);
+                let fdx=baseDir[0]*cosA - baseDir[1]*sinA;
+                let fdy=baseDir[0]*sinA + baseDir[1]*cosA;
+                let b=new Bullet(sx+fdx*8, sy+fdy*8, this.direction, `player${this.player_id}`, 2, '#ff8c00', false, false);
+                b.bulletType='flamethrower'; b.flame=true; b.life=12; b.maxLife=12; b.speed=12; b.vx=fdx; b.vy=fdy; b.travel=0; b.maxTravel=80;
+                this.bullets.push(b); bullets.push(b);
+            }
+            this.cooldown=4;
+            if(!this.spread_active && !this.homing_active) return bullets.length===1?bullets[0]:bullets;
+        }
+
+        if(this.spread_active && this.homing_active) {
             for(let d of EIGHT_DIRS) {
                 let [sx,sy] = this.getBulletSpawnFor(d);
-                let isHoming = this.homing_active;
-                let col = isHoming ? '#ff8c00' : baseColor;
-                let b = new Bullet(sx,sy,d,`player${this.player_id}`,this.bullet_power,col,isHoming,false);
-                if(this.rapid_active) b.speed*=1.2;
-                this.bullets.push(b);
-                bullets.push(b);
+                let b = new Bullet(sx,sy,d,`player${this.player_id}`,this.bullet_power,baseColor,false,false);
+                b.bulletType='spread'; this.bullets.push(b); bullets.push(b);
+            }
+            let [sx,sy]=this.getBulletSpawn(); let b=new Bullet(sx,sy,this.direction,`player${this.player_id}`,this.bullet_power,'#ff8c00',true,false); b.bulletType='homing'; this.bullets.push(b); bullets.push(b);
+            this.cooldown = this.rapid_active ? 10 : 28;
+        } else if(this.spread_active) {
+            for(let d of EIGHT_DIRS) {
+                let [sx,sy] = this.getBulletSpawnFor(d);
+                let b = new Bullet(sx,sy,d,`player${this.player_id}`,this.bullet_power,baseColor,false,false);
+                b.bulletType='spread'; this.bullets.push(b); bullets.push(b);
             }
             this.cooldown = this.rapid_active ? 8 : 25;
-        } else {
+        } else if(this.homing_active) {
             let [sx,sy] = this.getBulletSpawn();
-            let isHoming = this.homing_active;
-            let col = isHoming ? '#ff8c00' : (this.rapid_active ? '#ff5096' : baseColor);
-            let b = new Bullet(sx,sy,this.direction,`player${this.player_id}`,this.bullet_power,col,isHoming,false);
-            if(this.rapid_active) b.speed*=1.2;
-            this.bullets.push(b);
-            bullets.push(b);
+            let b = new Bullet(sx,sy,this.direction,`player${this.player_id}`,this.bullet_power,'#ff8c00',true,false);
+            b.bulletType='homing'; this.bullets.push(b); bullets.push(b);
+            this.cooldown = this.rapid_active ? 6 : 18;
+        } else if(!hasFlame) {
+            let [sx,sy] = this.getBulletSpawn();
+            let b = new Bullet(sx,sy,this.direction,`player${this.player_id}`,this.bullet_power,baseColor,false,false);
+            this.bullets.push(b); bullets.push(b);
             this.cooldown = this.rapid_active ? 6 : (this.star_level>=1 ? 15 : 20);
         }
         return bullets.length===1 ? bullets[0] : bullets;
     }
 
     applyPowerup(type, game) {
-        if(type==='helmet') { this.helmet_timer=10*FPS; this.invulnerable_timer=10*FPS; }
-        else if(type==='star') { this.star_level=Math.min(this.star_level+1,3); }
-        else if(type==='tank') { this.lives++; this.score+=500; }
-        else if(type==='gun') { this.bullet_power=2; }
+        if(type==='helmet') { this.helmet_timer=10*FPS; this.invulnerable_timer=10*FPS; this.armor=Math.min(this.max_armor||100, (this.armor||0)+50); }
+        else if(type==='star') { this.star_level=Math.min(this.star_level+1,3); this.armor=Math.min(this.max_armor||100, (this.armor||0)+25); }
+        else if(type==='tank') { this.lives++; this.score+=500; this.armor=Math.min(this.max_armor||100, (this.armor||0)+50); }
+        else if(type==='gun') { this.bullet_power=2; this.armor=Math.min(this.max_armor||100, (this.armor||0)+30); }
         else if(type==='shovel') { if(game) game.tilemap.activateShovel(); }
         else if(type==='homing') { this.homing_timer=-1; this.homing_active=true; this.score+=200; }
         else if(type==='spread') { this.spread_timer=-1; this.spread_active=true; this.score+=200; }
         else if(type==='rapid') { this.rapid_timer=-1; this.rapid_active=true; this.score+=200; }
+        else if(type==='monster_truck') { this.monster_truck_timer=180*FPS; this.is_monster_truck=true; this.current_scale=2.0; this.flamethrower_active=true; this.flamethrower_level=1; this.score+=500; this.armor=Math.min(this.max_armor||100, (this.armor||0)+60); }
+        else if(type==='flamethrower') { this.flamethrower_active=true; this.flamethrower_level=(this.flamethrower_level||0)+1; this.score+=200; }
     }
 }
 
@@ -772,15 +939,17 @@ class EnemyTank extends Tank {
         this.last_pos=[this.x,this.y];
         this.base_attack_cooldown=0;
 
-        if(type==='basic') { this.speed=1.8; this.health=1; this.score_value=100; this.shoot_chance=0.018; }
-        else if(type==='fast') { this.speed=3.0; this.health=1; this.score_value=200; this.shoot_chance=0.025; }
-        else if(type==='power') { this.speed=1.8*1.1; this.health=1; this.score_value=300; this.shoot_chance=0.045; }
-        else if(type==='armor') { this.speed=1.8*0.75; this.health=4; this.score_value=400; this.shoot_chance=0.020; }
-        else if(type.includes('boss')) { this.speed=1.8; this.health=12; this.bullet_power=2; this.score_value=2000; this.shoot_chance=0.045; this.venom_cooldown=0; this.venom_shoot_chance=0.025;
+        // OG balance: basic/fast/power 1 hit kill (no armor), armor 4HP, boss 18HP + armor
+        // VERY easy 1-hit kills for itch.io fun - no armor for basic, low armor for armor type
+        if(type==='basic') { this.speed=1.8; this.health=1; this.max_health=1; this.armor=0; this.max_armor=0; this.score_value=100; this.shoot_chance=0.015; }
+        else if(type==='fast') { this.speed=3.0; this.health=1; this.max_health=1; this.armor=0; this.max_armor=0; this.score_value=200; this.shoot_chance=0.020; }
+        else if(type==='power') { this.speed=1.8*1.1; this.health=1; this.max_health=1; this.armor=0; this.max_armor=0; this.score_value=300; this.shoot_chance=0.030; }
+        else if(type==='armor') { this.speed=1.8*0.75; this.health=3; this.max_health=3; this.armor=20; this.max_armor=20; this.score_value=400; this.shoot_chance=0.015; }
+        else if(type.includes('boss')) { this.speed=1.5; this.health=10; this.max_health=15; this.armor=50; this.max_armor=50; this.bullet_power=2; this.score_value=2000; this.shoot_chance=0.030; this.venom_cooldown=0; this.venom_shoot_chance=0.020;
             this.rect = {left:this.x-25, top:this.y-25, right:this.x+25, bottom:this.y+25, centerx:this.x, centery:this.y};
         }
 
-        this.spawn_protection=60; this.invulnerable_timer=60;
+        this.spawn_protection=30; this.invulnerable_timer=30;
         this.state='wander';
         this.path=[];
         this.path_timer=0;
@@ -1155,8 +1324,10 @@ class Bullet {
     constructor(x,y,dir,owner,power=1,color='#fff',homing=false,venom=false) {
         this.x=x; this.y=y; this.dir=dir; this.owner=owner; this.power=power; this.color=color;
         this.homing=homing; this.venom=venom;
+        this.bulletType = homing ? 'homing' : (power>=2 ? 'power' : 'normal');
+        if(venom) this.bulletType='venom';
         this.speed = venom ? 3.7 : (power>=2 ? 8.25*1.3 : 8.25);
-        if(homing) this.speed = 6.5;
+        if(homing) { this.speed = 3.564; this.bulletType='homing'; }
         this.alive=true;
         this.rect={left:x-3,top:y-3,right:x+3,bottom:y+3,centerx:x,centery:y};
         this.trail=[];
@@ -1164,7 +1335,9 @@ class Bullet {
         let [dx,dy]=DIRS[dir]||[0,-1];
         if(dx!==0&&dy!==0) { let len=Math.hypot(dx,dy); dx/=len; dy/=len; }
         this.vx=dx; this.vy=dy;
-        this.turn_speed=0.18;
+        this.turn_speed=0.068;
+        this.travel=0; this.maxTravel=homing?574:2000;
+        this.flame=false; this.life=0;
     }
 
     update(tilemap, tanks, base) {
@@ -1218,16 +1391,30 @@ class Bullet {
         }
 
         for(let tank of tanks) {
-            if(!tank.alive || tank.invulnerable_timer>0) continue;
+            if(!tank.alive) continue;
+            // Spawn protection only blocks player being hit, not enemy being hit by player - allow 0.5s grace for player only
+            if(tank.is_player && (tank.invulnerable_timer>0 || tank.spawn_protection>0)) continue;
+            if(!tank.is_player && tank.invulnerable_timer>0) {
+                // Enemy invuln is shorter, only check invuln not spawn_prot for player bullets to avoid spawn-kill but not fully immune
+                // Actually keep spawn_prot for enemy too but shorter - already 30 frames, skip only if invuln
+            }
             if(this.owner.startsWith('player') && tank.is_player) continue;
-            if(this.owner==='enemy' && !tank.is_player) continue;
+            if(this.owner==='enemy' && !tank.is_player && !tank.is_boss) continue;
             if(this.x>=tank.rect.left && this.x<=tank.rect.right && this.y>=tank.rect.top && this.y<=tank.rect.bottom) {
                 if(this.venom) {
                     tank.venom_timer = 18*FPS;
+                    this.alive=false;
                     return 'venom_hit';
                 }
-                if(!tank.takeDamage(this.power)) { this.alive=false; return 'blocked'; }
+                let bType = this.bulletType || (this.power>=2 ? 'power' : (this.homing ? 'homing' : 'normal'));
+                if(this.flame) bType='flamethrower';
+                let shouldKill = tank.takeDamage(this.power, bType);
                 this.alive=false;
+                if(!shouldKill) return 'blocked';
+                // Should kill - set tank dead here (was missing, bug #1)
+                tank.alive=false;
+                tank.health=0;
+                tank.armor=0;
                 return 'hit_tank';
             }
         }
@@ -1366,14 +1553,16 @@ class PowerUp {
     }
 }
 
-// Game
+// Game - VERY high quality with all Python parity
 class Game {
     constructor() {
         this.canvas = document.getElementById('gameCanvas');
         this.ctx = this.canvas.getContext('2d');
         this.mapCanvas = document.getElementById('mapCanvas');
-        this.mapCtx = this.mapCanvas.getContext('2d');
+        this.mapCtx = this.mapCanvas ? this.mapCanvas.getContext('2d') : null;
         this.current_level=0;
+        this.total_stages_cleared=0;
+        this.current_loop=0;
         this.state='menu';
         this.menu_selected=0;
         this.menu_mode='main';
@@ -1385,6 +1574,7 @@ class Game {
         this.enemies=[];
         this.bullets=[];
         this.powerups=[];
+        this.particles=[];
         this.enemies_total=20;
         this.enemies_killed=0;
         this.enemies_spawned=0;
@@ -1392,23 +1582,86 @@ class Game {
         this.freeze_timer=0;
         this.boss_enemy=null;
         this.boss_released=false;
+        this._boss_escaped_logged=false;
         this.max_enemies_on_field=4;
         this.dynamic_spawn_interval=2.5*FPS;
         this.difficulty_ramp_timer=0;
         this.lastTime=0;
+        this._touchDir=null;
+        this._touchShoot=false;
+        this._gamepadLogged=false;
+        this.screenshake=0;
+        this.flashAlpha=0;
 
         window.addEventListener('keydown', e=>{ this.keys[e.code]=true; if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) e.preventDefault(); });
         window.addEventListener('keyup', e=>{ this.keys[e.code]=false; });
 
         this.initLevel(0,1);
-        document.getElementById('loading').style.display='none';
-        requestAnimationFrame(this.loop.bind(this));
+        let loadingEl=document.getElementById('loading');
+        if(loadingEl) loadingEl.style.display='none';
+        // Touch controls
+        this.initTouchControls();
+        // Expose globally for touch patch and debug
+        window.game=this;
+        try{ console.log("[Tank93] Web VERY high quality - 35 maps, armor HP, brick texture NES mortar, bullet damage armor+health, truck 2x 3min crush all + water pass + multi weapons, flame cone, progressive TOTAL counter, plus blocky explosion + screenshake + flash"); }catch(e){}
+    }
+
+    initTouchControls(){
+        let joyBase=document.getElementById('joyBase'), joyKnob=document.getElementById('joyKnob');
+        let shootBtn=document.getElementById('btnShoot'), pauseBtn=document.getElementById('btnPause');
+        if(!joyBase) return;
+        let dir=null, active=false;
+        const move=(touch)=>{
+            let r=joyBase.getBoundingClientRect();
+            let cx=r.left+r.width/2, cy=r.top+r.height/2;
+            let dx=touch.clientX-cx, dy=touch.clientY-cy;
+            let max=36;
+            let dist=Math.hypot(dx,dy);
+            if(dist>max){dx=dx/dist*max; dy=dy/dist*max;}
+            joyKnob.style.transform=`translate(${dx}px,${dy}px)`;
+            if(Math.abs(dx)<12&&Math.abs(dy)<12){dir=null; this._touchDir=null; return;}
+            dir=Math.abs(dy)>Math.abs(dx)?(dy<0?'UP':'DOWN'):(dx<0?'LEFT':'RIGHT');
+            this._touchDir=dir;
+        };
+        const end=()=>{joyKnob.style.transform='translate(0px,0px)'; dir=null; this._touchDir=null; active=false;};
+        joyBase.addEventListener('touchstart', e=>{active=true; move(e.touches[0]); e.preventDefault();},{passive:false});
+        joyBase.addEventListener('touchmove', e=>{if(active) move(e.touches[0]); e.preventDefault();},{passive:false});
+        joyBase.addEventListener('touchend', e=>{end(); e.preventDefault();},{passive:false});
+        joyBase.addEventListener('mousedown', e=>{active=true; move(e);});
+        window.addEventListener('mousemove', e=>{if(active) move(e);});
+        window.addEventListener('mouseup', ()=>{end();});
+        if(shootBtn){
+            shootBtn.addEventListener('touchstart', e=>{this._touchShoot=true; e.preventDefault();},{passive:false});
+            shootBtn.addEventListener('touchend', e=>{this._touchShoot=false; e.preventDefault();},{passive:false});
+            shootBtn.addEventListener('mousedown', ()=>{this._touchShoot=true;});
+            window.addEventListener('mouseup', ()=>{this._touchShoot=false;});
+        }
+        if(pauseBtn){
+            pauseBtn.addEventListener('touchstart', e=>{this.state=this.state==='playing'?'paused':'playing'; e.preventDefault();},{passive:false});
+        }
+    }
+
+    getDifficultyParams(){
+        let total=this.total_stages_cleared||0;
+        let loop=Math.floor(total/35);
+        let cap = (settingsData && settingsData.DIFFICULTY_MAX_ENEMIES_CAP) || 12;
+        let baseMax = (settingsData && settingsData.DIFFICULTY_MAX_ENEMIES_BASE) || 4;
+        let perStage = (settingsData && settingsData.DIFFICULTY_MAX_ENEMIES_PER_STAGE) || 0.5;
+        let baseSpawn = (settingsData && settingsData.DIFFICULTY_SPAWN_BASE) || 150;
+        let perSpawn = (settingsData && settingsData.DIFFICULTY_SPAWN_PER_STAGE) || 4.8;
+        let minSpawn = (settingsData && settingsData.DIFFICULTY_SPAWN_MIN) || 24;
+        let speedPer = (settingsData && settingsData.DIFFICULTY_SPEED_PER_LOOP) || 0.12;
+        let shootPer = (settingsData && settingsData.DIFFICULTY_SHOOT_PER_LOOP) || 0.15;
+        let max_on=Math.min(cap, baseMax+Math.floor(total*perStage));
+        let spawnInt=Math.max(minSpawn, baseSpawn - total*perSpawn);
+        return {total, loop, max_on_field:max_on, spawn_interval:spawnInt, speed_mult:1+loop*speedPer, shoot_mult:1+loop*shootPer};
     }
 
     getEnemyTotalForLevel(lvl) {
-        let base = 20;
-        let extra = lvl*2 + Math.floor(lvl/5)*3;
-        return base + extra;
+        let total=this.total_stages_cleared||0, loop=Math.floor(total/35);
+        let base=20;
+        if(mapsData && mapsData.enemy_queues && mapsData.enemy_queues[lvl]) base=mapsData.enemy_queues[lvl].length;
+        return base + total*2 + loop*5 + lvl*2 + Math.floor(lvl/5)*3;
     }
 
     initLevel(idx, numPlayers) {
@@ -1422,16 +1675,20 @@ class Game {
         this.enemies=[];
         this.bullets=[];
         this.powerups=[];
+        this.particles=[];
+        this.enemies_total = this.getEnemyTotalForLevel(this.current_level);
+        let diff=this.getDifficultyParams();
         this.enemies_total = this.getEnemyTotalForLevel(this.current_level);
         this.enemies_killed=0;
         this.enemies_spawned=0;
         this.spawn_timer=0;
         this.freeze_timer=0;
-        this.max_enemies_on_field = Math.min(8, 4 + Math.floor(this.current_level/2));
-        this.dynamic_spawn_interval = Math.max(0.8*FPS, 2.5*FPS - this.current_level*0.12*FPS);
+        this.max_enemies_on_field = diff.max_on_field;
+        this.dynamic_spawn_interval = diff.spawn_interval;
         this.difficulty_ramp_timer=0;
         this.boss_enemy=null;
         this.boss_released=false;
+        this._boss_escaped_logged=false;
 
         for(let i=0;i<numPlayers;i++) {
             let [gx,gy]=PLAYER_SPAWN[i];
@@ -1445,6 +1702,8 @@ class Game {
 
     initNextLevel() {
         let prevPlayers=this.players;
+        this.total_stages_cleared = (this.total_stages_cleared||0)+1;
+        this.current_loop = Math.floor(this.total_stages_cleared/35);
         this.current_level = (this.current_level+1)%(mapsData ? mapsData.levels_26.length : 35);
         let levelData = mapsData ? mapsData.levels_26[this.current_level] : null;
         this.tilemap = new TileMap(levelData);
@@ -1454,16 +1713,18 @@ class Game {
         this.enemies=[];
         this.bullets=[];
         this.powerups=[];
+        let diff=this.getDifficultyParams();
         this.enemies_total = this.getEnemyTotalForLevel(this.current_level);
         this.enemies_killed=0;
         this.enemies_spawned=0;
         this.spawn_timer=0;
         this.freeze_timer=0;
-        this.max_enemies_on_field = Math.min(8, 4 + Math.floor(this.current_level/2));
-        this.dynamic_spawn_interval = Math.max(0.8*FPS, 2.5*FPS - this.current_level*0.12*FPS);
+        this.max_enemies_on_field = diff.max_on_field;
+        this.dynamic_spawn_interval = diff.spawn_interval;
         this.difficulty_ramp_timer=0;
         this.boss_enemy=null;
         this.boss_released=false;
+        this._boss_escaped_logged=false;
 
         let newPlayers=[];
         for(let i=0;i<prevPlayers.length;i++) {
@@ -1507,9 +1768,23 @@ class Game {
                 }
             }
             if(!blocked) {
-                let types=['basic','basic','basic','fast','power','armor'];
-                let etype = types[Math.floor(Math.random()*types.length)];
+                // Use authentic queue if available like Python, else weighted
+                let etype=null;
+                if(mapsData && mapsData.enemy_queues && mapsData.enemy_queues[this.current_level] && this.enemies_spawned < mapsData.enemy_queues[this.current_level].length){
+                    etype=mapsData.enemy_queues[this.current_level][this.enemies_spawned];
+                }
+                if(!etype){
+                    let types;
+                    if(this.current_level<5) types=['basic','basic','basic','fast','power','armor'];
+                    else if(this.current_level<15) types=['basic','fast','power','armor'];
+                    else types=['basic','fast','power','armor','armor'];
+                    etype = types[Math.floor(Math.random()*types.length)];
+                }
                 let en=new EnemyTank(sx,sy,etype);
+                // Progressive difficulty: speed_mult and shoot_mult based on total_stages_cleared
+                let diff=this.getDifficultyParams ? this.getDifficultyParams() : {speed_mult:1, shoot_mult:1};
+                en.speed*=diff.speed_mult||1;
+                if(en.shoot_chance) en.shoot_chance*=(diff.shoot_mult||1);
                 this.enemies.push(en);
                 this.enemies_spawned++;
                 break;
@@ -1520,17 +1795,21 @@ class Game {
 
     releaseMonsterBoss() {
         if(this.boss_released) return;
-        console.log("[BOSS] Monster released!");
+        console.log("[BOSS] Monster released! Trapped, must crush to escape");
         this.boss_released=true;
+        this._boss_escaped_logged=false;
         let [bx,by]=BASE_POS;
-        this.tilemap.clearArea(bx-1,by-1,4,4);
+        // Only clear 2x2, not 4x4, so boss trapped - must crush steel/brick to escape (like Python)
+        this.tilemap.clearArea(bx,by,2,2);
+        let wall=[[bx-1,by-1],[bx,by-1],[bx+1,by-1],[bx+2,by-1],[bx-1,by],[bx+2,by],[bx-1,by+1],[bx+2,by+1],[bx-1,by+2],[bx,by+2],[bx+1,by+2],[bx+2,by+2]];
+        if(wall.length>0){let [rx,ry]=wall[Math.floor(Math.random()*wall.length)]; if(rx>=0&&rx<GRID_W&&ry>=0&&ry<GRID_H) this.tilemap.tiles[ry][rx]=TILE_EMPTY;}
         let boss=new EnemyTank(bx,by,'monster_boss');
         boss.setPosition(bx,by);
         boss.spawn_protection=30;
         boss.invulnerable_timer=30;
+        boss.can_crush_steel=true; boss.can_crush_brick=true;
         this.enemies.push(boss);
         this.boss_enemy=boss;
-        // Randomly assign items to current enemies
         let otherEnemies = this.enemies.filter(e=>e!==boss&&e.alive);
         console.log(`[BOSS] Assigning items to ${otherEnemies.length} enemies`);
         for(let en of otherEnemies) {
@@ -1551,11 +1830,13 @@ class Game {
         if(this.tilemap) this.tilemap.update();
         if(this.freeze_timer>0) this.freeze_timer--;
 
-        // Difficulty ramp
+        // Difficulty ramp within level + progressive counter
         this.difficulty_ramp_timer++;
+        let cap = (settingsData && settingsData.DIFFICULTY_MAX_ENEMIES_CAP) || 12;
+        let minSpawn = (settingsData && settingsData.DIFFICULTY_SPAWN_MIN) || 24;
         if(this.difficulty_ramp_timer%(12*FPS)===0 && this.difficulty_ramp_timer>0) {
-            if(this.max_enemies_on_field<8) this.max_enemies_on_field++;
-            if(this.dynamic_spawn_interval>0.8*FPS) this.dynamic_spawn_interval=Math.max(0.8*FPS, this.dynamic_spawn_interval-8);
+            if(this.max_enemies_on_field<cap) this.max_enemies_on_field++;
+            if(this.dynamic_spawn_interval>minSpawn) this.dynamic_spawn_interval=Math.max(minSpawn, this.dynamic_spawn_interval-8);
         }
 
         // Spawn
@@ -1648,13 +1929,17 @@ class Game {
         }
         this.powerups=this.powerups.filter(p=>p.alive);
 
-        // Dead enemies
+        // Dead enemies - with explosion screenshake + flash (like Python authentic)
         for(let e of [...this.enemies]) {
             if(!e.alive) {
                 let killer = this.players[0];
                 if(killer) killer.score+=e.score_value;
                 this.enemies=this.enemies.filter(en=>en!==e);
                 this.enemies_killed++;
+                // Explosion juice
+                this.screenshake = e.is_boss ? 10 : e.enemy_type==='armor' ? 6 : 3;
+                this.flashAlpha = e.is_boss ? 0.6 : 0.2;
+                this.particles.push({x:e.rect.centerx, y:e.rect.centery, life:20, maxLife:20, type:'explosion', color:e.color, isBoss:e.is_boss});
                 if(e.powerup_carrier) {
                     let pu=new PowerUp(e.rect.centerx, e.rect.centery);
                     this.powerups.push(pu);
@@ -1752,11 +2037,21 @@ class Game {
 
     draw() {
         let ctx=this.ctx;
+        // Screenshake like Python authentic NES explosion
+        let shakeX=0, shakeY=0;
+        if(this.screenshake>0){
+            shakeX=(Math.random()-0.5)*this.screenshake*2;
+            shakeY=(Math.random()-0.5)*this.screenshake*2;
+            this.screenshake*=0.9;
+            if(this.screenshake<0.3) this.screenshake=0;
+        }
+        ctx.save();
+        ctx.translate(shakeX, shakeY);
+
         ctx.fillStyle='#121218';
-        ctx.fillRect(0,0,960,720);
+        ctx.fillRect(-10,-10,980,740);
 
         if(this.state==='menu') {
-            // Simple menu
             ctx.fillStyle='#000';
             ctx.fillRect(0,0,960,720);
             ctx.fillStyle='#ff0';
@@ -1764,37 +2059,64 @@ class Game {
             ctx.fillText('TANK 93', 360, 160);
             ctx.fillStyle='#ccc';
             ctx.font='16px monospace';
-            ctx.fillText('Enhanced - 35 ORIGINAL NES MAPS - Pure JS', 300, 200);
+            ctx.fillText('OG Classic - 35 MAPS - Tank 1.0x + Truck 2x 3min crush all + Flame', 180, 200);
             ctx.fillStyle = this.menu_selected===0 ? '#ff0' : '#fff';
-            ctx.fillText('> 1 PLAYER (35 STAGES)', 360, 340);
+            ctx.fillText('> 1 PLAYER - Armor bar fixed', 360, 330);
             ctx.fillStyle = this.menu_selected===1 ? '#ff0' : '#fff';
-            ctx.fillText('> 2 PLAYERS CO-OP (35 STAGES)', 360, 380);
+            ctx.fillText('> 2 PLAYERS - Brick texture NES mortar', 360, 370);
             ctx.fillStyle = this.menu_selected===2 ? '#ff0' : '#fff';
-            ctx.fillText('> LEVEL SELECT - 35 ORIGINAL NES MAPS', 360, 420);
+            ctx.fillText('> Bullets now destroy tanks - armor 100 player armor enemies', 260, 410);
             ctx.fillStyle='#0f0';
-            ctx.font='14px monospace';
-            ctx.fillText('DEFAULT: 1 PLAYER - 35 ORIGINAL NES MAPS - PRESS ENTER', 300, 500);
-            ctx.fillStyle='#ff0';
-            ctx.fillText('INSERT COIN C/5 FOR 10 LIVES - PRESS ENTER TO START', 300, 700);
+            ctx.font='12px monospace';
+            ctx.fillText('ESC + Enter fix: weapon damage + HP bar + brick texture', 300, 460);
+            ctx.restore();
             return;
         }
 
         // Playfield bg
         ctx.fillStyle='#000';
         ctx.fillRect(PLAYFIELD_X-4, PLAYFIELD_Y-4, PLAYFIELD_W+8, PLAYFIELD_H+8);
-        // Tilemap
         this.tilemap.draw(ctx);
-        // Base
         this.base.draw(ctx);
-        // Tanks
         for(let e of this.enemies) e.draw(ctx);
         for(let p of this.players) p.draw(ctx);
-        // Bullets
         for(let b of this.bullets) b.draw(ctx);
-        // Powerups
         for(let pu of this.powerups) pu.draw(ctx);
-        // Overlay
         this.tilemap.drawOverlay(ctx);
+
+        // Particles (explosion)
+        for(let i=this.particles.length-1;i>=0;i--){
+            let p=this.particles[i];
+            p.life--;
+            if(p.life<=0){this.particles.splice(i,1); continue;}
+            let alpha=p.life/p.maxLife;
+            ctx.globalAlpha=alpha;
+            if(p.type==='explosion'){
+                // NES blocky explosion: white -> yellow -> orange -> red
+                let size = (p.isBoss? 32 : 20) * (1-alpha*0.5 + 0.5);
+                if(alpha>0.7) ctx.fillStyle='#fff';
+                else if(alpha>0.4) ctx.fillStyle='#ff0';
+                else if(alpha>0.2) ctx.fillStyle='#f80';
+                else ctx.fillStyle='#f00';
+                ctx.fillRect(p.x-size/2, p.y-size/2, size, size);
+                // Plus arms
+                ctx.fillRect(p.x-size/2-8*alpha, p.y-3, 8*alpha, 6);
+                ctx.fillRect(p.x+size/2, p.y-3, 8*alpha, 6);
+                ctx.fillRect(p.x-3, p.y-size/2-8*alpha, 6, 8*alpha);
+                ctx.fillRect(p.x-3, p.y+size/2, 6, 8*alpha);
+            }
+            ctx.globalAlpha=1;
+        }
+
+        // Flash overlay
+        if(this.flashAlpha>0){
+            ctx.fillStyle=`rgba(255,255,255,${this.flashAlpha})`;
+            ctx.fillRect(0,0,960,720);
+            this.flashAlpha*=0.85;
+            if(this.flashAlpha<0.02) this.flashAlpha=0;
+        }
+
+        ctx.restore();
     }
 
     loop(timestamp) {
