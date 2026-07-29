@@ -2449,6 +2449,15 @@ class Game:
                     snd_mgr.play_powerup_appear()
             except:
                 pass
+        elif pu_type == 'monster_truck':
+            player.apply_powerup('monster_truck', self)
+            self.particles.add_explosion(player.rect.centerx, player.rect.centery, (80, 140, 255), 20, big=True, kind='tank')
+            try:
+                if snd_mgr:
+                    snd_mgr.play_powerup_appear()
+                _log_gameplay("POWERUP_MONSTER_TRUCK_PICK", level_idx=self.current_level, player_id=getattr(player, 'player_id', None), data={"x": player.x, "y": player.y, "timer": getattr(player, 'monster_truck_timer', 0), "scale": getattr(player, 'current_scale', 2.0)})
+            except:
+                pass
 
     def draw(self):
         # Create canvas at original resolution for consistent drawing and easy scaling to fullscreen

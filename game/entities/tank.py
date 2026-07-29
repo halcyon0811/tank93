@@ -99,17 +99,18 @@ class Tank:
         self.last_pos = (self.x, self.y)
 
     def update_size_state(self):
-        # Monster truck has highest priority - 2x bigger, crushes everything + logs for debug
+        # Monster truck has highest priority - 2x bigger, crushes everything + extensive logging
         if self.monster_truck_timer > 0:
+            prev_timer = self.monster_truck_timer
             self.monster_truck_timer -= 1
             self.is_monster_truck = True
             self.current_scale = MONSTER_TRUCK_SCALE
             self.speed = self.base_speed * MONSTER_TRUCK_SPEED_MULT
-            # Log expiry warning at 3s, 1s
-            if self.monster_truck_timer in (180, 60, 0):
+            # Detailed timer logging at key points + every 30 sec for 3-min tracking
+            if self.monster_truck_timer in (10800, 9000, 7200, 5400, 3600, 1800, 900, 600, 300, 180, 60, 0):
                 try:
                     from .logger_integration import safe_log_monster_truck
-                    safe_log_monster_truck("TIMER", {"timer": self.monster_truck_timer, "player_id": getattr(self, 'player_id', None), "scale": self.current_scale, "x": getattr(self, 'x', 0), "y": getattr(self, 'y', 0)})
+                    safe_log_monster_truck("TIMER", {"timer": self.monster_truck_timer, "timer_sec": self.monster_truck_timer//60, "prev": prev_timer, "player_id": getattr(self, 'player_id', None), "scale": self.current_scale, "x": getattr(self, 'x', 0), "y": getattr(self, 'y', 0), "weapons_stacking": True})
                 except:
                     pass
             if self.monster_truck_timer == 0:
@@ -129,7 +130,7 @@ class Tank:
                 self._update_rect_size()
                 try:
                     from .logger_integration import safe_log_monster_truck
-                    safe_log_monster_truck("END", {"player_id": getattr(self, 'player_id', None), "x": getattr(self, 'x', 0), "y": getattr(self, 'y', 0)})
+                    safe_log_monster_truck("EXPIRE_RETURN_TO_TANK", {"player_id": getattr(self, 'player_id', None), "x": getattr(self, 'x', 0), "y": getattr(self, 'y', 0), "scale": self.current_scale, "duration_sec": 180, "reason": "3 min elapsed - back to OG tank"})
                 except:
                     pass
             self._update_rect_size()

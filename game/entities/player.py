@@ -785,21 +785,41 @@ class PlayerTank(Tank):
             self.bullets.append(bullet)
             bullets_created.append(bullet)
 
-        # Cooldown handling - adjusted for combined firing (spread+homing fires more bullets, needs slightly higher cd)
+        # Cooldown handling + extensive logging for multi-formed weapons while monster truck
+        is_truck = getattr(self, 'is_monster_truck', False)
+        has_flame = getattr(self, 'flamethrower_active', False)
+        # Log multi-formed weapons in truck mode
+        active_weapons = []
+        if has_flame: active_weapons.append(f"flame{getattr(self,'flamethrower_level',1)}")
+        if has_spread: active_weapons.append(f"spread{getattr(self,'spread_level',1)}")
+        if has_homing: active_weapons.append(f"homing{getattr(self,'homing_level',1)}")
+        if has_rapid: active_weapons.append(f"rapid{getattr(self,'rapid_level',1)}")
+        if is_truck and len(active_weapons) >= 2:
+            try:
+                from ..logger_integration import safe_log_monster_truck
+                safe_log_monster_truck("MULTI_WEAPON", {"player_id": self.player_id, "weapons": active_weapons, "count": len(bullets_created), "is_truck": is_truck, "x": getattr(self,'x',0), "y": getattr(self,'y',0), "stacking": True})
+            except:
+                pass
+
         if has_spread and has_homing:
-            # Both: spread 8 + homing 1-3 = 9-11 bullets, use average cooldown
             base_cd = 28
             if has_power:
                 base_cd = max(6, base_cd - 3 - self.homing_level)
             if has_rapid:
                 base_cd = max(4, base_cd - self.rapid_level*2)
             self.cooldown = max(3, base_cd // 3) if has_rapid else max(4, base_cd)
-            # Log combined firing observability (user request: fire both)
             try:
                 from ..logger_integration import safe_log_weapon
-                safe_log_weapon("COMBINED_SHOOT", {"player_id": self.player_id, "spread": 8, "homing": len([b for b in bullets_created if b.homing]), "total": len(bullets_created), "power": has_power})
+                safe_log_weapon("COMBINED_SHOOT", {"player_id": self.player_id, "spread": 8, "homing": len([b for b in bullets_created if getattr(b,'homing',False)]), "flame": len([b for b in bullets_created if getattr(b,'bullet_type','')=='flamethrower']), "total": len(bullets_created), "power": has_power, "is_truck": is_truck, "weapons": active_weapons})
             except:
                 pass
+            # Extra truck+flame log
+            if is_truck and has_flame:
+                try:
+                    from ..logger_integration import safe_log_flamethrower
+                    safe_log_flamethrower("MULTI_FORMED", {"player_id": self.player_id, "weapons": active_weapons, "total": len(bullets_created), "is_truck": True}, player_id=self.player_id)
+                except:
+                    pass
         elif has_spread:
             base_cd = 25
             if power_synergy:
