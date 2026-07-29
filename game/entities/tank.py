@@ -385,24 +385,37 @@ class Tank:
         # Previously 24x24 required perfect centering, now 20x20 allows ±2px tolerance, feels better
         # Giant/boss keep full rect for crush detection
         is_giant = getattr(self, 'is_giant', False) and getattr(self, 'giant_timer', 0) > 0
-        is_monster_truck = getattr(self, 'is_monster_truck', False) and getattr(self, 'monster_truck_timer', 0) > 0
+        # Monster truck includes both starting vehicle (permanent 1.3x) and temporary 2x powerup
+        # Check both timer and flag for starting vehicle (timer may be huge 1e9)
+        is_monster_truck = getattr(self, 'is_monster_truck', False)
+        monster_truck_active = is_monster_truck and (getattr(self, 'monster_truck_timer', 0) > 0 or getattr(self, 'current_scale', 1.0) >= 1.2)
         is_boss = getattr(self, 'is_boss', False)
-        can_crush_brick = is_giant or is_boss or is_monster_truck
-        can_crush_all = is_monster_truck or is_boss  # monster truck crushes bricks, forest, steel
+        can_crush_brick = is_giant or is_boss or monster_truck_active
+        can_crush_all = monster_truck_active or is_boss
+        can_pass_water = monster_truck_active  # big wheels can pass water/ocean
         is_shrunk = getattr(self, 'is_shrunk', False) and getattr(self, 'shrink_timer', 0) > 0
 
-        if can_crush_all or can_crush_brick:
-            tile_check_rect = new_rect.copy()  # full for crush detection (2x for monster truck)
+        # Collision rect sizing: monster truck big visually but should not get stuck at brick edges
+        # Use smaller collision for movement to avoid edge stuck, but still crush on overlap
+        # Starting truck 1.3x = 41px visual, but collision 24px (like brick tile) so can slide through gaps
+        # Powerup 2x truck (64px visual) collision 28px still bigger but still passable with clearance
+        if monster_truck_active:
+            # Different collision based on scale: 1.3x truck -> 24px collision, 2x truck -> 28px
+            cur_scale = getattr(self, 'current_scale', 2.0)
+            if cur_scale <= 1.4:
+                tile_check_rect = new_rect.inflate(- (new_rect.width - 24), - (new_rect.height - 24))  # 24x24 for 1.3x truck
+            else:
+                tile_check_rect = new_rect.inflate(- (new_rect.width - 28), - (new_rect.height - 28))  # 28x28 for 2x truck
+        elif can_crush_brick:
+            tile_check_rect = new_rect.copy()  # full for giant/boss crush detection
         elif is_shrunk:
             tile_check_rect = new_rect.inflate(-16, -16)
         else:
-            # Normal tank: 20x20 collision (was 24x24) - allows passing through single destroyed brick (24px gap) with 4px clearance
-            # TANK_SIZE 32, TILE 24, collision 20 = 6px visual overlap each side when squeezing, acceptable
-            tile_check_rect = new_rect.inflate(-12, -12)  # 32->20
+            tile_check_rect = new_rect.inflate(-12, -12)
 
         tiles = tilemap.get_tiles_in_rect(tile_check_rect)
         crushed_bricks = []
-        # For monster truck, also scan forest/grass tiles directly since get_tiles_in_rect excludes grass/ice
+        # For monster truck, scan forest/grass/steel/brick + water (big wheels can pass water)
         extra_tiles = []
         if can_crush_all:
             left = max(0, int((tile_check_rect.left - PLAYFIELD_X) // tilemap.tile_size))
@@ -412,7 +425,8 @@ class Tank:
             for gy in range(top, bottom+1):
                 for gx in range(left, right+1):
                     t = tilemap.tiles[gy][gx]
-                    if t in (TILE_GRASS, TILE_STEEL, TILE_BRICK):
+                    # Monster truck crushes brick, steel, grass, and can pass water (water not destroyed, just passable)
+                    if t in (TILE_GRASS, TILE_STEEL, TILE_BRICK, TILE_WATER):
                         trect = pygame.Rect(
                             PLAYFIELD_X + gx * tilemap.tile_size,
                             PLAYFIELD_Y + gy * tilemap.tile_size,
@@ -421,11 +435,21 @@ class Tank:
                         if tile_check_rect.colliderect(trect):
                             extra_tiles.append((t, gx, gy, trect))
 
-        # Combine normal blocking tiles + extra forest for monster truck
+        # Combine normal blocking tiles + extra for monster truck
         all_tiles = tiles + extra_tiles if can_crush_all else tiles
         for ttype, gx, gy, trect in all_tiles:
             if tile_check_rect.colliderect(trect):
                 if can_crush_all:
+                    if ttype == TILE_WATER and can_pass_water:
+                        # Monster truck big wheels can pass through water/ocean - not blocked, not destroyed
+                        try:
+                            from .logger_integration import safe_log_monster_truck
+                            if getattr(self, '_water_log_timer', 0) % 60 == 0:
+                                safe_log_monster_truck("WATER_PASS", {"x": gx, "y": gy, "player_id": getattr(self, 'player_id', None)})
+                            self._water_log_timer = getattr(self, '_water_log_timer', 0) + 1
+                        except:
+                            pass
+                        continue
                     if ttype in (TILE_BRICK, TILE_STEEL, TILE_GRASS):
                         crushed_bricks.append((gx, gy))
                         continue
@@ -439,18 +463,39 @@ class Tank:
                 if is_turn and (abs(snap_x - self.x) > 0.1 or abs(snap_y - self.y) > 0.1):
                     new_rect2 = self.rect.copy()
                     new_rect2.center = (self.x + dx * self.speed * speed_mult, self.y + dy * self.speed * speed_mult)
-                    if can_crush_all:
-                        tile_check_rect2 = new_rect2.copy()
-                    elif can_crush_brick:
+                    if monster_truck_active:
+                        cur_scale2 = getattr(self, 'current_scale', 2.0)
+                        if cur_scale2 <= 1.4:
+                            tile_check_rect2 = new_rect2.inflate(- (new_rect2.width - 24), - (new_rect2.height - 24))
+                        else:
+                            tile_check_rect2 = new_rect2.inflate(- (new_rect2.width - 28), - (new_rect2.height - 28))
+                    elif can_crush_all or can_crush_brick:
                         tile_check_rect2 = new_rect2.copy()
                     elif is_shrunk:
                         tile_check_rect2 = new_rect2.inflate(-16, -16)
                     else:
                         tile_check_rect2 = new_rect2.inflate(-12, -12)
                     tiles2 = tilemap.get_tiles_in_rect(tile_check_rect2)
+                    # Also include water for monster truck water pass check
+                    extra_tiles2 = []
+                    if can_crush_all:
+                        left2 = max(0, int((tile_check_rect2.left - PLAYFIELD_X) // tilemap.tile_size))
+                        right2 = min(tilemap.grid_w-1, int((tile_check_rect2.right -1 - PLAYFIELD_X) // tilemap.tile_size))
+                        top2 = max(0, int((tile_check_rect2.top - PLAYFIELD_Y) // tilemap.tile_size))
+                        bottom2 = min(tilemap.grid_h-1, int((tile_check_rect2.bottom -1 - PLAYFIELD_Y) // tilemap.tile_size))
+                        for gy2b in range(top2, bottom2+1):
+                            for gx2b in range(left2, right2+1):
+                                t2b = tilemap.tiles[gy2b][gx2b]
+                                if t2b in (TILE_GRASS, TILE_STEEL, TILE_BRICK, TILE_WATER):
+                                    trect2b = pygame.Rect(PLAYFIELD_X + gx2b * tilemap.tile_size, PLAYFIELD_Y + gy2b * tilemap.tile_size, tilemap.tile_size, tilemap.tile_size)
+                                    if tile_check_rect2.colliderect(trect2b):
+                                        extra_tiles2.append((t2b, gx2b, gy2b, trect2b))
+                    all_tiles2 = tiles2 + extra_tiles2 if can_crush_all else tiles2
                     blocked2 = False
-                    for t2, gx2, gy2, tr2b in tiles2:
+                    for t2, gx2, gy2, tr2b in all_tiles2:
                         if not tile_check_rect2.colliderect(tr2b):
+                            continue
+                        if t2 == TILE_WATER and can_pass_water:
                             continue
                         if can_crush_all and t2 in (TILE_BRICK, TILE_STEEL, TILE_GRASS):
                             continue
@@ -480,30 +525,43 @@ class Tank:
                         return False
                 else:
                     slid = False
-                    if not can_crush_brick and not can_crush_all:
-                        for offset in (4, -4, 8, -8, 12, -12):
+                    # Slide through gap - now also for monster truck to prevent edge stuck in bricks
+                    # Monster truck uses smaller collision (24/28) so should be easier to slide
+                    slide_offsets = (4, -4, 8, -8, 12, -12) if not monster_truck_active else (3, -3, 6, -6, 10, -10, 14, -14)
+                    if not (can_crush_brick and not monster_truck_active and not can_crush_all) or monster_truck_active or (not can_crush_brick and not can_crush_all):
+                        # Allow sliding for normal, giant (if not crushing), and monster truck (for edge case where 2 bricks leave small gap)
+                        for offset in slide_offsets:
                             test_x = new_x
                             test_y = new_y
-                            if dy != 0:  # vertical movement, try X slide
+                            if dy != 0:
                                 test_x = new_x + offset
-                            else:  # horizontal, try Y slide
+                            else:
                                 test_y = new_y + offset
                             test_rect = self.rect.copy()
                             test_rect.center = (test_x, test_y)
-                            if is_shrunk:
+                            if monster_truck_active:
+                                cur_scale_s = getattr(self, 'current_scale', 2.0)
+                                if cur_scale_s <= 1.4:
+                                    test_check = test_rect.inflate(- (test_rect.width - 24), - (test_rect.height - 24))
+                                else:
+                                    test_check = test_rect.inflate(- (test_rect.width - 28), - (test_rect.height - 28))
+                            elif is_shrunk:
                                 test_check = test_rect.inflate(-16, -16)
                             else:
                                 test_check = test_rect.inflate(-12, -12)
-                            # Check tiles for this offset
                             blocked = False
+                            # Check normal tiles + water handling
                             for ttype2, gx2, gy2, trect2 in tilemap.get_tiles_in_rect(test_check):
                                 if test_check.colliderect(trect2):
+                                    if ttype2 == TILE_WATER and can_pass_water:
+                                        continue
+                                    if ttype2 in (TILE_BRICK, TILE_STEEL, TILE_GRASS) and can_crush_all:
+                                        continue
                                     if ttype2 == TILE_BRICK and can_crush_brick:
                                         continue
                                     blocked = True
                                     break
                             if not blocked:
-                                # Found slide path
                                 new_x = test_x
                                 new_y = test_y
                                 new_rect.center = (new_x, new_y)
@@ -511,12 +569,19 @@ class Tank:
                                 slid = True
                                 try:
                                     from .logger_integration import safe_log_gameplay
-                                    safe_log_gameplay("SLIDE_THROUGH_GAP", data={"x": self.x, "y": self.y, "dir": dir_name, "offset": offset})
+                                    safe_log_gameplay("SLIDE_THROUGH_GAP", data={"x": self.x, "y": self.y, "dir": dir_name, "offset": offset, "monster_truck": monster_truck_active, "scale": getattr(self, 'current_scale', 1.0)})
                                 except:
                                     pass
                                 break
                     if not slid:
                         self.stuck_timer = getattr(self, 'stuck_timer', 0) + 1
+                        # Log monster truck stuck specifically for debugging
+                        if monster_truck_active and self.stuck_timer % 30 == 0:
+                            try:
+                                from .logger_integration import safe_log_monster_truck
+                                safe_log_monster_truck("STUCK_EDGE", {"x": self.x, "y": self.y, "dir": dir_name, "stuck_timer": self.stuck_timer, "scale": getattr(self, 'current_scale', 1.0), "tiles_blocking": len([t for t in tilemap.get_tiles_in_rect(tile_check_rect) if tile_check_rect.colliderect(t[3])])})
+                            except:
+                                pass
                         self._log_stuck_if_needed(dir_name)
                         return False
 
