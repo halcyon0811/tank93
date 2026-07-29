@@ -463,53 +463,15 @@ class HUD:
                     arrow = pygame.font.Font(None, 28).render("▶", True, COLOR_YELLOW)
                     screen.blit(arrow, (x-22, y+card_h//2-9))
 
-            # Vehicle choice at landing page - Tank vs Monster Truck
-            # Get current choice from game if passed via selected tuple? We need game ref - try to get from screen? We'll use global in Game
-            vehicle_choice = getattr(self, '_vehicle_choice', 'tank')
-            # Try to get from game instance if available via attribute we set in draw_menu caller? We'll set attribute on HUD before draw
-            if hasattr(self, '_game_vehicle_choice'):
-                vehicle_choice = self._game_vehicle_choice
-            veh_y = start_y + card_h + 18
-            veh_w, veh_h = 520, 36
-            veh_x = SCREEN_WIDTH//2 - veh_w//2
-            veh_rect = pygame.Rect(veh_x, veh_y, veh_w, veh_h)
-            # Background for vehicle chooser
-            pygame.draw.rect(screen, (30,30,45), veh_rect, border_radius=18)
-            pygame.draw.rect(screen, (70,70,90), veh_rect, 2, border_radius=18)
-            # Two options: TANK vs MONSTER TRUCK
-            tank_opt_w = veh_w//2 - 4
-            tank_selected = vehicle_choice == 'tank'
-            truck_selected = vehicle_choice == 'monster_truck'
-            # Tank button
-            tank_rect = pygame.Rect(veh_x+4, veh_y+4, tank_opt_w, veh_h-8)
-            tank_bg = (60,60,90) if not tank_selected else (80,70,20)
-            tank_border = COLOR_YELLOW if tank_selected else (100,100,120)
-            pygame.draw.rect(screen, tank_bg, tank_rect, border_radius=12)
-            pygame.draw.rect(screen, tank_border, tank_rect, 2, border_radius=12)
-            tank_font = pygame.font.Font(None, 20)
-            tank_txt = tank_font.render("TANK 1.0x", True, COLOR_YELLOW if tank_selected else (180,180,200))
-            screen.blit(tank_txt, tank_txt.get_rect(center=tank_rect.center))
-            # Truck button
-            truck_rect = pygame.Rect(veh_x+veh_w//2+2, veh_y+4, tank_opt_w, veh_h-8)
-            truck_bg = (60,60,90) if not truck_selected else (30,80,180)
-            truck_border = (80,140,255) if truck_selected else (100,100,120)
-            pygame.draw.rect(screen, truck_bg, truck_rect, border_radius=12)
-            pygame.draw.rect(screen, truck_border, truck_rect, 2, border_radius=12)
-            truck_txt = tank_font.render("MONSTER TRUCK 1.3x + FLAME", True, (100,180,255) if truck_selected else (180,180,200))
-            screen.blit(truck_txt, truck_txt.get_rect(center=truck_rect.center))
-            # Store rects for click
-            self._veh_tank_rect = tank_rect
-            self._veh_truck_rect = truck_rect
-
-            # Single clean hint, no overlap
-            hint_y = veh_y + veh_h + 12
+            # Single clean hint, no overlap - OG taste, no vehicle choice at landing (truck is item only, 3 min)
+            hint_y = start_y + card_h + 18
             if selected in (0,1):
-                hint = pygame.font.Font(None, 20).render("PRESS ENTER TO START  •  V = Toggle Tank / Truck", True, (220, 200, 80))
+                hint = pygame.font.Font(None, 22).render("PRESS ENTER TO START", True, (220, 200, 80))
                 screen.blit(hint, hint.get_rect(center=(SCREEN_WIDTH//2, hint_y)))
 
             # Menu options - clean list, no boxes, good spacing
             options_main = ["LEVEL SELECT", "HOW TO PLAY", "QUIT"]
-            sec_start_y = hint_y + 36
+            sec_start_y = hint_y + 24
             for i, opt in enumerate(options_main):
                 main_idx = i + 2
                 is_sel = (selected == main_idx)
@@ -518,7 +480,6 @@ class HUD:
                 txt = font.render(opt, True, color)
                 y = sec_start_y + i*30
                 if is_sel:
-                    # underline marker
                     pygame.draw.rect(screen, (60,60,80), (SCREEN_WIDTH//2-90, y-2, 180, 22), border_radius=6)
                     screen.blit(txt, txt.get_rect(center=(SCREEN_WIDTH//2, y)))
                     arr = pygame.font.Font(None, 18).render(">", True, COLOR_YELLOW)
@@ -526,10 +487,10 @@ class HUD:
                 else:
                     screen.blit(txt, txt.get_rect(center=(SCREEN_WIDTH//2, y)))
 
-            # Minimal footer - single line, no clutter
+            # Minimal footer
             footer_y = SCREEN_HEIGHT - 28
             footer_font = pygame.font.Font(None, 16)
-            footer_txt = footer_font.render("LEFT/RIGHT: 1P/2P  •  V: Tank/Truck  •  UP/DOWN: Menu  •  ENTER  •  F11 Fullscreen  •  C Coin", True, (90,90,110))
+            footer_txt = footer_font.render("LEFT/RIGHT: 1P/2P  •  UP/DOWN: Menu  •  ENTER  •  F11 Fullscreen  •  C Coin", True, (90,90,110))
             screen.blit(footer_txt, footer_txt.get_rect(center=(SCREEN_WIDTH//2, footer_y)))
 
             # Coin hint - subtle blinking at very bottom, no box

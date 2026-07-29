@@ -632,14 +632,16 @@ class PlayerTank(Tank):
             except:
                 pass
 
-        # Flamethrower priority - if active, fires flames instead of normal bullets (monster truck default) + logging
-        if getattr(self, 'flamethrower_active', False):
+        # Flamethrower - if active, fires flames IN ADDITION to other weapons (multi-formed while monster truck)
+        # User request: while in monster truck mode, player can still get new weapons that fire multi-formed
+        has_flame = getattr(self, 'flamethrower_active', False)
+        if has_flame:
             import random as _rnd_f
             import math as _m_f
             flame_count = 5 + getattr(self, 'flamethrower_level', 1) * 2
             try:
                 from ..logger_integration import safe_log_flamethrower
-                safe_log_flamethrower("SHOOT", {"player_id": self.player_id, "level": getattr(self, 'flamethrower_level', 1), "count": flame_count, "dir": self.direction, "x": getattr(self, 'x', 0), "y": getattr(self, 'y', 0)}, player_id=self.player_id)
+                safe_log_flamethrower("SHOOT", {"player_id": self.player_id, "level": getattr(self, 'flamethrower_level', 1), "count": flame_count, "dir": self.direction, "x": getattr(self, 'x', 0), "y": getattr(self, 'y', 0), "with_spread": has_spread, "with_homing": has_homing}, player_id=self.player_id)
             except:
                 pass
             for _ in range(flame_count):
@@ -655,9 +657,8 @@ class PlayerTank(Tank):
                 sy2 = sy + fdy * 8 * rng
                 col = _rnd_f.choice([(255, 100, 20), (255, 200, 50), (255, 80, 10), (255, 150, 0)])
                 b = Bullet(sx2, sy2, self.direction, f"player{self.player_id}", power=2, color=col, homing=False, bullet_type='flamethrower')
-                # Flamethrower faster, short lived
                 b.speed = BULLET_SPEED * 1.5
-                b.life = 12  # short range
+                b.life = 12
                 b.max_life = 12
                 b.flame = True
                 b.vx, b.vy = fdx, fdy
@@ -665,15 +666,20 @@ class PlayerTank(Tank):
                 b.max_distance = 80 + getattr(self, 'flamethrower_level', 1) * 20
                 self.bullets.append(b)
                 bullets_created.append(b)
-            self.cooldown = 4  # rapid fire
-            try:
-                from ..sound_manager import sound_manager
-                sound_manager.play_shoot('flame' if hasattr(sound_manager, 'play_shoot') else 'shoot')
-            except:
-                pass
-            if len(bullets_created) == 1:
-                return bullets_created[0]
-            return bullets_created
+            # If only flamethrower (no spread/homing), use rapid cooldown and return early for sound
+            if not has_spread and not has_homing:
+                self.cooldown = 4
+                try:
+                    from ..sound_manager import sound_manager
+                    sound_manager.play_shoot('flame' if hasattr(sound_manager, 'play_shoot') else 'shoot')
+                except:
+                    pass
+                # Don't return yet - allow fallthrough to also shoot spread/homing if they exist (multi-formed)
+                # But if no other weapons, return flames only
+                if not has_spread and not has_homing:
+                    if len(bullets_created) == 1:
+                        return bullets_created[0]
+                    return bullets_created
 
         # NEW LOGIC: fire spread and homing separately so they don't replace each other
         # If both active, you get 8 spread bullets + homing missiles (9+ total) - user request
@@ -1104,20 +1110,25 @@ class PlayerTank(Tank):
             except:
                 pass
         elif type_name == 'monster_truck':
-            # New monster truck item - 2x bigger, crushes enemy + bricks + forest + steel
+            # Monster truck item - 2x bigger, crushes enemy + bricks + forest + steel, lasts 3 min
+            # While in truck mode, player can still get new weapons that fire multi-formed (user request)
             # Uses NES style blue truck image like provided
-            self.monster_truck_timer = MONSTER_TRUCK_DURATION
+            self.monster_truck_timer = MONSTER_TRUCK_DURATION  # 3 min = 180 sec
             self.is_monster_truck = True
-            self.current_scale = MONSTER_TRUCK_SCALE
+            self.current_scale = MONSTER_TRUCK_SCALE  # 2.0x for item (starting vehicle was 1.3x but removed)
             self.speed = self.base_speed * MONSTER_TRUCK_SPEED_MULT
             self._update_rect_size()
+            # Also give flamethrower as default weapon for truck if not already active - still allows stacking
+            if not getattr(self, 'flamethrower_active', False):
+                self.flamethrower_active = True
+                self.flamethrower_level = max(1, getattr(self, 'flamethrower_level', 0))
             self.score += 500
             self.add_armor(60)
             self.update_bullet_power()
-            print(f"[POWERUP] Monster Truck activated! 2x size crush all P{self.player_id}")
+            print(f"[POWERUP] Monster Truck activated! 2.0x size crush all + flame for 3 min P{self.player_id}")
             try:
-                from ..logger_integration import safe_log_gameplay
-                safe_log_gameplay("POWERUP_MONSTER_TRUCK_ACTIVATE", data={"player_id": self.player_id, "timer": self.monster_truck_timer, "x": getattr(self, 'x', 0), "y": getattr(self, 'y', 0), "scale": self.current_scale})
+                from ..logger_integration import safe_log_monster_truck
+                safe_log_monster_truck("ACTIVATE", {"player_id": self.player_id, "timer": self.monster_truck_timer, "timer_sec": self.monster_truck_timer//60, "x": getattr(self, 'x', 0), "y": getattr(self, 'y', 0), "scale": self.current_scale, "weapon_stacking": True})
             except:
                 pass
         # grenade, clock handled by game

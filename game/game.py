@@ -469,28 +469,14 @@ class Game:
         # Keep grouped order authentic but allow occasional shuffle of remaining? We'll keep as-is for faithfulness
         # If queue is None, random weighted spawning will be used (legacy)
 
-        # players - use mega spawns if mega mode, with vehicle choice (tank / monster_truck)
+        # players - use mega spawns if mega mode
         spawns = MEGA_PLAYER_SPAWN if self.is_mega else PLAYER_SPAWN
         for i in range(num_players):
             gx, gy = spawns[i]
             p = PlayerTank(i+1, gx, gy, is_mega=self.is_mega)
-            # Apply vehicle choice from landing page
-            veh = getattr(self, 'vehicle_choice', 'tank')
-            if veh == 'monster_truck':
-                # Start as 1.3x truck with flamethrower default
-                p.is_monster_truck = True
-                p.monster_truck_timer = 10**9  # effectively permanent until death (player chose truck)
-                p.current_scale = 1.3
-                p._update_rect_size()
-                # Flamethrower as default weapon
-                p.flamethrower_active = True
-                p.flamethrower_level = 1
-                # Slight speed boost for truck 1.3x size but still nimble (original truck 2x had 1.6x, here 1.3x should be ~1.2x speed)
-                p.speed = p.base_speed * 1.2
-                try:
-                    _log_gameplay("VEHICLE_CHOICE", level_idx=self.current_level, player_id=p.player_id, data={"vehicle": "monster_truck", "scale": 1.3, "weapon": "flamethrower", "x": gx, "y": gy})
-                except:
-                    pass
+            # Vehicle choice at landing page only affects UI hint now, not starting vehicle
+            # Player always starts as normal tank OG per user request "remove by default monster truck mode"
+            # Monster truck is now item-only, lasts 3 min, can still get new weapons multi-formed
             self.players.append(p)
 
         self.enemies_total = self._get_enemies_total_for_level(self.current_level)
@@ -589,14 +575,12 @@ class Game:
         # respawn players at start with protections - preserve items across stages
         spawns = MEGA_PLAYER_SPAWN if self.is_mega else PLAYER_SPAWN
         new_players = []
-        veh = getattr(self, 'vehicle_choice', 'tank')
         for i, old_p in enumerate(prev_players):
             gx, gy = spawns[i]
             p = PlayerTank(old_p.player_id, gx, gy, is_mega=self.is_mega)
             p.score = old_p.score
             p.lives = old_p.lives
             p.star_level = old_p.star_level
-            # Preserve items across stages (homing, spread, rapid) - only lost on death, not on stage clear
             p.homing_timer = getattr(old_p, 'homing_timer', 0)
             p.spread_timer = getattr(old_p, 'spread_timer', 0)
             p.rapid_timer = getattr(old_p, 'rapid_timer', 0)
@@ -605,16 +589,14 @@ class Game:
             p.rapid_active = getattr(old_p, 'rapid_active', False)
             p.helmet_timer = getattr(old_p, 'helmet_timer', 0)
             p.invulnerable_timer = getattr(old_p, 'helmet_timer', 0)
-            # Preserve vehicle choice across stages
-            if veh == 'monster_truck':
+            # Preserve monster truck item if still active (3 min lasts across stages)
+            if getattr(old_p, 'is_monster_truck', False) and getattr(old_p, 'monster_truck_timer', 0) > 0:
                 p.is_monster_truck = True
-                p.monster_truck_timer = 10**9
-                p.current_scale = 1.3
+                p.monster_truck_timer = getattr(old_p, 'monster_truck_timer', 0)
+                p.current_scale = getattr(old_p, 'current_scale', 2.0)
                 p._update_rect_size()
-                p.flamethrower_active = getattr(old_p, 'flamethrower_active', True)
-                p.flamethrower_level = getattr(old_p, 'flamethrower_level', 1)
-                p.speed = p.base_speed * 1.2
-            # Preserve flamethrower if was active
+                p.speed = p.base_speed * MONSTER_TRUCK_SPEED_MULT if p.current_scale>=1.9 else p.base_speed * 1.2
+            # Preserve flamethrower and other weapons - multi-formed while truck
             if getattr(old_p, 'flamethrower_active', False):
                 p.flamethrower_active = True
                 p.flamethrower_level = getattr(old_p, 'flamethrower_level', 1)
@@ -1283,19 +1265,6 @@ class Game:
                         pass
 
                     if self.state == 'menu':
-                        # Check vehicle choice clicks at landing page
-                        try:
-                            mx, my = event.pos
-                            if hasattr(self.hud, '_veh_tank_rect') and self.hud._veh_tank_rect.collidepoint(mx, my):
-                                self.vehicle_choice = 'tank'
-                                print("[Vehicle] Clicked TANK 1.0x")
-                                continue
-                            if hasattr(self.hud, '_veh_truck_rect') and self.hud._veh_truck_rect.collidepoint(mx, my):
-                                self.vehicle_choice = 'monster_truck'
-                                print("[Vehicle] Clicked MONSTER TRUCK 1.3x + FLAME")
-                                continue
-                        except:
-                            pass
                         # Ignore mouse clicks in first 60 frames (avoid accidental trackpad)
                         if getattr(self, 'menu_stuck_timer', 0) > 60:
                             print(f"Mouse click to start menu {self.menu_selected}")
@@ -1535,15 +1504,6 @@ class Game:
                         self.player_join(2)
 
                 if self.state == 'menu':
-                    # Vehicle choice toggle with V key at landing page - tank vs monster truck 1.3x + flamethrower
-                    if event.key == pygame.K_v and self.menu_mode == 'main':
-                        old_veh = getattr(self, 'vehicle_choice', 'tank')
-                        self.vehicle_choice = 'monster_truck' if old_veh == 'tank' else 'tank'
-                        print(f"[Vehicle] Choice toggled {old_veh} -> {self.vehicle_choice} (1.3x truck with flamethrower)" if self.vehicle_choice=='monster_truck' else f"[Vehicle] Choice {old_veh} -> tank")
-                        try:
-                            _log_gameplay("VEHICLE_TOGGLE", level_idx=self.current_level, data={"from": old_veh, "to": self.vehicle_choice})
-                        except:
-                            pass
                     if self.menu_mode == 'main':
                         # New navigation: 1P/2P cards are horizontal, so LEFT/RIGHT controls them
                         # Top row: [0:1P left, 1:2P right], then 2:LEVEL SELECT, 3:HOWTO, 4:QUIT below
@@ -2506,8 +2466,6 @@ class Game:
         canvas = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
 
         if self.state == 'menu':
-            # Pass vehicle choice to HUD for landing page toggle
-            self.hud._game_vehicle_choice = getattr(self, 'vehicle_choice', 'tank')
             self.hud.draw_menu(canvas, self.menu_selected, self.menu_mode)
         elif self.state in ('playing', 'paused', 'gameover', 'stage_clear'):
             # bg

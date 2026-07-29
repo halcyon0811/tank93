@@ -248,7 +248,7 @@ POWERUP_DURATION = {
     'rapid': 10 * FPS,    # rapid fire 3x attack speed - now PERM until death
     'shrink': 15 * FPS,   # half size double speed for 15s
     'giant': 15 * FPS,    # double size crush bricks + enemies for 15s
-    'monster_truck': 15 * FPS,  # monster truck 2x crush all including steel/forest
+    'monster_truck': 180 * FPS,  # 3 min = 180 sec * 60 = 10800 frames - monster truck item lasts 3 min before returning to tank
 }
 STAR_LEVELS = 4
 
@@ -258,7 +258,7 @@ SHRINK_SPEED_MULT = 2.0
 GIANT_SCALE = 2.0
 GIANT_DURATION = 15 * FPS
 MONSTER_TRUCK_SCALE = 2.0
-MONSTER_TRUCK_DURATION = 15 * FPS
+MONSTER_TRUCK_DURATION = 180 * FPS  # 3 min = 180 sec * 60 = 10800 frames
 MONSTER_TRUCK_SPEED_MULT = 1.6
 MONSTER_SPEED_MULT = 1.0  # slowed to normal enemy speed per user request (was 1.5x player)
 VENOM_DISSOLVE_TIME = 18 * FPS  # slowed down venom: was 10s, now 18s for more time to counter (user request)
