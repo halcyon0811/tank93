@@ -2,7 +2,8 @@ import { defineConfig, devices } from '@playwright/test';
 
 export default defineConfig({
   testDir: './tests',
-  testMatch: '**/*.e2e.js',
+  testMatch: '**/e2e.spec.js',
+  testIgnore: '**/unit.test.js',
   fullyParallel: false, // game tests need sequential due to shared server?
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,

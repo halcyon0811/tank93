@@ -1661,6 +1661,7 @@ class Game {
         let total=this.total_stages_cleared||0, loop=Math.floor(total/35);
         let base=20;
         if(mapsData && mapsData.enemy_queues && mapsData.enemy_queues[lvl]) base=mapsData.enemy_queues[lvl].length;
+        // Progressive difficulty with STAGE_CLEARED_COUNTER tracking total stages cleared for difficulty scaling
         return base + total*2 + loop*5 + lvl*2 + Math.floor(lvl/5)*3;
     }
 
