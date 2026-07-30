@@ -105,18 +105,7 @@ async function loadAssets() {
                 console.warn(`Failed to load sound ${sf}: ${e}`);
             }
         }
-        // Also try to load authentic NES sounds if available (ogg)
-        const oggSounds = ['bullet_shot', 'bullet_hit_1', 'explosion_1'];
-        for(let name of oggSounds) {
-            try {
-                const resp = await fetch(`../game/assets/sounds/${name}.ogg`);
-                if(resp.ok) {
-                    const buf = await resp.arrayBuffer();
-                    const audioBuf = await audioContext.decodeAudioData(buf);
-                    soundBuffers[name] = audioBuf;
-                }
-            } catch(e) {}
-        }
+        // Ogg optional sounds disabled for web-pure build (would 404 in CI) - kept for full Python game only
     } catch(e) {
         console.warn("Web Audio not supported or failed", e);
     }
